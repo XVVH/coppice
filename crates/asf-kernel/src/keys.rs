@@ -1,0 +1,204 @@
+//! Key hierarchy and KEK/DEK wrapping. Spec §8.1, §8.2.
+//!
+//! Stage 1 keeps device-held keys as files in a keystore directory (0600):
+//! `user_root` signs Principals and Intents; `fabric` (the coordinator — the
+//! broker key of §8.1 once the daemon exists, SI-3) signs events, manifests,
+//! channels; agent instance keys sign runtime attestations (M4, milestone 2).
+//!
+//! Payload encryption: per-payload 256-bit DEKs, AES-256-GCM, wrapped to an
+//! owner KEK (SI-9). Crypto-shredding destroys the wrapped DEK row.
+
+use aes_gcm::{
+    aead::{Aead, KeyInit, OsRng as AeadOsRng},
+    AeadCore, Aes256Gcm, Key, Nonce,
+};
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use rand::rngs::OsRng;
+use rand::RngCore;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, thiserror::Error)]
+pub enum KeyError {
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("malformed key file {0}")]
+    Malformed(PathBuf),
+    #[error("aead failure (wrong KEK or corrupted ciphertext)")]
+    Aead,
+}
+
+/// Well-known signing roles in the Stage 1 keystore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    UserRoot,
+    Fabric,
+    AgentInstance,
+}
+
+impl Role {
+    fn file_name(self) -> &'static str {
+        match self {
+            Role::UserRoot => "user_root.ed25519",
+            Role::Fabric => "fabric.ed25519",
+            Role::AgentInstance => "agent_instance.ed25519",
+        }
+    }
+}
+
+/// File-backed keystore. Signing keys and the KEK live here; nothing in this
+/// directory is ever placed in an agent's context (brief principle 4).
+pub struct Keystore {
+    dir: PathBuf,
+}
+
+impl Keystore {
+    /// Open (creating if absent) a keystore at `dir`.
+    pub fn open(dir: impl AsRef<Path>) -> Result<Self, KeyError> {
+        let dir = dir.as_ref().to_path_buf();
+        fs::create_dir_all(&dir)?;
+        Ok(Self { dir })
+    }
+
+    fn load_or_create_raw(&self, name: &str, len: usize) -> Result<Vec<u8>, KeyError> {
+        let path = self.dir.join(name);
+        if path.exists() {
+            let bytes = fs::read(&path)?;
+            if bytes.len() != len {
+                return Err(KeyError::Malformed(path));
+            }
+            return Ok(bytes);
+        }
+        let mut bytes = vec![0u8; len];
+        OsRng.fill_bytes(&mut bytes);
+        write_private(&path, &bytes)?;
+        Ok(bytes)
+    }
+
+    /// Load (or generate on first use) the signing key for a role.
+    pub fn signing_key(&self, role: Role) -> Result<SigningKey, KeyError> {
+        let bytes = self.load_or_create_raw(role.file_name(), 32)?;
+        let arr: [u8; 32] = bytes.try_into().expect("length checked");
+        Ok(SigningKey::from_bytes(&arr))
+    }
+
+    pub fn verifying_key(&self, role: Role) -> Result<VerifyingKey, KeyError> {
+        Ok(self.signing_key(role)?.verifying_key())
+    }
+
+    /// The owner KEK (Stage 1: single-human, one KEK). §8.2's multi-actor
+    /// key-distribution is mechanism-reserved, policy-deferred.
+    pub fn kek(&self) -> Result<Kek, KeyError> {
+        let bytes = self.load_or_create_raw("owner.kek", 32)?;
+        let arr: [u8; 32] = bytes.try_into().expect("length checked");
+        Ok(Kek {
+            key: arr,
+            kek_id: format!("kek:{}", hex::encode(&sha2::Sha256::digest(arr)[..8])),
+        })
+    }
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), KeyError> {
+    fs::write(path, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+use sha2::Digest;
+
+/// A key-encryption key that wraps per-payload DEKs.
+pub struct Kek {
+    key: [u8; 32],
+    pub kek_id: String,
+}
+
+/// A freshly generated data-encryption key, plus its wrapped form for storage.
+pub struct WrappedDek {
+    pub dek_id: String,
+    pub wrap_nonce: Vec<u8>,
+    pub wrapped: Vec<u8>,
+    /// Plaintext DEK — use immediately, never persist.
+    pub dek: [u8; 32],
+}
+
+impl Kek {
+    /// Generate a fresh DEK and wrap it (AES-256-GCM, SI-9).
+    pub fn new_dek(&self) -> Result<WrappedDek, KeyError> {
+        let mut dek = [0u8; 32];
+        OsRng.fill_bytes(&mut dek);
+        let dek_id = format!("dek:{}", hex::encode(&sha2::Sha256::digest(dek)[..12]));
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key));
+        let nonce = Aes256Gcm::generate_nonce(&mut AeadOsRng);
+        let wrapped = cipher
+            .encrypt(&nonce, dek.as_slice())
+            .map_err(|_| KeyError::Aead)?;
+        Ok(WrappedDek {
+            dek_id,
+            wrap_nonce: nonce.to_vec(),
+            wrapped,
+            dek,
+        })
+    }
+
+    /// Unwrap a stored DEK.
+    pub fn unwrap_dek(&self, wrap_nonce: &[u8], wrapped: &[u8]) -> Result<[u8; 32], KeyError> {
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key));
+        let plain = cipher
+            .decrypt(Nonce::from_slice(wrap_nonce), wrapped)
+            .map_err(|_| KeyError::Aead)?;
+        plain.try_into().map_err(|_| KeyError::Aead)
+    }
+}
+
+/// AES-256-GCM encrypt with a DEK. Returns (nonce, ciphertext).
+pub fn dek_encrypt(dek: &[u8; 32], plaintext: &[u8]) -> Result<(Vec<u8>, Vec<u8>), KeyError> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(dek));
+    let nonce = Aes256Gcm::generate_nonce(&mut AeadOsRng);
+    let ct = cipher
+        .encrypt(&nonce, plaintext)
+        .map_err(|_| KeyError::Aead)?;
+    Ok((nonce.to_vec(), ct))
+}
+
+pub fn dek_decrypt(dek: &[u8; 32], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, KeyError> {
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(dek));
+    cipher
+        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .map_err(|_| KeyError::Aead)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keys_persist_across_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let ks1 = Keystore::open(dir.path()).unwrap();
+        let vk1 = ks1.verifying_key(Role::UserRoot).unwrap();
+        let ks2 = Keystore::open(dir.path()).unwrap();
+        assert_eq!(vk1, ks2.verifying_key(Role::UserRoot).unwrap());
+        assert_ne!(vk1, ks2.verifying_key(Role::Fabric).unwrap());
+    }
+
+    #[test]
+    fn dek_wrap_roundtrip_and_shred_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let ks = Keystore::open(dir.path()).unwrap();
+        let kek = ks.kek().unwrap();
+        let wd = kek.new_dek().unwrap();
+        let (nonce, ct) = dek_encrypt(&wd.dek, b"secret payload").unwrap();
+
+        // Unwrap from storage form and decrypt.
+        let dek = kek.unwrap_dek(&wd.wrap_nonce, &wd.wrapped).unwrap();
+        assert_eq!(dek_decrypt(&dek, &nonce, &ct).unwrap(), b"secret payload");
+
+        // Without the wrapped DEK, content is gone: that's all shredding is.
+        let other = kek.new_dek().unwrap();
+        assert!(dek_decrypt(&other.dek, &nonce, &ct).is_err());
+    }
+}

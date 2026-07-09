@@ -160,6 +160,15 @@ vault itself is fine — pleasingly recursive).
 - **Widen a standing grant:** enough clean same-shape approvals accumulate to
   justify a rule — the Stage 3 caveat ratchet, human-ratified (not yet built;
   until then, every grant stays session-scoped).
+- **Wire the first egress tool (workflows 1–2):** only after `read.scope`
+  (§5.2 R2) and a read-volume budget are implemented and minted in the
+  default grant. Today reads are structurally unscoped within the store,
+  which is harmless while every action is `side_effect: local` — but the
+  first `external_reach: live` tool turns read scope into the exfiltration
+  perimeter ("reads are irreversible"). Enumeration must be governed by
+  the same scope (names are content: list results filter to scope, the
+  `filter_tools_result` pattern). Adjacent open problem, not solved by
+  this: A3 cross-run memory taint.
 - **Invite a second person:** only after multi-actor roots/visibility policy
   exists (§8.2 mechanism reserved, policy deferred) — not in v0.
 

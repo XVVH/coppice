@@ -7,6 +7,8 @@
 //! - `asf vault-server --vault V` — toy downstream MCP server
 //! - `asf approve --home H list|approve <id> [--uses N]|deny <id>` — the
 //!   human side of the C2 surface (separate terminal, never the agent)
+//! - `asf recover --home H --vault V [man:… …]` — gate sessions a dead
+//!   proxy left stranded (RF-9); explicit ids for pre-marker branches
 
 mod broker_demo;
 mod mcp;
@@ -81,6 +83,16 @@ fn main() -> Result<()> {
             let uses = flag(&args, "--uses").and_then(|u| u.parse().ok()).unwrap_or(1);
             proxy::approve_cli(Path::new(&home), sub, id, uses)
         }
+        Some("recover") => {
+            let home = flag(&args, "--home").context("recover needs --home <dir>")?;
+            let vault = flag(&args, "--vault").context("recover needs --vault <dir>")?;
+            let manifests: Vec<String> = args
+                .iter()
+                .filter(|a| a.starts_with("man:"))
+                .cloned()
+                .collect();
+            proxy::recover_cli(Path::new(&home), Path::new(&vault), &manifests)
+        }
         Some("revert") => {
             let home = flag(&args, "--home").context("revert needs --home <dir>")?;
             let manifest = args
@@ -121,7 +133,7 @@ fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>"
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>"
             );
             std::process::exit(2);
         }

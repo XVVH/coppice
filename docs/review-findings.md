@@ -179,6 +179,34 @@ join, mirroring `asf-cli`'s `vault_server::safe_join`.
 
 ---
 
+## RF-9 — EOF-triggered promotion is unreachable under real MCP clients — fixed
+
+**Fixed** in the RF-9 recovery PR: sessions write a `session_live:<manifest>`
+meta marker at bootstrap, cleared only when the gate runs; bootstrap (and the
+new `asf recover --home … --vault … [man:… …]`) gates any marker whose pid is
+dead — SIGKILL/power-loss safe. A signal handler (SIGTERM/SIGINT/SIGHUP)
+additionally runs the gate before exit so the common shutdown lands work
+immediately. Tests: `sigkilled_session_is_recovered_by_next_bootstrap`,
+`sigterm_runs_the_gate_before_exit` (proxy_smoke).
+
+**Severity: high. Direction: FAIL-CLOSED (work stranded, not lost).**
+Found by dogfooding, first real-client session (2026-07-09). The promotion
+gate ran only after the proxy's stdin read-loop returned EOF
+(`proxy.rs`), but real MCP clients don't grant a graceful EOF: Claude Code
+(via the MCP TypeScript SDK stdio transport) kills the server process on
+shutdown. Result: every real session's branch was stranded — writes reported
+as successful, never promoted, no ledger record of the non-promotion, and no
+CLI to gate an orphaned branch after the fact. The scripted smoke test
+passed because piped stdin closes cleanly — a client-fidelity gap in the
+test harness. Residual (accepted, v0): a tools/call in flight at
+signal-time may complete on the branch after its result recording is cut
+off; the gate's trace check still sees the recorded call, and the branch
+state is what gets merged. PID-reuse against the liveness check reads a
+reused pid as dead only if the new process isn't an `asf` invocation —
+recovery of a genuinely live session is prevented by the args match.
+
+---
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

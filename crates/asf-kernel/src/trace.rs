@@ -322,6 +322,20 @@ pub fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<(), TraceEr
     Ok(())
 }
 
+pub fn meta_del(conn: &Connection, key: &str) -> Result<(), TraceError> {
+    conn.execute("DELETE FROM meta WHERE key = ?1", [key])?;
+    Ok(())
+}
+
+/// All meta entries whose key starts with `prefix`, ordered by key.
+pub fn meta_scan(conn: &Connection, prefix: &str) -> Result<Vec<(String, String)>, TraceError> {
+    let mut stmt = conn.prepare(
+        "SELECT key, value FROM meta WHERE key >= ?1 AND key < ?1 || x'ff' ORDER BY key",
+    )?;
+    let rows = stmt.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -55,3 +55,23 @@ directly (observe-everything posture). Milestone 3 introduces the fork.
   branches as roots.
 - Concurrent sessions over the same stores are not yet coordinated —
   one session at a time is the Stage 3 dogfooding assumption.
+
+## Session granularity — v0 decision (2026-07-09)
+
+Promotion fires at proxy stdin EOF (`proxy.rs`), so one proxy process is one
+branch is one promotion. A real MCP client keeps that process alive for its
+whole app run, so **"one session" currently equals "one app lifetime"**: many
+unrelated tasks pile onto one branch and promote as a single large merge on
+quit. This is in tension with M6 (small manifests).
+
+**Decision: accept coarse app-lifetime sessions for v0 dogfooding** rather
+than build a finer session boundary now. Rationale: whether coarse sessions
+actually hurt (unreadable merges, avoidable conflicts) is an empirical
+question, and dogfooding is the instrument that answers it — build the fix
+when the data shows the pain, not before. The candidate fix, if needed, is an
+agent-callable `checkpoint` verb (+ `asf checkpoint` CLI) forcing a
+step-boundary + promotion mid-connection.
+
+**Tripwire (see `docs/dogfooding.md`):** track ops-per-promotion and conflict
+incidence. If promotions become routinely large or conflict-prone, implement
+the checkpoint boundary.

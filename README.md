@@ -71,4 +71,6 @@ for the language decision (Rust) and module map. Testing philosophy and the
 deep-dive agenda live in [docs/testing-theory.md](docs/testing-theory.md).
 Open implementation findings are tracked in
 [docs/review-findings.md](docs/review-findings.md) (`RF-n`); spec ambiguities
-in [docs/spec-issues.md](docs/spec-issues.md) (`SI-n`).
+in [docs/spec-issues.md](docs/spec-issues.md) (`SI-n`). Dogfooding setup and
+methodology (corpus, wiring, metrics, graduation criteria) live in
+[docs/dogfooding.md](docs/dogfooding.md).

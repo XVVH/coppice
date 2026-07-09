@@ -852,6 +852,15 @@ impl Fabric {
                     body["caveat"].as_str().unwrap_or("?"),
                     body["count"]
                 ),
+                // Promotion approvals carry `promotion` (no uses);
+                // escalation approvals carry `escalation` + `uses` (RF-12).
+                "approval" if body.get("promotion").is_some() => format!(
+                    "APPROVAL promotion #{} {} via {} ({})",
+                    body["promotion"],
+                    body["resolution"].as_str().unwrap_or("?"),
+                    body["channel"].as_str().unwrap_or("?"),
+                    body["auth_strength"].as_str().unwrap_or("?")
+                ),
                 "approval" => format!(
                     "APPROVAL #{} {} ({} uses) via {} ({})",
                     body["escalation"],

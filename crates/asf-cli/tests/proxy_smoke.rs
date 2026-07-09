@@ -288,6 +288,24 @@ fn si20_midsession_edit_to_branch_touched_path_parks_as_conflict() {
         "parked promotion illegible in ledger:\n{text}"
     );
     assert!(!text.contains("#null"), "RF-12 regression:\n{text}");
+
+    // And resolving it must be legible too — the approval line carries the
+    // promotion id, not "#null" (the RF-12 sibling).
+    let out = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args(["approve", "--home", home.to_str().unwrap(), "reject", "1"])
+        .output()
+        .expect("run asf approve reject");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\"ok\":true"));
+    let out = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args(["ledger", "--home", home.to_str().unwrap()])
+        .output()
+        .expect("run asf ledger");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("APPROVAL promotion #1 denied"),
+        "promotion resolution illegible:\n{text}"
+    );
+    assert!(!text.contains("#null"), "RF-12 sibling regression:\n{text}");
 }
 
 /// note.edit (@1.2): targeted single-occurrence replacement — the

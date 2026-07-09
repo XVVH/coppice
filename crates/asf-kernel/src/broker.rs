@@ -629,6 +629,11 @@ impl Broker {
         manifest_id: &str,
         branch_paths: &BTreeMap<String, PathBuf>,
     ) -> Result<PromotionOutcome, BrokerError> {
+        // M8 (A20): attribute any out-of-band divergence BEFORE the merge
+        // consumes live trunk, under the per-home gate lock — attribution
+        // must not depend on when the human edited relative to the session.
+        let _gate = self.fabric.gate_lock()?;
+        self.fabric.check_drift()?;
         let man = trace::get_object(&self.fabric.conn, manifest_id)?;
         let span = man["trace"]["span"]
             .as_str()
@@ -963,6 +968,11 @@ impl Broker {
             .optional()?;
         let (manifest_id, bp_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
         self.check_min_auth_for_manifest(&manifest_id, auth_strength)?;
+
+        // M8 (A20): the approval-time re-merge consumes live trunk exactly
+        // like the auto gate does — same divergence check, same lock.
+        let _gate = self.fabric.gate_lock()?;
+        self.fabric.check_drift()?;
 
         let branch_paths: BTreeMap<String, PathBuf> =
             serde_json::from_str::<BTreeMap<String, String>>(&bp_raw)

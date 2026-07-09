@@ -56,6 +56,12 @@ pub struct Fabric {
     branch: Option<std::collections::BTreeMap<String, std::path::PathBuf>>,
 }
 
+/// Holds the per-fabric-home gate lock (M8); dropping it releases the
+/// flock. See [`Fabric::gate_lock`].
+pub struct GateGuard {
+    _file: std::fs::File,
+}
+
 #[derive(Debug, Clone)]
 pub struct DriftReport {
     pub store: String,
@@ -353,6 +359,68 @@ impl Fabric {
 
     // ---- drift (A12) ---------------------------------------------------
 
+    /// Serialize gates (promotion, approval-time re-merge, revert) per
+    /// fabric home (M8, A20). Cross-PROCESS by construction — concurrent
+    /// proxies on one home are an observed fact, not a hypothetical — via
+    /// flock on `<home>/gate.lock`; released when the guard drops.
+    /// Fabric-home grain, not per-store: gates consume and attest all
+    /// roots as one coherent tuple, and per-store locks could deadlock.
+    pub fn gate_lock(&self) -> Result<GateGuard, KernelError> {
+        let path = self.home.join("gate.lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|source| snapshot::SnapError::Io { path: path.clone(), source })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+                return Err(snapshot::SnapError::Io {
+                    path,
+                    source: std::io::Error::last_os_error(),
+                }
+                .into());
+            }
+        }
+        Ok(GateGuard { _file: file })
+    }
+
+    /// The A13 operation-class summary of a divergence (A20): what changed
+    /// between two attested roots, in the same vocabulary rules and
+    /// promotion previews speak. Opaque stores degrade to a whole-store
+    /// `modify` (SI-18). Paths land in the plaintext substrate — the same
+    /// exposure promotion event bodies already accept.
+    fn divergence_ops(&self, spec: &StoreSpec, expected: &str, observed: &str) -> Vec<Value> {
+        match spec.kind {
+            crate::snapshot::StoreKind::Fs => {
+                let trees = (
+                    snapshot::load_tree_object(&self.cas, expected),
+                    snapshot::load_tree_object(&self.cas, observed),
+                );
+                match trees {
+                    (Ok(e), Ok(o)) => {
+                        // base = trunk = expected: every difference reads as
+                        // observed-side ops, with rename/move detection, and
+                        // conflicts are impossible by construction.
+                        let e = crate::promote::tree_from_object(&e);
+                        let o = crate::promote::tree_from_object(&o);
+                        crate::promote::three_way(&e, &o, &e)
+                            .ops
+                            .iter()
+                            .map(crate::promote::Op::to_json)
+                            .collect()
+                    }
+                    _ => vec![json!({"op": "modify", "path": "(tree unavailable)"})],
+                }
+            }
+            crate::snapshot::StoreKind::Sqlite => {
+                vec![json!({"op": "modify", "path": format!("{} (whole store)", spec.store)})]
+            }
+        }
+    }
+
     /// Compare each store's live root against the last attested root and
     /// emit `drift` events for divergences.
     ///
@@ -362,6 +430,12 @@ impl Fabric {
     /// action; with exactly one human on the machine it attributes quietly
     /// to `human_local`. `tool_known` and `unattributed` become reachable in
     /// milestone 2 when the broker's write log and external tools exist.
+    ///
+    /// M8 (A20): one drift event per divergence window — emission updates
+    /// the expected root, so re-checks are silent until the next
+    /// divergence. Gates call this before any merge or revert consumes
+    /// live state; the body carries the A13 op summary so the narrative is
+    /// equivalent no matter when the change happened.
     pub fn check_drift(&mut self) -> Result<Vec<DriftReport>, KernelError> {
         let mut reports = Vec::new();
         let head = trace::head_offset(&self.conn)?;
@@ -378,6 +452,7 @@ impl Fabric {
             if let Some((expected_root, since)) = expected {
                 if expected_root != observed {
                     let attribution = "human_local";
+                    let ops = self.divergence_ops(&spec, &expected_root, &observed);
                     let ev = self.substrate_event(
                         None,
                         "drift",
@@ -387,6 +462,7 @@ impl Fabric {
                             "observed_root": observed,
                             "between": [since, head],
                             "attribution": attribution,
+                            "ops": ops,
                         }),
                     )?;
                     self.set_expected(&spec.store, &observed, ev.offset)?;
@@ -615,6 +691,11 @@ impl Fabric {
     /// swapped. Emits the `revert` event and re-baselines expectations —
     /// undo never gaslights the agent with a world its memory contradicts.
     pub fn revert_to(&mut self, manifest_id: &str) -> Result<(), KernelError> {
+        // M8: revert consumes live state exactly like a merge does — any
+        // out-of-band divergence must be attributed BEFORE the restore
+        // erases it, and gates serialize per home.
+        let _gate = self.gate_lock()?;
+        self.check_drift()?;
         let man = trace::get_object(&self.conn, manifest_id)?;
         let roots = man["state"]["roots"]
             .as_array()
@@ -764,8 +845,13 @@ impl Fabric {
                     let store = body["store"].as_str().unwrap_or("?").to_string();
                     let observed = body["observed_root"].as_str().unwrap_or("?").to_string();
                     roots.insert(store.clone(), observed.clone());
+                    // A20: the op summary is the narrative — a drift that
+                    // names its paths is much harder to misread than one
+                    // that names two hashes.
+                    let summary = summarize_ops(&body["ops"]);
                     format!(
-                        "DRIFT in {store}: {} -> {} between offsets {}..{}, attributed {}",
+                        "DRIFT in {store}: {}{} -> {} between offsets {}..{}, attributed {}",
+                        summary,
                         short(body["expected_root"].as_str().unwrap_or("?")),
                         short(&observed),
                         body["between"][0],
@@ -895,6 +981,35 @@ impl Fabric {
         }
         Ok(Explanation { lines, unexplained })
     }
+}
+
+/// Render a drift body's A13 op summary (A20). Empty for pre-A20 events,
+/// which carried only the two root hashes.
+fn summarize_ops(ops: &Value) -> String {
+    let Some(list) = ops.as_array().filter(|l| !l.is_empty()) else {
+        return String::new();
+    };
+    let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();
+    let mut paths: Vec<String> = Vec::new();
+    for o in list {
+        *counts.entry(o["op"].as_str().unwrap_or("?")).or_insert(0) += 1;
+        if paths.len() < 3 {
+            paths.push(o["path"].as_str().map(str::to_string).unwrap_or_else(|| {
+                format!(
+                    "{}→{}",
+                    o["from"].as_str().unwrap_or("?"),
+                    o["to"].as_str().unwrap_or("?")
+                )
+            }));
+        }
+    }
+    let counts_s = counts
+        .iter()
+        .map(|(k, v)| format!("{v} {k}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ell = if list.len() > 3 { ", …" } else { "" };
+    format!("{counts_s} ({}{ell}) · ", paths.join(", "))
 }
 
 fn short(hash: &str) -> String {

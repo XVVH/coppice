@@ -203,54 +203,87 @@ fn sigterm_runs_the_gate_before_exit() {
     p2.finish();
 }
 
-/// SI-20 (open), the silent case, pinned as currently implemented: a trunk
-/// edit made MID-SESSION to a path the branch never touches is folded into
-/// the promotion merge's trunk side and NO drift event is ever emitted —
-/// not at the gate, not at the next boundary (expected_roots already
-/// matches the merged result). When SI-20 is resolved (candidate:
-/// drift-check-before-merge at the gate), flip these assertions from
-/// absence to presence.
+/// M8 (A20, resolves SI-20): attribution is timing-independent. The same
+/// hand edit gets one drift event with A12 attribution and an A13 op
+/// summary whether it happens mid-session (attributed at the gate, BEFORE
+/// the merge consumes live trunk) or between sessions (attributed at the
+/// next boundary) — and exactly one per divergence window.
 #[test]
-fn si20_midsession_edit_to_branch_untouched_path_absorbs_without_drift() {
+fn m8_attribution_is_timing_independent() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     let vault = tmp.path().join("vault");
     std::fs::create_dir_all(&vault).unwrap();
 
+    // Timing 1: mid-session, branch-untouched path.
     let mut p = Proxy::start(&home, &vault);
     init_session(&mut p);
     let r = p.call_tool("note.write", json!({ "path": "agent-note.md", "content": "brokered" }));
     assert_eq!(r["isError"], false, "{r}");
-
-    // The human edits trunk directly while the session is live — a path
-    // the branch has not touched.
     std::fs::write(vault.join("hand-note.md"), "out-of-band, mid-session").unwrap();
-
     p.sigterm();
 
-    // Both survive on trunk: the branch write via promotion, the hand edit
-    // via the merge's trunk side.
+    // Both survive on trunk, and the promotion still auto-applies…
     assert_eq!(std::fs::read_to_string(vault.join("agent-note.md")).unwrap(), "brokered");
     assert_eq!(
         std::fs::read_to_string(vault.join("hand-note.md")).unwrap(),
         "out-of-band, mid-session"
     );
     assert_eq!(promotion_count(&home), 1, "clean additive run auto-promoted");
-    assert_eq!(drift_count(&home), 0, "SI-20: the hand edit was absorbed unattributed");
+    // …but the hand edit was attributed FIRST: one drift event, before the
+    // promotion in ledger order, naming the path.
+    assert_eq!(drift_count(&home), 1, "M8: mid-session edit must be attributed");
+    let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+    let (drift_off, drift_raw): (i64, String) = conn
+        .query_row(
+            "SELECT offset, raw FROM events WHERE kind = 'drift'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let promo_off: i64 = conn
+        .query_row("SELECT offset FROM events WHERE kind = 'promotion'", [], |r| r.get(0))
+        .unwrap();
+    assert!(drift_off < promo_off, "drift must precede the merge that consumes it");
+    let body = serde_json::from_str::<Value>(&drift_raw).unwrap()["body"].clone();
+    assert_eq!(body["attribution"], "human_local");
+    assert!(
+        body["ops"].to_string().contains("hand-note.md"),
+        "drift narrative must name its paths: {body}"
+    );
+    drop(conn);
 
-    // And the next boundary sees nothing either — the merge updated
-    // expected_roots, so the absorption is permanent, not deferred.
+    // Timing 2: between sessions — identical act, equivalent narrative.
+    std::fs::write(vault.join("hand-note-2.md"), "out-of-band, between sessions").unwrap();
     let mut p2 = Proxy::start(&home, &vault);
     init_session(&mut p2);
-    assert_eq!(drift_count(&home), 0, "SI-20: no deferred attribution at the next boundary");
+    assert_eq!(drift_count(&home), 2, "M8: exactly one drift per divergence window");
+    let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+    let raw: String = conn
+        .query_row(
+            "SELECT raw FROM events WHERE kind = 'drift' ORDER BY offset DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let body = serde_json::from_str::<Value>(&raw).unwrap()["body"].clone();
+    assert_eq!(body["attribution"], "human_local");
+    assert!(
+        body["ops"].to_string().contains("hand-note-2.md"),
+        "between-session narrative must be equivalent: {body}"
+    );
+    drop(conn);
     p2.finish();
+
+    // No re-attribution: the windows closed, the count stands.
+    assert_eq!(drift_count(&home), 2);
 }
 
-/// SI-20's visible sibling: the same mid-session hand edit to a path the
-/// branch DID touch is a both-changed conflict — the gate parks the
-/// promotion (conflicts never auto-resolve in the agent's favor) and trunk
-/// keeps the human's version pending approval. The hand edit is not
-/// attributed here either, but at least it is loudly visible.
+/// The conflict timing of M8: a mid-session hand edit to a path the
+/// branch DID touch is attributed at the gate (drift before the plan is
+/// computed) AND parks as a both-changed conflict — the gate never
+/// auto-resolves in the agent's favor, and trunk keeps the human's
+/// version pending approval.
 #[test]
 fn si20_midsession_edit_to_branch_touched_path_parks_as_conflict() {
     let tmp = tempfile::tempdir().unwrap();
@@ -275,6 +308,7 @@ fn si20_midsession_edit_to_branch_touched_path_parks_as_conflict() {
     );
     assert_eq!(promotion_count(&home), 0, "conflicted run must not auto-promote");
     assert_eq!(pending_promotions(&home), 1, "parked for the C2 surface");
+    assert_eq!(drift_count(&home), 1, "M8: the conflict timing is attributed too");
 
     // RF-12: the parked promotion must be legible in the ledger — the
     // promotion id and the ops/conflict preview, not "ESCALATE #null".

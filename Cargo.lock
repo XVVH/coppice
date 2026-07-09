@@ -75,6 +75,7 @@ dependencies = [
  "aes-gcm",
  "ed25519-dalek",
  "hex",
+ "libc",
  "rand",
  "rusqlite",
  "serde",

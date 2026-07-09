@@ -122,6 +122,18 @@ fn promotion_count(home: &std::path::Path) -> i64 {
         .unwrap()
 }
 
+fn drift_count(home: &std::path::Path) -> i64 {
+    let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+    conn.query_row("SELECT COUNT(*) FROM events WHERE kind = 'drift'", [], |r| r.get(0))
+        .unwrap()
+}
+
+fn pending_promotions(home: &std::path::Path) -> i64 {
+    let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+    conn.query_row("SELECT COUNT(*) FROM promotions WHERE status = 'pending'", [], |r| r.get(0))
+        .unwrap()
+}
+
 /// RF-9, the crash-safe layer: a SIGKILLed proxy strands its session; the
 /// next bootstrap finds the live-marker, gates the branch, and the write
 /// lands on trunk before the new session takes its snapshot.
@@ -189,6 +201,80 @@ fn sigterm_runs_the_gate_before_exit() {
     init_session(&mut p2);
     assert_eq!(promotion_count(&home), 1, "nothing re-gated");
     p2.finish();
+}
+
+/// SI-20 (open), the silent case, pinned as currently implemented: a trunk
+/// edit made MID-SESSION to a path the branch never touches is folded into
+/// the promotion merge's trunk side and NO drift event is ever emitted —
+/// not at the gate, not at the next boundary (expected_roots already
+/// matches the merged result). When SI-20 is resolved (candidate:
+/// drift-check-before-merge at the gate), flip these assertions from
+/// absence to presence.
+#[test]
+fn si20_midsession_edit_to_branch_untouched_path_absorbs_without_drift() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+    let r = p.call_tool("note.write", json!({ "path": "agent-note.md", "content": "brokered" }));
+    assert_eq!(r["isError"], false, "{r}");
+
+    // The human edits trunk directly while the session is live — a path
+    // the branch has not touched.
+    std::fs::write(vault.join("hand-note.md"), "out-of-band, mid-session").unwrap();
+
+    p.sigterm();
+
+    // Both survive on trunk: the branch write via promotion, the hand edit
+    // via the merge's trunk side.
+    assert_eq!(std::fs::read_to_string(vault.join("agent-note.md")).unwrap(), "brokered");
+    assert_eq!(
+        std::fs::read_to_string(vault.join("hand-note.md")).unwrap(),
+        "out-of-band, mid-session"
+    );
+    assert_eq!(promotion_count(&home), 1, "clean additive run auto-promoted");
+    assert_eq!(drift_count(&home), 0, "SI-20: the hand edit was absorbed unattributed");
+
+    // And the next boundary sees nothing either — the merge updated
+    // expected_roots, so the absorption is permanent, not deferred.
+    let mut p2 = Proxy::start(&home, &vault);
+    init_session(&mut p2);
+    assert_eq!(drift_count(&home), 0, "SI-20: no deferred attribution at the next boundary");
+    p2.finish();
+}
+
+/// SI-20's visible sibling: the same mid-session hand edit to a path the
+/// branch DID touch is a both-changed conflict — the gate parks the
+/// promotion (conflicts never auto-resolve in the agent's favor) and trunk
+/// keeps the human's version pending approval. The hand edit is not
+/// attributed here either, but at least it is loudly visible.
+#[test]
+fn si20_midsession_edit_to_branch_touched_path_parks_as_conflict() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("note.md"), "base").unwrap();
+
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+    let r = p.call_tool("note.write", json!({ "path": "note.md", "content": "agent version" }));
+    assert_eq!(r["isError"], false, "{r}");
+
+    std::fs::write(vault.join("note.md"), "human version").unwrap();
+
+    p.sigterm();
+
+    assert_eq!(
+        std::fs::read_to_string(vault.join("note.md")).unwrap(),
+        "human version",
+        "trunk-wins: the human's edit stands while the conflict awaits approval"
+    );
+    assert_eq!(promotion_count(&home), 0, "conflicted run must not auto-promote");
+    assert_eq!(pending_promotions(&home), 1, "parked for the C2 surface");
 }
 
 #[test]

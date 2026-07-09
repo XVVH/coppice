@@ -262,6 +262,50 @@ fn out_of_scope_paths_and_reversibility_denied() {
 }
 
 #[test]
+fn exemption_survives_a_denied_call() {
+    // RF-2 regression: an approved exemption must NOT be consumed by a call
+    // that is ultimately denied for an unrelated (non-escalatable) reason.
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+
+    // Burn the write budget (max 2), then escalate + approve 1 exemption.
+    for p in ["inbox/a.md", "inbox/b.md"] {
+        match write_call(&mut w, &cap, p) {
+            Decision::Allowed { ticket, .. } => { w.broker.record_result(ticket, b"{}").unwrap(); }
+            other => panic!("{other:?}"),
+        }
+    }
+    let esc = match write_call(&mut w, &cap, "inbox/c.md") {
+        Decision::Escalated { escalations } => escalations[0],
+        other => panic!("expected escalation, got {other:?}"),
+    };
+    w.broker.approve_escalation(esc, 1, "chan:tty", "local_session").unwrap();
+
+    // A call that is BOTH over budget (escalatable, exemption applies) AND
+    // out-of-scope path (hard, non-escalatable deny). It must be denied —
+    // and must NOT spend the exemption.
+    match write_call(&mut w, &cap, "secrets/leak.md") {
+        Decision::Denied { reasons, .. } => {
+            assert!(reasons.contains(&"paths.write".to_string()), "{reasons:?}");
+        }
+        other => panic!("expected denial, got {other:?}"),
+    }
+
+    // The exemption is intact: a legitimate over-budget write now passes.
+    // (Before the RF-2 fix, the denied call above burned it and this parks.)
+    match write_call(&mut w, &cap, "inbox/d.md") {
+        Decision::Allowed { ticket, .. } => { w.broker.record_result(ticket, b"{}").unwrap(); }
+        other => panic!("exemption was wrongly consumed by the denied call: {other:?}"),
+    }
+
+    // And it was a bounded grant of 1: the next over-budget write parks again.
+    assert!(matches!(
+        write_call(&mut w, &cap, "inbox/e.md"),
+        Decision::Escalated { .. }
+    ));
+}
+
+#[test]
 fn escalation_batch_approval_cycle() {
     let mut w = setup();
     let cap = mint_default(&mut w);

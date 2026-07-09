@@ -126,6 +126,13 @@ ratchet compiles approvals into rules).
 **Secondary UX signals.** Escalations per session; approval latency
 (escalation → your decision); promotions auto-applied vs parked.
 
+**Capability gaps** (found by DF-P work dying with no verdict event): the
+workflow failed in the tool registry, not the policy — the grant was never
+consulted. Track separately from denial-FPs; each one is a missing tool
+action (first instance: no enumeration → `note.list`, tool:vault@1.1).
+The distinction matters because the fixes live in different layers: FPs
+indict the caveat defaults, gaps indict the tool surface.
+
 **Storage tripwires (ADR 0002 — F2 migration gate).** From `asf stats`:
 CAS bytes/week and the sqlite-image vs fs-blob split; live memory-db size;
 snapshot cadence; SI-6 false-drift noise (logically-idle sqlite touches

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Only first-party actions/checkout is used; the toolchain is installed
+      # via the runner's preinstalled rustup rather than a marketplace action,
+      # keeping CI's supply-chain surface minimal (on-brand for this project).
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+# Deliberately NOT enforcing `cargo fmt --check` yet: the tree is not
+# rustfmt-clean, and reformatting belongs in its own PR, not bundled here.
+# Track: enable fmt-check after a dedicated `cargo fmt` pass.

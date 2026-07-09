@@ -277,6 +277,43 @@ fn si20_midsession_edit_to_branch_touched_path_parks_as_conflict() {
     assert_eq!(pending_promotions(&home), 1, "parked for the C2 surface");
 }
 
+/// note.list (@1.1): enumeration is the prerequisite for every
+/// vault-maintenance workflow — without it the agent can only touch paths
+/// it is told about. Read-class: unmetered, no path scoping.
+#[test]
+fn note_list_enumerates_without_consuming_write_budget() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(vault.join("patterns")).unwrap();
+    std::fs::write(vault.join("patterns/a.md"), "A").unwrap();
+    std::fs::write(vault.join("patterns/b.md"), "B").unwrap();
+    std::fs::write(vault.join("index.md"), "root note").unwrap();
+
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+
+    // Root listing: folders marked, sorted.
+    let r = p.call_tool("note.list", json!({}));
+    assert_eq!(r["isError"], false, "{r}");
+    assert_eq!(r["content"][0]["text"], "index.md\npatterns/");
+
+    // Subfolder listing — the exact workflow that was dead without this.
+    let r = p.call_tool("note.list", json!({ "path": "patterns" }));
+    assert_eq!(r["content"][0]["text"], "a.md\nb.md");
+
+    // Escape attempts still rejected by the downstream.
+    let r = p.call_tool("note.list", json!({ "path": "../" }));
+    assert_eq!(r["isError"], true);
+
+    // Listing is read-class: the full write budget (20) remains spendable.
+    for i in 0..20 {
+        let r = p.call_tool("note.write", json!({ "path": format!("n{i}.md"), "content": "x" }));
+        assert_eq!(r["isError"], false, "write {i} blocked — did list consume budget? {r}");
+    }
+    p.finish();
+}
+
 #[test]
 fn proxied_session_end_to_end() {
     let tmp = tempfile::tempdir().unwrap();
@@ -292,7 +329,7 @@ fn proxied_session_end_to_end() {
         "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }));
     assert_eq!(init["result"]["serverInfo"]["name"], "asf-vault-server");
 
-    // tools/list is filtered to the session grant: the downstream offers 4
+    // tools/list is filtered to the session grant: the downstream offers 5
     // tools, but note.delete (irreversible, outside action.allow, neither
     // dimension escalatable) is unreachable — so it is not advertised.
     let tools = p.request("tools/list", json!({}));
@@ -302,7 +339,11 @@ fn proxied_session_end_to_end() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["note.read", "note.write", "note.move"], "filtered advertisement");
+    assert_eq!(
+        names,
+        ["note.list", "note.read", "note.write", "note.move"],
+        "filtered advertisement"
+    );
 
     // Allowed write goes through — landing on the session BRANCH, not
     // trunk: the live vault only changes at promotion.

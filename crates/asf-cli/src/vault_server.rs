@@ -22,6 +22,9 @@ fn tool_defs() -> Value {
     let path_schema = json!({ "type": "object",
         "properties": { "path": { "type": "string" } }, "required": ["path"] });
     json!([
+        { "name": "note.list",   "description": "List notes and folders (one level; folders end with /)",
+          "inputSchema": { "type": "object",
+            "properties": { "path": { "type": "string", "description": "Folder relative to vault root; empty or omitted for the root" } } } },
         { "name": "note.read",   "description": "Read a note",
           "inputSchema": path_schema },
         { "name": "note.write",  "description": "Write a note",
@@ -44,6 +47,23 @@ fn call(vault: &Path, name: &str, args: &Value) -> Result<String> {
             .ok_or_else(|| anyhow::anyhow!("missing argument {field}"))
     };
     Ok(match name {
+        "note.list" => {
+            let rel = args.get("path").and_then(Value::as_str).unwrap_or("");
+            let dir = safe_join(vault, rel)?;
+            let mut entries: Vec<String> = fs::read_dir(&dir)?
+                .flatten()
+                .map(|e| {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    if e.path().is_dir() { format!("{name}/") } else { name }
+                })
+                .collect();
+            entries.sort();
+            if entries.is_empty() {
+                "(empty)".to_string()
+            } else {
+                entries.join("\n")
+            }
+        }
         "note.read" => fs::read_to_string(safe_join(vault, s("path")?)?)?,
         "note.write" => {
             let p = safe_join(vault, s("path")?)?;

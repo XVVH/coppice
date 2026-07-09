@@ -1,6 +1,6 @@
 # Spec issues — ambiguities the code forced
 
-> **v0.4 (2026-07-09): every issue below (SI-1…SI-19) is RESOLVED** —
+> **v0.4 (2026-07-09): every v0.3-era issue (SI-1…SI-19) is RESOLVED** —
 > ratified individually (SI-11, SI-17, SI-19, F2/SI-6) or via the
 > adjudicated A19 conformance sweep, and integrated into
 > `asf-schema-spec.md` v0.4 (changelog A15–A19). This file is preserved
@@ -15,6 +15,38 @@ Settled decisions (F1, F4, fail-open) are not re-litigated here.
 Status legend: **open** = needs a spec amendment or an explicit "fine as
 interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
+
+---
+
+## SI-20 — mid-session out-of-band edits are absorbed unattributed (A12 vs §5.3) — open
+
+Found by dogfooding (2026-07-09, first verified real-client loop), not by
+code: the human hand-edited a trunk note *while a session was live*. At
+session end the gate's three-way merge took live trunk as the trunk side,
+merged cleanly, and installed roots that already contain the human's edit —
+so `expected_roots` matches, no boundary ever sees divergence, and **no
+drift event is emitted**. The same edit made *between* sessions produces
+`drift {attribution: human_local}` at the next step boundary.
+
+A12 promises out-of-band local edits are "logged, not alerted" — attributed
+quietly, but attributed. §5.3 specifies the merge but says nothing about
+attributing trunk-side divergence encountered at promotion time. So the
+attribution completeness of the ledger currently depends on *when* the human
+happens to edit relative to session lifetime: two acts identical in
+substance leave different ledger narratives.
+
+Single-human v0 impact is cosmetic (the absorbed edit is the human's either
+way, and state stays fully explained). Multi-actor impact is not: absorbed
+edits are exactly where an unattributed actor's changes could ride a
+promotion into trunk — this touches the same surface as the A3 memory-taint
+problem and the reserved multi-actor visibility policy.
+
+**Candidate resolution** (not implemented — needs author ratification): at
+promotion, before computing the merge, compare live trunk roots against
+`expected_roots`; on divergence emit `drift` (same A12 attribution classes,
+`between` bracketing the session's span offsets) and only then merge. That
+makes "every out-of-band change gets an attribution event" an invariant
+independent of timing — a candidate M-invariant phrasing for the spec.
 
 ---
 

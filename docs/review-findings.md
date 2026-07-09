@@ -207,6 +207,67 @@ recovery of a genuinely live session is prevented by the args match.
 
 ---
 
+## RF-10 — promotion rewrites the whole store; every mtime clobbered — fixed
+
+**Fixed** in the dogfooding-round-2 PR: fs restores now apply IN PLACE —
+only files whose content differs are written (tmp+rename per file),
+deletions pruned, emptied dirs removed; unchanged files keep mtimes and
+inodes. The prepare-all-then-commit-all contract survives: prepare
+validates tree parse + CAS blob presence for every store before any store
+is touched. Sqlite keeps the staging swap (single file). Test:
+`fs_restore_leaves_unchanged_files_untouched`.
+
+**Severity: medium. Direction: fidelity/legibility (no data loss).**
+Found by dogfooding DF-P1 (2026-07-09): after a session promoted, every
+file in the vault carried the same fresh mtime. `commit_restore` rebuilt
+the entire store from CAS into staging and renamed it into place — sound
+for crash-safety, but it made every promotion read as a full-vault rewrite
+to humans, sync clients, backup tools, and mtime-sorted note UIs.
+Residual: a crash mid-apply leaves a mixed-but-valid tree; the apply is
+idempotent and drift detection attributes leftovers, but the multi-file
+atomic swap property is traded away for fidelity.
+
+---
+
+## RF-11 — the vault's `.git` was inside the store boundary — fixed
+
+**Fixed** in the dogfooding-round-2 PR: `EXCLUDED_DIRS = [".git"]` —
+excluded from `capture_fs` (so git activity no longer moves the state
+root), invisible on branches (the downstream never sees the backstop),
+and never deleted or rewritten by restore. Test:
+`git_dir_is_outside_the_store_boundary`.
+
+**Severity: medium. Direction: entanglement (backstop inside the system it
+backstops).** Found while diagnosing DF-P1: `capture_fs` walked everything,
+so the git-backed corpus's `.git` was captured in every snapshot, its
+churn moved state roots (operator `git commit` = spurious drift), and
+promotions rewrote git's internals from the branch copy. The out-of-band
+undo of last resort must live outside the fabric's byte-boundary.
+Note: on existing fabric homes the first post-upgrade check reports one
+quiet root change (root recomputed without `.git`) — expected, once.
+
+---
+
+## RF-12 — parked promotions are illegible: "ESCALATE #null", stderr-only — fixed
+
+**Fixed** in the dogfooding-round-2 PR: promotion-policy escalations now
+render as `PARKED promotion #N — ops […], N conflict(s); resolve via
+asf approve … promotions`. Test: ledger assertion in
+`si20_midsession_edit_to_branch_touched_path_parks_as_conflict`.
+
+**Severity: low code / high UX. Direction: legibility.** Found by
+dogfooding DF-P3 (2026-07-09): a correctly-parked move promotion read as
+"FAIL: promotion did not move the file". Two causes: the ledger renderer
+read `body["escalation"]` where promotion escalations carry
+`body["promotion"]` (hence `#null`), and showed none of the ops preview —
+so the operator could not see that classification had in fact produced a
+correct `move` op, nor that the park was policy (§5.3 default: auto-apply
+only add/modify), nor how to resolve it. The park itself was RIGHT; the
+system just failed to say so. Block-nothing-**loudly** requires the loud
+part.
+
+---
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

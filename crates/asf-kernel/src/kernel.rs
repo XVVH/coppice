@@ -639,10 +639,10 @@ impl Fabric {
                 snapshot::prepare_restore(&self.cas, &spec, root)?,
             ));
         }
-        // Commit all swaps.
+        // Commit all restores.
         let mut restored = Vec::new();
         for (store, root, prep) in prepared {
-            snapshot::commit_restore(prep)?;
+            snapshot::commit_restore(&self.cas, prep)?;
             restored.push(json!({ "store": store, "root": root }));
         }
 
@@ -828,6 +828,24 @@ impl Fabric {
                             .unwrap_or_default()
                     )
                 ),
+                // Promotion-policy escalations carry `promotion`, not
+                // `escalation`, and their whole point is the ops preview —
+                // render both or the line reads as "#null" (RF-12).
+                "escalation" if body["caveat"] == "promotion.policy" => {
+                    let sample = &body["sample"][0];
+                    let ops: Vec<&str> = sample["ops"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect();
+                    format!(
+                        "PARKED promotion #{} — ops [{}], {} conflict(s); resolve via `asf approve --home <H> promotions`",
+                        body["promotion"],
+                        ops.join(", "),
+                        sample["conflicts"]
+                    )
+                }
                 "escalation" => format!(
                     "ESCALATE #{} caveat {} (batch count {})",
                     body["escalation"],

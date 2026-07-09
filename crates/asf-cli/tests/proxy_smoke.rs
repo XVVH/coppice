@@ -275,6 +275,65 @@ fn si20_midsession_edit_to_branch_touched_path_parks_as_conflict() {
     );
     assert_eq!(promotion_count(&home), 0, "conflicted run must not auto-promote");
     assert_eq!(pending_promotions(&home), 1, "parked for the C2 surface");
+
+    // RF-12: the parked promotion must be legible in the ledger — the
+    // promotion id and the ops/conflict preview, not "ESCALATE #null".
+    let out = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args(["ledger", "--home", home.to_str().unwrap()])
+        .output()
+        .expect("run asf ledger");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("PARKED promotion #1") && text.contains("conflict"),
+        "parked promotion illegible in ledger:\n{text}"
+    );
+    assert!(!text.contains("#null"), "RF-12 regression:\n{text}");
+}
+
+/// note.edit (@1.2): targeted single-occurrence replacement — the
+/// whole-document rewrite gap from DF-P2. Metered as a write.
+#[test]
+fn note_edit_replaces_one_unique_occurrence_and_meters_as_write() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("links.md"), "see [[old-note]] and [[other]] and [[old-note]]").unwrap();
+
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+
+    // Ambiguous target → error, nothing changed.
+    let r = p.call_tool("note.edit", json!({ "path": "links.md",
+        "old_string": "[[old-note]]", "new_string": "[[new-note]]" }));
+    assert_eq!(r["isError"], true, "ambiguous edit must be rejected: {r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("2 times"));
+
+    // Absent target → error.
+    let r = p.call_tool("note.edit", json!({ "path": "links.md",
+        "old_string": "[[missing]]", "new_string": "x" }));
+    assert_eq!(r["isError"], true);
+
+    // Unique target → replaced, once, visible via read-your-writes.
+    let r = p.call_tool("note.edit", json!({ "path": "links.md",
+        "old_string": "and [[other]]", "new_string": "and [[renamed]]" }));
+    assert_eq!(r["isError"], false, "{r}");
+    let r = p.call_tool("note.read", json!({ "path": "links.md" }));
+    assert_eq!(r["content"][0]["text"], "see [[old-note]] and [[renamed]] and [[old-note]]");
+
+    // Edits consume the write budget — including the two the DOWNSTREAM
+    // rejected above: the broker allowed them, and consumption is
+    // only-on-Allow (RF-3). 3 edit allows + 17 writes = 20; the 21st
+    // write-class call parks. A read-classed edit would sail through.
+    for i in 0..17 {
+        let r = p.call_tool("note.write", json!({ "path": format!("n{i}.md"), "content": "x" }));
+        assert_eq!(r["isError"], false, "write {i}: {r}");
+    }
+    let r = p.call_tool("note.edit", json!({ "path": "links.md",
+        "old_string": "[[renamed]]", "new_string": "[[blocked]]" }));
+    assert_eq!(r["isError"], true, "21st write-class call must escalate: {r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("parked"));
+    p.finish();
 }
 
 /// note.list (@1.1): enumeration is the prerequisite for every
@@ -341,7 +400,7 @@ fn proxied_session_end_to_end() {
         .collect();
     assert_eq!(
         names,
-        ["note.list", "note.read", "note.write", "note.move"],
+        ["note.list", "note.read", "note.write", "note.edit", "note.move"],
         "filtered advertisement"
     );
 

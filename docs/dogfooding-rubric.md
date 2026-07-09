@@ -20,6 +20,16 @@ denial-FP tally with the ledger event id. Log results in the vault's
 auto-promotes; `asf ledger` ends "every live root is explained."
 *Exercises:* happy path end-to-end — branch topology, zero-authorship
 auto-promote, RF-9 signal path.
+*Findings:* 9-Jul 1740 ET - Observed that when the session ended and the vault was promoted, all files in the vault were touched at the same timestamp. Need to correlate if every file in the vault was touched, or if this is a concequence of how we've built the vault promotion for any files read in.
+*Resolution:* confirmed — promotion rebuilt the whole store from CAS and
+swapped it in (not read-related; every promotion did this). RF-10, fixed:
+fs restores now apply in place, unchanged files keep mtimes/inodes.
+Diagnosis also surfaced RF-11: the vault's `.git` was inside the captured
+store boundary (git activity moved state roots; promotions rewrote git
+internals) — now excluded. Expect ONE quiet drift event on the first
+post-upgrade session (root recomputed without `.git`).
+
+---
 
 **DF-P2 — read-your-writes.** Mid-session, have the agent read back a note
 it wrote earlier in the same session.
@@ -27,12 +37,43 @@ it wrote earlier in the same session.
 has the old content.
 *Exercises:* branch read/write coherence; the mid-session invisibility UX
 (you knowing trunk lags is the point).
+*Findings:* 9-Jul 1740 ET - Did multiple changes across multiple files (fixing broken wikilinks) in the vault. Observed that the available tools can only do full document read and rewrite, no targetted edits. This seems like a shortcoming.
+*Resolution:* capability gap #2 (no verdict event — tool surface, not
+policy). `note.edit {path, old_string, new_string}` added in
+tool:vault@1.2: exactly-one-occurrence replacement, errors on zero or
+ambiguous matches, metered as a write.
+
+---
 
 **DF-P3 — move/rename classification.** Have the agent reorganize: rename a
 note in place, and move one to a different folder unchanged.
 *Expect:* promotion preview/ledger shows `rename` and `move` ops — not
 delete+add pairs.
 *Exercises:* A17/SI-17 rename detection, exact-hash authority, op classes.
+*Findings:* 
+Rename hello.md to hello2.md (doesn't appear that this was classified as rename)
+[ 139] tool_call   tool_call tool:vault@1.1.note.read (reversible)
+[ 140] tool_call   tool_call tool:vault@1.1.note.move (reversible)
+Move up one level:
+[ 141] tool_call   tool_call tool:vault@1.1.note.move (reversible)
+
+FAIL: Promotion did NOT rename the file nor move the file in the FS.
+[ 142] escalation  ESCALATE #null caveat promotion.policy (batch count 1)
+
+*Resolution:* the classifier PASSED and the non-application is POLICY, not
+a bug — but the system failed to say so (RF-12, fixed). The parked
+promotion's preview (promotions table #2) shows one correct op:
+`move test/hello.md → hello2.md` — the two steps collapse into one net
+base→branch diff, and new-name+new-parent classifies as `move` per A17
+(pure in-place rename would classify `rename`). The zero-authorship
+default policy auto-applies only add/modify (§5.3), so the move parked
+for `asf approve … promotions` — which was announced only on stderr and
+as the illegible "#null" ledger line. RF-12 renders it as
+"PARKED promotion #N — ops [move], 0 conflict(s); resolve via …".
+NOTE: this approval is founding example #1 for a move-allowing promotion
+rule (k ≥ 3 before the ratchet may propose it).
+
+---
 
 **DF-P4 — escalate → approve → retry.** Drive past the write budget
 (20/run) in one session.
@@ -49,6 +90,18 @@ note; start the next session.
 no prompt, no noise.
 *Exercises:* A12 single-human quiet attribution; detection-is-lazy
 semantics.
+
+[ 132] drift       DRIFT in fs:vault: a79b59c47fe5 -> d9596c155bc5 between offsets 119..131, attributed human_local
+[ 133] snapshot    manifest man:f5caf2f7aa7446d21c379593c31c3584c304f7dbf47c6e2c78695ff72edea6f4 snapshotted [fs:vault=d9596c155bc5, db:memory=ef45efd636f7]
+[ 134] remanifest  re-manifest from parent man:7cc94a51c827acd4e45ace5d7dcb3869033aa2299ca1b24c270f3e65033a94d0 (behavior_changed=false)
+[ 135] grant       capability cap:e2afac78eda5e219cecddcd5b834ea345934eae0b4110001712084aca12bc0ad granted
+
+*Resolution:* PASS as observed (quiet human_local attribution). Caveat
+discovered later: pre-RF-11, part of any such drift window could be `.git`
+churn rather than note edits; with `.git` outside the boundary the drift
+events now reflect note content only.
+
+---
 
 **DF-P6 — multi-session cadence.** Several short sessions across a day,
 each promoting.

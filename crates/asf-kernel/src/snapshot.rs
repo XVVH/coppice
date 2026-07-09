@@ -5,10 +5,12 @@
 //! CAS directory. Because delegations happen at step boundaries where
 //! nothing is in flight (brief §4), "atomic multi-root capture" degenerates
 //! to: collect each store's current root, record the tuple in one manifest.
-//! Revert is prepare-all-then-swap-all: every root is materialized to a
-//! staging path first (any failure aborts with stores untouched), then all
-//! swaps are simple renames. A crash mid-swap leaves recoverable staging
-//! directories rather than a half-written store.
+//! Restore is prepare-all-then-commit-all: every store's plan is validated
+//! first (tree parse + CAS presence; any failure aborts with stores
+//! untouched), then committed. Sqlite commits are staging renames; fs
+//! commits apply IN PLACE (RF-10) — only differing files are written, so
+//! unchanged files keep their mtimes/inodes and a promotion touches
+//! exactly what it changed.
 //!
 //! sqlite roots hash the main db file bytes after a WAL TRUNCATE checkpoint
 //! (SI-6). Fs trees are git-like: files only (empty dirs not tracked),
@@ -105,6 +107,10 @@ impl Cas {
         Ok(hash)
     }
 
+    pub fn has(&self, hash: &str) -> bool {
+        self.blob_path(hash).exists()
+    }
+
     pub fn get(&self, hash: &str) -> Result<Vec<u8>, SnapError> {
         let path = self.blob_path(hash);
         if !path.exists() {
@@ -122,12 +128,28 @@ pub fn capture(cas: &Cas, spec: &StoreSpec) -> Result<String, SnapError> {
     }
 }
 
+/// Directories that live inside a store root but outside the fabric's
+/// byte-boundary (RF-11). `.git` is the operator's out-of-band backstop
+/// (dogfooding.md): capturing it would entangle the backstop with the very
+/// system it exists to recover from, churn state roots on every git
+/// command, and let promotions rewrite git's internals. Excluded from
+/// capture, invisible on branches, and never deleted by restore.
+pub const EXCLUDED_DIRS: &[&str] = &[".git"];
+
+fn is_excluded_dir(e: &walkdir::DirEntry) -> bool {
+    e.file_type().is_dir() && EXCLUDED_DIRS.iter().any(|d| e.file_name() == *d)
+}
+
 fn capture_fs(cas: &Cas, root: &Path) -> Result<String, SnapError> {
     if !root.is_dir() {
         return Err(SnapError::MissingRoot(root.to_path_buf()));
     }
     let mut entries: Vec<Value> = Vec::new();
-    for entry in WalkDir::new(root).sort_by_file_name() {
+    for entry in WalkDir::new(root)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|e| !is_excluded_dir(e))
+    {
         let entry = entry.map_err(|e| SnapError::Io {
             path: root.to_path_buf(),
             source: e.into(),
@@ -277,63 +299,99 @@ pub fn compose_tree(
 /// leaves the live store untouched.
 pub struct PreparedRestore {
     spec: StoreSpec,
-    staging: PathBuf,
+    plan: RestorePlan,
 }
 
-/// Stage a store's restore to `root` next to the live path (same
-/// filesystem, so commit is a rename).
+enum RestorePlan {
+    /// Whole-file swap via a staging path (sqlite): materialize, rename.
+    Swap { staging: PathBuf },
+    /// In-place fs apply (RF-10): write only files whose content differs,
+    /// delete files absent from the tree, prune empty dirs. Unchanged
+    /// files keep their mtimes and inodes — a promotion touches exactly
+    /// what it changed, so the vault does not read as wholly rewritten to
+    /// humans, sync clients, or backup tools.
+    FsInPlace { entries: Vec<FsEntry> },
+}
+
+struct FsEntry {
+    rel: String,
+    hash: String,
+    mode: String,
+}
+
+/// Prepare a store's restore to `root`. All tree parsing and CAS presence
+/// checks happen here, so a multi-store restore that is going to fail does
+/// so before ANY store is touched (the prepare-all-then-commit-all
+/// contract behind coherent revert).
 pub fn prepare_restore(
     cas: &Cas,
     spec: &StoreSpec,
     root: &str,
 ) -> Result<PreparedRestore, SnapError> {
-    let parent = spec
-        .path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let staging = parent.join(format!(
-        ".asf-staging-{}-{}",
-        spec.path.file_name().unwrap_or_default().to_string_lossy(),
-        &root.strip_prefix("sha256:").unwrap_or(root)[..12],
-    ));
-    if staging.exists() {
-        if staging.is_dir() {
-            fs::remove_dir_all(&staging).map_err(io_err(&staging))?;
-        } else {
-            fs::remove_file(&staging).map_err(io_err(&staging))?;
-        }
-    }
     match spec.kind {
-        StoreKind::Fs => materialize_fs(cas, root, &staging)?,
-        StoreKind::Sqlite => materialize_sqlite(cas, root, &staging)?,
-    }
-    Ok(PreparedRestore {
-        spec: spec.clone(),
-        staging,
-    })
-}
-
-/// Swap a staged restore into place. Callers must have closed any open
-/// connections to sqlite stores first.
-pub fn commit_restore(prepared: PreparedRestore) -> Result<(), SnapError> {
-    let live = &prepared.spec.path;
-    match prepared.spec.kind {
         StoreKind::Fs => {
-            let old = live.with_extension("asf-old");
-            if old.exists() {
-                fs::remove_dir_all(&old).map_err(io_err(&old))?;
+            let tree = load_tree_object(cas, root)?;
+            let raw = tree["entries"]
+                .as_array()
+                .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+            let mut entries = Vec::with_capacity(raw.len());
+            for e in raw {
+                let entry = FsEntry {
+                    rel: e["path"]
+                        .as_str()
+                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?
+                        .to_string(),
+                    hash: e["hash"]
+                        .as_str()
+                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?
+                        .to_string(),
+                    mode: e["mode"].as_str().unwrap_or("644").to_string(),
+                };
+                if !cas.has(&entry.hash) {
+                    return Err(SnapError::MissingBlob(entry.hash));
+                }
+                entries.push(entry);
             }
-            if live.exists() {
-                fs::rename(live, &old).map_err(io_err(live))?;
-            }
-            fs::rename(&prepared.staging, live).map_err(io_err(live))?;
-            if old.exists() {
-                fs::remove_dir_all(&old).map_err(io_err(&old))?;
-            }
+            Ok(PreparedRestore {
+                spec: spec.clone(),
+                plan: RestorePlan::FsInPlace { entries },
+            })
         }
         StoreKind::Sqlite => {
-            fs::rename(&prepared.staging, live).map_err(io_err(live))?;
+            let parent = spec
+                .path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."));
+            let staging = parent.join(format!(
+                ".asf-staging-{}-{}",
+                spec.path.file_name().unwrap_or_default().to_string_lossy(),
+                &root.strip_prefix("sha256:").unwrap_or(root)[..12],
+            ));
+            if staging.exists() {
+                if staging.is_dir() {
+                    fs::remove_dir_all(&staging).map_err(io_err(&staging))?;
+                } else {
+                    fs::remove_file(&staging).map_err(io_err(&staging))?;
+                }
+            }
+            materialize_sqlite(cas, root, &staging)?;
+            Ok(PreparedRestore {
+                spec: spec.clone(),
+                plan: RestorePlan::Swap { staging },
+            })
+        }
+    }
+}
+
+/// Apply a prepared restore. Callers must have closed any open
+/// connections to sqlite stores first.
+pub fn commit_restore(cas: &Cas, prepared: PreparedRestore) -> Result<(), SnapError> {
+    let live = &prepared.spec.path;
+    match prepared.plan {
+        RestorePlan::FsInPlace { entries } => apply_fs_in_place(cas, live, &entries)?,
+        RestorePlan::Swap { staging } => {
+            fs::rename(&staging, live).map_err(io_err(live))?;
             // A restored image must not be polluted by a stale WAL/SHM.
             for ext in ["-wal", "-shm"] {
                 let side = PathBuf::from(format!("{}{}", live.display(), ext));
@@ -341,6 +399,79 @@ pub fn commit_restore(prepared: PreparedRestore) -> Result<(), SnapError> {
                     fs::remove_file(&side).map_err(io_err(&side))?;
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// The in-place fs apply. Per-file writes are tmp+rename (atomic per
+/// file); a crash mid-apply leaves a mixed-but-valid tree that a rerun of
+/// the same restore completes (the apply is idempotent), and drift
+/// detection attributes anything left over. Excluded dirs (`.git`) are
+/// never written to and never deleted.
+fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), SnapError> {
+    fs::create_dir_all(root).map_err(io_err(root))?;
+    let desired: std::collections::BTreeMap<&str, &FsEntry> =
+        entries.iter().map(|e| (e.rel.as_str(), e)).collect();
+
+    // Pass 1: delete live files the tree does not contain.
+    for entry in WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| !is_excluded_dir(e))
+    {
+        let entry = entry.map_err(|e| SnapError::Io {
+            path: root.to_path_buf(),
+            source: e.into(),
+        })?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .expect("walkdir yields children of root")
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        if !desired.contains_key(rel.as_str()) {
+            fs::remove_file(entry.path()).map_err(io_err(entry.path()))?;
+        }
+    }
+
+    // Pass 2: write only files whose content differs.
+    for e in entries {
+        let target = root.join(&e.rel);
+        if let Ok(existing) = fs::read(&target) {
+            if sha256_hex(&existing) == e.hash {
+                continue; // identical — leave mtime and inode alone
+            }
+        }
+        if let Some(p) = target.parent() {
+            fs::create_dir_all(p).map_err(io_err(p))?;
+        }
+        let tmp = target.with_file_name(format!(
+            ".asf-tmp-{}",
+            target.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        fs::write(&tmp, cas.get(&e.hash)?).map_err(io_err(&tmp))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = if e.mode == "755" { 0o755 } else { 0o644 };
+            fs::set_permissions(&tmp, fs::Permissions::from_mode(mode)).map_err(io_err(&tmp))?;
+        }
+        fs::rename(&tmp, &target).map_err(io_err(&target))?;
+    }
+
+    // Pass 3: prune dirs the deletions emptied (never the root, never
+    // excluded dirs). remove_dir refuses non-empty dirs; that is the test.
+    for entry in WalkDir::new(root)
+        .contents_first(true)
+        .into_iter()
+        .filter_entry(|e| !is_excluded_dir(e))
+        .flatten()
+    {
+        if entry.file_type().is_dir() && entry.path() != root {
+            let _ = fs::remove_dir(entry.path());
         }
     }
     Ok(())
@@ -397,7 +528,7 @@ mod tests {
         write(&vault.join("new/added.md"), "agent addition");
 
         let prepared = prepare_restore(&cas, &spec, &root).unwrap();
-        commit_restore(prepared).unwrap();
+        commit_restore(&cas, prepared).unwrap();
 
         assert_eq!(fs::read_to_string(vault.join("keep.md")).unwrap(), "original");
         assert_eq!(
@@ -406,6 +537,81 @@ mod tests {
         );
         assert!(!vault.join("new").exists(), "additions rolled back");
         assert_eq!(capture(&cas, &spec).unwrap(), root, "root round-trips");
+    }
+
+    /// RF-10: restore is in-place — files whose content already matches
+    /// the target tree are not rewritten, so their mtimes (and inodes)
+    /// survive. A promotion must touch exactly what it changed.
+    #[test]
+    fn fs_restore_leaves_unchanged_files_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let vault = tmp.path().join("vault");
+        write(&vault.join("untouched.md"), "stable");
+        write(&vault.join("mutated.md"), "original");
+        let spec = fs_spec(&vault);
+        let root = capture(&cas, &spec).unwrap();
+
+        let mtime_before = fs::metadata(vault.join("untouched.md")).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(&vault.join("mutated.md"), "changed");
+
+        let prepared = prepare_restore(&cas, &spec, &root).unwrap();
+        commit_restore(&cas, prepared).unwrap();
+
+        assert_eq!(fs::read_to_string(vault.join("mutated.md")).unwrap(), "original");
+        assert_eq!(
+            fs::metadata(vault.join("untouched.md")).unwrap().modified().unwrap(),
+            mtime_before,
+            "unchanged file was rewritten — RF-10 regression"
+        );
+    }
+
+    /// RF-11: `.git` is the operator's out-of-band backstop — outside the
+    /// store's byte-boundary. Not captured, and never deleted by restore.
+    #[test]
+    fn git_dir_is_outside_the_store_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let vault = tmp.path().join("vault");
+        write(&vault.join("note.md"), "content");
+        write(&vault.join(".git/config"), "[core]");
+        write(&vault.join(".git/objects/ab/cdef"), "blob");
+        let spec = fs_spec(&vault);
+
+        let root = capture(&cas, &spec).unwrap();
+        // Git activity must not move the state root.
+        write(&vault.join(".git/index"), "changed by git commit");
+        assert_eq!(capture(&cas, &spec).unwrap(), root, "git churn read as drift");
+
+        // Restore must neither delete nor rewrite the backstop.
+        write(&vault.join("note.md"), "mutated");
+        let prepared = prepare_restore(&cas, &spec, &root).unwrap();
+        commit_restore(&cas, prepared).unwrap();
+        assert_eq!(fs::read_to_string(vault.join("note.md")).unwrap(), "content");
+        assert_eq!(fs::read_to_string(vault.join(".git/config")).unwrap(), "[core]");
+        assert_eq!(
+            fs::read_to_string(vault.join(".git/index")).unwrap(),
+            "changed by git commit"
+        );
+    }
+
+    /// Restores prune directories their deletions emptied (a reverted
+    /// move must not leave a husk of empty folders).
+    #[test]
+    fn fs_restore_prunes_emptied_directories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let vault = tmp.path().join("vault");
+        write(&vault.join("a.md"), "root note");
+        let spec = fs_spec(&vault);
+        let root = capture(&cas, &spec).unwrap();
+
+        write(&vault.join("deep/nested/b.md"), "agent addition");
+        let prepared = prepare_restore(&cas, &spec, &root).unwrap();
+        commit_restore(&cas, prepared).unwrap();
+        assert!(!vault.join("deep").exists(), "emptied dirs must be pruned");
+        assert!(vault.exists(), "the root itself is never pruned");
     }
 
     #[test]
@@ -436,7 +642,7 @@ mod tests {
         assert_ne!(capture(&cas, &spec).unwrap(), root);
 
         let prepared = prepare_restore(&cas, &spec, &root).unwrap();
-        commit_restore(prepared).unwrap();
+        commit_restore(&cas, prepared).unwrap();
 
         let conn = Connection::open(&db).unwrap();
         let n: i64 = conn

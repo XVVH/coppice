@@ -271,25 +271,19 @@ impl Broker {
             .flatten()
             .unwrap_or(0) as u64
         };
+        // Peek only — never consume here (RF-2). The broker commits the
+        // decrement below, and only if the aggregate outcome is Allow.
         let mut exempt = |key: &str| -> Option<String> {
-            let row: Option<(i64, i64)> = conn
-                .query_row(
-                    "SELECT rowid, escalation FROM exemptions
-                     WHERE cap = ?1 AND key = ?2 AND remaining > 0 LIMIT 1",
-                    params![cap_id, key],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .optional()
-                .ok()
-                .flatten();
-            row.map(|(rowid, esc)| {
-                conn.execute(
-                    "UPDATE exemptions SET remaining = remaining - 1 WHERE rowid = ?1",
-                    [rowid],
-                )
-                .ok();
-                format!("esc:{esc}")
-            })
+            conn.query_row(
+                "SELECT escalation FROM exemptions
+                 WHERE cap = ?1 AND key = ?2 AND remaining > 0 LIMIT 1",
+                params![cap_id, key],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .map(|esc| format!("esc:{esc}"))
         };
 
         let eval = evaluate::evaluate(&cap, &ctx, &mut meter, &mut exempt);
@@ -297,19 +291,38 @@ impl Broker {
 
         match eval.outcome {
             Outcome::Allow => {
-                // Bump run-window meters for the class this call consumed.
+                // Consume budget + approval exemptions atomically, and ONLY
+                // here (RF-2/RF-3): a denied/escalated call never reaches this
+                // arm, so it burns neither. NB consumption commits at decision
+                // time, not at record_result — deferring it there would let
+                // two calls proposed before either records both pass the same
+                // budget (fail-OPEN under pipelined proposes). Consuming now
+                // keeps the meter monotonic; the residual cost is that an
+                // Allowed-but-never-recorded call over-counts budget (the
+                // fail-safe direction), and the promotion gate reconciles
+                // authority from the signed ledger, not this meter.
+                let tx = self.fabric.conn.unchecked_transaction()?;
                 for c in &eval.checks {
-                    if c.caveat.starts_with("budget.count:") {
-                        if c.meter.get("applies") == Some(&Value::Bool(false)) {
-                            continue;
-                        }
-                        self.fabric.conn.execute(
+                    if c.caveat.starts_with("budget.count:")
+                        && c.meter.get("applies") != Some(&Value::Bool(false))
+                    {
+                        tx.execute(
                             "INSERT INTO broker_meters (cap, key, used) VALUES (?1, ?2, 1)
                              ON CONFLICT(cap, key) DO UPDATE SET used = used + 1",
                             params![cap_id, c.caveat],
                         )?;
                     }
                 }
+                for (key, _esc) in &eval.consumed_exemptions {
+                    tx.execute(
+                        "UPDATE exemptions SET remaining = remaining - 1
+                         WHERE rowid = (SELECT rowid FROM exemptions
+                                        WHERE cap = ?1 AND key = ?2 AND remaining > 0
+                                        LIMIT 1)",
+                        params![cap_id, key],
+                    )?;
+                }
+                tx.commit()?;
                 // Credential injection — AFTER checks, into the forwarded
                 // copy only. reg.credentials: {"arg": <field>, "secret": <vault name>}.
                 let mut forwarded = args.clone();

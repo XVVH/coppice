@@ -55,12 +55,18 @@ pub enum Outcome {
 pub struct Evaluation {
     pub checks: Vec<Check>,
     pub outcome: Outcome,
+    /// `(caveat_key, escalation_id)` for each approval exemption that made a
+    /// failing check pass. The evaluator is side-effect-free (RF-2): it only
+    /// *reports* what would be consumed; the broker commits the decrement
+    /// solely on `Outcome::Allow`, so a denied call never burns an exemption.
+    pub consumed_exemptions: Vec<(String, String)>,
 }
 
 /// Evaluate `cap` against a proposed call.
 /// `meter_used(key)` returns prior consumption for a budget caveat key;
-/// `exempt(key)` consumes-and-returns an approval exemption if one is
-/// available (A9 approvals convert a failing check into a passing one).
+/// `exempt(key)` *peeks* whether an unconsumed approval exemption is
+/// available for the key and returns its escalation id — it MUST NOT consume
+/// (RF-2). Consumption is the broker's, and only on Allow.
 pub fn evaluate(
     cap: &Value,
     ctx: &CallCtx<'_>,
@@ -71,6 +77,7 @@ pub fn evaluate(
     let structural_deny = |why: String| Evaluation {
         checks: vec![],
         outcome: Outcome::Deny { failed: vec![], structural: Some(why) },
+        consumed_exemptions: vec![],
     };
     match cap.get("expires_at").and_then(Value::as_str) {
         Some(exp) if ctx.now <= exp => {}
@@ -222,6 +229,7 @@ pub fn evaluate(
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
+    let mut consumed_exemptions = Vec::new();
     for c in checks.iter_mut() {
         if !c.ok
             && escalatable.contains(&c.caveat)
@@ -229,6 +237,7 @@ pub fn evaluate(
         {
             if let Some(esc_id) = exempt(&c.caveat) {
                 c.ok = true;
+                consumed_exemptions.push((c.caveat.clone(), esc_id.clone()));
                 c.meter = json!({"approved_exemption": esc_id, "was": c.meter});
             }
         }
@@ -243,7 +252,10 @@ pub fn evaluate(
     } else {
         Outcome::Deny { failed, structural: None }
     };
-    Evaluation { checks, outcome }
+    // consumed_exemptions is reported regardless of outcome; the broker
+    // consumes it only when `outcome == Allow` (RF-2). On Deny/Escalate the
+    // peeked exemptions are left untouched.
+    Evaluation { checks, outcome, consumed_exemptions }
 }
 
 /// Render checks for the §6 tool_call body.

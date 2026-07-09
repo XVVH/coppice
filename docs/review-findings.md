@@ -46,7 +46,14 @@ compare RFC 3339 as strings. Audit every `now <=`/`>=`/`<`/`>` on timestamps
 instant pairs, string-compare and instant-compare must agree — it currently
 fails.
 
-## RF-2 — approval exemption consumed even when the call is denied (#1) — open
+## RF-2 — approval exemption consumed even when the call is denied (#1) — fixed
+
+**Fixed** in the RF-2/RF-3 broker-consumption PR. `evaluate` is now
+side-effect-free — the `exempt` closure *peeks* (no `UPDATE`) and reports
+`consumed_exemptions`; the broker decrements only in the `Outcome::Allow`
+arm, inside one transaction with the meter bump. Regression test:
+`exemption_survives_a_denied_call` (a call denied on a non-escalatable
+caveat leaves an approved exemption intact for a later legitimate call).
 
 **Severity: medium. Direction: fail-closed (agent loses granted authority).**
 In `propose_call` the `exempt` closure runs the
@@ -66,23 +73,29 @@ never executed. The meter-write error path leaks identically.
 not side effect); commit the decrement only on `Outcome::Allow`, in the same
 transaction as the meter bump (see RF-3).
 
-## RF-3 — meters/exemptions consumed at decision time, not execution time (#2) — open
+## RF-3 — meters/exemptions consumed at decision time, not execution time (#2) — fixed (as accepted residual)
 
 **Severity: medium-low. Direction: fail-closed (agent loses budget).**
-Meter bump ([broker.rs:308](crates/asf-kernel/src/broker.rs:308)) and
-exemption decrement happen in `propose_call`; the `tool_call` ledger event is
-written only in
-[`record_result`](crates/asf-kernel/src/broker.rs:566). If a call is
-`Allowed` but never recorded (downstream error, agent disconnect, crash
-between the two), budget is spent with no corresponding trace event.
+Meter bump and exemption decrement happen in `propose_call`; the `tool_call`
+ledger event is written only in `record_result`. If a call is `Allowed` but
+never recorded (downstream error, agent disconnect, crash between the two),
+budget is spent with no corresponding trace event — runtime meter and signed
+ledger diverge. Enforcement stays correct because the promotion gate recounts
+budgets from trace events, not the meter.
 
-**Consequence:** runtime meter state and the signed ledger diverge.
-Enforcement stays correct — the promotion gate recounts budgets from trace
-events, not the meter — so this is an operational/consistency bug, not a
-security hole. Same root cause as RF-2.
+**Correction to the original fix idea.** The first writeup proposed
+"commit consumption in `record_result`." On implementation that is **wrong**:
+deferring consumption past the decision lets two calls proposed before either
+records both read the same pre-consumption meter and both pass the same
+budget — turning a fail-*closed* bug into a fail-*open* one under pipelined
+proposes. Rejected.
 
-**Fix:** stage the consumption in `PendingCall`; commit meter + exemption +
-event atomically in `record_result`. Resolves RF-2 and RF-3 together.
+**What was done instead.** Consumption stays at decision time but is now
+(a) committed only on `Outcome::Allow` and (b) atomic (meter bump + exemption
+decrement in one transaction) — see RF-2. This keeps the meter monotonic and
+never over-grants. The residual — an Allowed-but-never-recorded call
+over-counts budget by one — is the **fail-safe** direction and is reconciled
+by the gate's ledger-based recount. Accepted as designed; no further change.
 
 ## RF-4 — Ed25519 verified non-strict (`verify`, not `verify_strict`) (#3) — open
 

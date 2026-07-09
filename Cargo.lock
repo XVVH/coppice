@@ -64,6 +64,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "tempfile",
+ "time",
 ]
 
 [[package]]

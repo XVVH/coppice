@@ -52,9 +52,11 @@ pub const EVENT_KINDS: &[&str] = &[
     "shred",
     "amendment",
     "remanifest",
-    // SI-11 extensions:
+    // SI-11 extensions (Option A ratified 2026-07-08):
     "register",
     "intent",
+    // SI-13 extension: escalation resolution (C1-stamped human approval/denial).
+    "approval",
 ];
 
 pub fn init(conn: &Connection) -> Result<(), TraceError> {

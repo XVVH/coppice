@@ -15,24 +15,40 @@ crypto-shredding, snapshot coordinator over fs + sqlite Tier-1 roots with
 coherent multi-root revert, step-boundary delegation manifests, drift
 attribution (single-human default).
 
-**Milestone 2 — broker / capability evaluation: not started.** Manifests
-carry no `authority` yet (see SI-7); M1/M2/C1–C5/attenuation tests activate
-there.
+**Milestone 2 — broker / capability evaluation: complete.**
+Broker-minted capabilities (F1) with mandatory expiry and manifest binding
+(M2), conjunctive caveat evaluation with unknown dimensions failing closed,
+§5.2 attenuation subset-checking, tool registration with conservative
+defaults (§4), run-window budget meters, A9 batch escalations, a
+daemon-owned approval surface (C2: Unix socket + `asf approve`; the MCP
+stream has no approval verb), credential injection that never touches the
+ledger, mint-time M1 enforcement, and the MCP stdio proxy (`asf proxy`)
+fronting a downstream server. ADR 0003 covers the hand-rolled passthrough.
+
+Still open for later milestones: promotion gate three-way merge, Tier-2/3
+stores, judge/clerk, StandingRules/TrustRecords, taint dimensions
+(currently fail closed by design).
 
 ## Build & run
 
 ```sh
-cargo test --workspace         # unit + invariant + e2e tests
-cargo run -p asf -- demo       # narrated kernel round-trip in a temp dir
-cargo run -p asf -- demo /tmp/asf-home   # …kept on disk for inspection
+cargo test --workspace              # unit + invariant + e2e + proxy smoke tests
+cargo run -p asf -- demo            # milestone 1: kernel round-trip, narrated
+cargo run -p asf -- broker-demo     # milestone 2: broker pipeline, narrated
+
+# The real daemon topology (three terminals):
+cargo run -p asf -- proxy --home /tmp/asf-home --vault /tmp/vault \
+    --downstream target/debug/asf vault-server --vault /tmp/vault
+cargo run -p asf -- approve --home /tmp/asf-home list      # the C2 surface
+cargo run -p asf -- approve --home /tmp/asf-home approve 1 --uses 2
 ```
 
-The demo: registers principals and a `local_session` channel, captures a
-signed intent, manifests at a step boundary, runs a traced vault+memory
-mutation, re-manifests, injects an out-of-band human edit (surfaces as
-`human_local` drift), reverts both stores coherently to manifest 1, verifies
-every hash chain and signature, prints the ledger, and crypto-shreds the
-intent text.
+`demo` proves the kernel: manifest → traced mutations → out-of-band edit
+surfacing as attributed drift → coherent two-store revert → verified chains
+→ crypto-shredding. `broker-demo` proves the broker: virtual-card grant →
+checked calls → denials → one batched escalation for three violations →
+channel-stamped approval with bounded uses → attenuation → fail-closed
+unknown dimensions.
 
 ## Layout
 

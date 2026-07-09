@@ -86,6 +86,29 @@ impl Keystore {
         Ok(self.signing_key(role)?.verifying_key())
     }
 
+    /// Store a real credential in the vault (brief §5.3: secrets live here
+    /// and are injected at call time; the agent never sees them).
+    pub fn secret_set(&self, name: &str, value: &str) -> Result<(), KeyError> {
+        let path = self.dir.join("secrets.json");
+        let mut map: serde_json::Map<String, serde_json::Value> = if path.exists() {
+            serde_json::from_slice(&fs::read(&path)?).unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        map.insert(name.into(), serde_json::Value::String(value.into()));
+        write_private(&path, serde_json::to_vec(&map).expect("serialize").as_slice())
+    }
+
+    pub fn secret_get(&self, name: &str) -> Result<Option<String>, KeyError> {
+        let path = self.dir.join("secrets.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let map: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_slice(&fs::read(&path)?).unwrap_or_default();
+        Ok(map.get(name).and_then(|v| v.as_str()).map(str::to_string))
+    }
+
     /// The owner KEK (Stage 1: single-human, one KEK). §8.2's multi-actor
     /// key-distribution is mechanism-reserved, policy-deferred.
     pub fn kek(&self) -> Result<Kek, KeyError> {

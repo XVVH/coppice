@@ -46,6 +46,7 @@ pub struct Fabric {
     pub cas: Cas,
     pub kek: Kek,
     stores: Vec<StoreSpec>,
+    keystore: Keystore,
     fabric_sk: SigningKey,
     user_sk: SigningKey,
     substrate_span: String,
@@ -107,10 +108,23 @@ impl Fabric {
             cas,
             kek,
             stores,
+            keystore,
             fabric_sk,
             user_sk,
             substrate_span,
         })
+    }
+
+    pub(crate) fn fabric_sk(&self) -> &SigningKey {
+        &self.fabric_sk
+    }
+
+    pub(crate) fn substrate_span(&self) -> &str {
+        &self.substrate_span
+    }
+
+    pub fn keystore(&self) -> &Keystore {
+        &self.keystore
     }
 
     pub fn stores(&self) -> &[StoreSpec] {
@@ -420,7 +434,8 @@ impl Fabric {
 
     /// Record a tool call in the active span (§6 tool_call body). Args and
     /// result go to the payload store; `summary` must already be the
-    /// caveat-relevant extract (F4). Undeclared reversibility defaults to
+    /// caveat-relevant extract (F4); `checks` is the broker's caveat check
+    /// record (empty array pre-broker). Undeclared reversibility defaults to
     /// `irreversible` (§0). Captures `state_root_after` for every registered
     /// store and advances the expected roots.
     #[allow(clippy::too_many_arguments)]
@@ -431,6 +446,7 @@ impl Fabric {
         args: &[u8],
         result: &[u8],
         summary: Value,
+        checks: Value,
         reversibility: Option<&str>,
     ) -> Result<trace::Appended, KernelError> {
         let manifest = trace::meta_get(&self.conn, "current_manifest")?
@@ -461,7 +477,7 @@ impl Fabric {
                 "args": serde_json::to_value(&args_ref).unwrap(),
                 "result": serde_json::to_value(&result_ref).unwrap(),
                 "summary": summary,
-                "checks": [],  // capability evaluation lands in milestone 2 (SI-7)
+                "checks": checks,
                 "reversibility": reversibility.unwrap_or("irreversible"),
                 "compensator": Value::Null,
                 "state_root_after": Value::Object(roots_after.clone()),
@@ -653,6 +669,39 @@ impl Fabric {
                     "shredded payload {} ({})",
                     short(body["payload_hash"].as_str().unwrap_or("?")),
                     body["reason"].as_str().unwrap_or("?")
+                ),
+                "grant" => format!(
+                    "capability {} granted{}",
+                    body["capability"].as_str().unwrap_or("?"),
+                    body["parent"]
+                        .as_str()
+                        .map(|p| format!(" (attenuated from {p})"))
+                        .unwrap_or_default()
+                ),
+                "verdict" => format!(
+                    "DENY {}.{} — {}",
+                    body["tool"].as_str().unwrap_or("?"),
+                    body["action"].as_str().unwrap_or("?"),
+                    body["structural"].as_str().map(str::to_string).unwrap_or_else(
+                        || body["failed"]
+                            .as_array()
+                            .map(|f| f.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+                            .unwrap_or_default()
+                    )
+                ),
+                "escalation" => format!(
+                    "ESCALATE #{} caveat {} (batch count {})",
+                    body["escalation"],
+                    body["caveat"].as_str().unwrap_or("?"),
+                    body["count"]
+                ),
+                "approval" => format!(
+                    "APPROVAL #{} {} ({} uses) via {} ({})",
+                    body["escalation"],
+                    body["resolution"].as_str().unwrap_or("?"),
+                    body["uses"],
+                    body["channel"].as_str().unwrap_or("?"),
+                    body["auth_strength"].as_str().unwrap_or("?")
                 ),
                 other => format!("{other} event"),
             };

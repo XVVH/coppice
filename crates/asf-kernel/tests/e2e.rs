@@ -155,6 +155,7 @@ fn e2e_kernel_round_trip() {
             br#"{"src":"inbox/todo.md","dest":"MOCs/plants.md"}"#,
             br#"{"ok":true}"#,
             json!({ "paths": ["inbox/todo.md", "MOCs/plants.md"] }),
+            json!([]),
             Some("reversible"),
         )
         .unwrap();
@@ -324,7 +325,7 @@ fn conservative_default_reversibility_is_irreversible() {
         .unwrap();
     let ev = w
         .fabric
-        .record_tool_call("tool:x@1", "y.z", b"{}", b"{}", json!({}), None)
+        .record_tool_call("tool:x@1", "y.z", b"{}", b"{}", json!({}), json!([]), None)
         .unwrap();
     let rows = trace::events_in_span(&w.fabric.conn, &ev.span).unwrap();
     let tc = rows.iter().find(|e| e.kind == "tool_call").unwrap();

@@ -1,8 +1,17 @@
-//! `asf` — Stage 1 kernel driver.
+//! `asf` — Agent State Fabric driver.
 //!
-//! `asf demo [dir]` runs the milestone e2e against a real directory (default:
-//! a temp dir) and narrates the ledger: manifest → traced mutations →
-//! out-of-band edit → attributed drift → coherent revert → verification.
+//! - `asf demo [dir]`         — milestone 1: kernel round-trip, narrated
+//! - `asf broker-demo [dir]`  — milestone 2: broker pipeline, narrated
+//! - `asf proxy --home H --vault V --downstream CMD [ARGS…]` — the MCP
+//!   proxy daemon (brief §5.3) with its C2 approval socket
+//! - `asf vault-server --vault V` — toy downstream MCP server
+//! - `asf approve --home H list|approve <id> [--uses N]|deny <id>` — the
+//!   human side of the C2 surface (separate terminal, never the agent)
+
+mod broker_demo;
+mod mcp;
+mod proxy;
+mod vault_server;
 
 use anyhow::{bail, Context, Result};
 use asf_kernel::kernel::Fabric;
@@ -11,12 +20,19 @@ use asf_kernel::trace;
 use rusqlite::Connection;
 use serde_json::json;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn flag(args: &[String], name: &str) -> Option<String> {
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1).cloned())
+}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("demo") => {
+        Some("demo") | Some("broker-demo") => {
+            let which = args[1].clone();
             let keep = args.get(2).cloned();
             let tmp;
             let dir = match &keep {
@@ -26,14 +42,49 @@ fn main() -> Result<()> {
                     tmp.path().to_path_buf()
                 }
             };
-            demo(&dir)?;
+            if which == "demo" {
+                demo(&dir)?;
+            } else {
+                broker_demo::run(&dir)?;
+            }
             if let Some(d) = keep {
                 println!("\nfabric home kept at: {d}");
             }
             Ok(())
         }
+        Some("vault-server") => {
+            let vault = flag(&args, "--vault").context("vault-server needs --vault <dir>")?;
+            vault_server::run(PathBuf::from(vault))
+        }
+        Some("proxy") => {
+            let home = flag(&args, "--home").context("proxy needs --home <dir>")?;
+            let vault = flag(&args, "--vault").context("proxy needs --vault <dir>")?;
+            let dpos = args
+                .iter()
+                .position(|a| a == "--downstream")
+                .context("proxy needs --downstream <cmd> [args…]")?;
+            let downstream: Vec<String> = args[dpos + 1..].to_vec();
+            if downstream.is_empty() {
+                bail!("--downstream needs a command");
+            }
+            proxy::run(PathBuf::from(home), PathBuf::from(vault), downstream)
+        }
+        Some("approve") => {
+            let home = flag(&args, "--home").context("approve needs --home <dir>")?;
+            let sub = args.get(args.iter().position(|a| a == "--home").unwrap() + 2)
+                .map(String::as_str)
+                .context("approve needs list|approve <id>|deny <id>")?;
+            let id = args
+                .iter()
+                .filter_map(|a| a.parse::<i64>().ok())
+                .next();
+            let uses = flag(&args, "--uses").and_then(|u| u.parse().ok()).unwrap_or(1);
+            proxy::approve_cli(Path::new(&home), sub, id, uses)
+        }
         _ => {
-            eprintln!("usage: asf demo [dir]");
+            eprintln!(
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>"
+            );
             std::process::exit(2);
         }
     }
@@ -104,6 +155,7 @@ fn demo(dir: &Path) -> Result<()> {
         "tool:vault@1.0", "note.file",
         br#"{"src":"inbox/todo.md","dest":"MOCs/plants.md"}"#, br#"{"ok":true}"#,
         json!({ "paths": ["inbox/todo.md","MOCs/plants.md"] }),
+        json!([]),
         Some("reversible"),
     )?;
     println!("vault + memory mutated; tool_call recorded with state_root_after");

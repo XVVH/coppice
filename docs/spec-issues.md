@@ -142,6 +142,56 @@ events outside any manifest (cf. SI-5), and (b) objects are live only once
 their register event is on the chain — object rows are materialized views;
 a row without an event fails closed.
 
+## SI-12 — glob "narrower" is not mechanically decidable as written (§5.2) — interpreted
+
+§5.2 requires attenuation verification to be "mechanical subset-checking"
+and lists "globs narrower" as one dimension — but glob-language subset is
+not simple to decide in general. **Interpretation** (`capability.rs::glob_covers`):
+a conservative provable-cases-only rule (identical globs; parent `**`;
+parent `prefix/**` with a literal prefix covering the child). Everything
+else is rejected as not-a-subset even when a human can see it is one (e.g.
+parent `inbox/*.md`, child `inbox/a.md`). Fail-closed and spec-compatible,
+but the spec should either bless a restricted glob dialect with decidable
+subset or state that conservative approximation is intended.
+
+## SI-13 — no event kind for escalation *resolution* (§6, A9) — interpreted
+
+C1 lists "escalation approval" as a human authority act that must be
+recorded with channel + auth_strength; §6 has `escalation` (the request)
+but no kind for the decision. **Interpretation** (`trace.rs`, `broker.rs`):
+added kind `approval`, body `{escalation, resolution: approved|denied,
+uses, channel, auth_strength}`. Same family as SI-11; fold into the same
+spec amendment.
+
+## SI-14 — how are mechanical denials recorded? (§6) — interpreted
+
+A denied call executes nothing, so it is not a `tool_call`; §6's `verdict`
+kind reads as the model judge's (brief §5.4 layer 3). **Interpretation**
+(`broker.rs::deny`): broker denials are `verdict` events with
+`source: "broker"`, carrying the failed dimensions and full check record.
+If the spec would rather reserve `verdict` for the judge, it should name a
+`denial` kind.
+
+## SI-15 — auth_strength has no total order (§2.1, §5.1) — interpreted
+
+`approval.min_auth` requires comparing channel strengths, but §2.1 only
+lists them. C4 groups `local_session` and `passkey` as the strong tier.
+**Interpretation** (`capability.rs::auth_rank`): unverified(0) <
+platform_oauth(1) < passkey(2) = local_session(2). Unrankable strengths
+fail closed. Spec should publish the order — it is consent-surface
+semantics, not an implementation detail.
+
+## SI-16 — M1's "grants any access to" needs a derivation rule (§3 M1, §4) — interpreted
+
+M1 says roots must cover every store the capability grants access to, but
+nothing in §4/§5 says how to compute a capability's store-reach.
+**Interpretation** (`tools.rs`, `broker.rs::mint`): tool registrations
+declare `store` per action (plus `class` for budget metering and
+`path_args` for paths.write extraction — same trusted-mechanical tier as
+the §4 example's `writes`); mint-time M1 = union of stores of allowlisted
+tools ⊆ manifest roots. Spec should adopt per-action store/class/path
+bindings into §4, or name its own derivation.
+
 ## SI-10 — `captured_before` freshness is unenforceable as specified (§3.1) — open
 
 `captured_before` proves the intent was signed before a given substrate

@@ -5,12 +5,16 @@
 //! spec ambiguities are tracked in `docs/spec-issues.md` as SI-n and cited
 //! from the code they affect.
 
+pub mod broker;
 pub mod canon;
+pub mod capability;
+pub mod evaluate;
 pub mod keys;
+pub mod kernel;
 pub mod payload;
 pub mod snapshot;
+pub mod tools;
 pub mod trace;
-pub mod kernel;
 
 /// RFC 3339 UTC timestamp for "now" (spec §0).
 pub fn now_rfc3339() -> String {

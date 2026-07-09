@@ -106,6 +106,13 @@ recurring checklist, not a one-off: every new store, tool server, or channel
 must answer "does the agent surface have a native path to this state?"
 before it joins a dogfooding run.
 
+## What to exercise
+
+`dogfooding-rubric.md` enumerates the manual test batch — DF-P1…P8
+(positives: must succeed cleanly; a denial there is a false positive) and
+DF-N1…N9 (negatives: must be blocked/parked/attributed; those denials are
+expected, not FPs). Log outcomes by id in the vault's dogfooding log.
+
 ## What to measure
 
 **Primary — denial false-positive rate.** "Did the broker block good work?"

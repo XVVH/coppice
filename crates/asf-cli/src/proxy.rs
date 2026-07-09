@@ -32,10 +32,15 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-pub const TOOL_REF: &str = "tool:vault@1.0";
+// @1.1: adds note.list — dogfooding found workflow 3 dead on arrival
+// without enumeration (can't summarize or reorganize what you can't see).
+pub const TOOL_REF: &str = "tool:vault@1.1";
 
 fn vault_tool_actions() -> Value {
     json!([
+        { "name": "note.list",  "side_effect": "local", "surface": "fixed",
+          "reversibility": "reversible", "domain": "files.vault",
+          "class": "read", "store": "fs:vault", "path_args": ["path"] },
         { "name": "note.read",  "side_effect": "local", "surface": "fixed",
           "reversibility": "reversible", "domain": "files.vault",
           "class": "read", "store": "fs:vault", "path_args": ["path"] },
@@ -59,7 +64,7 @@ fn default_session_caveats() -> (Vec<Value>, Vec<&'static str>) {
     (
         vec![
             json!({"dim":"action.allow","tools":[TOOL_REF],
-                   "actions":["note.read","note.write","note.move"]}),
+                   "actions":["note.list","note.read","note.write","note.move"]}),
             json!({"dim":"reversibility.max","max":"compensable"}),
             json!({"dim":"paths.write","globs":["**"]}),
             json!({"dim":"budget.count","action_class":"write","max":20,"window":"run"}),
@@ -226,9 +231,12 @@ pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
         }))?,
     )?;
 
-    if trace::meta_get(&broker.fabric.conn, "tool_registered")?.is_none() {
+    // Register the tool surface once per version: the meta value is the
+    // registered ref, so a version bump (new/changed actions) re-registers
+    // under the new ref while prior versions stay in the ledger.
+    if trace::meta_get(&broker.fabric.conn, "tool_registered")?.as_deref() != Some(TOOL_REF) {
         broker.register_tool(TOOL_REF, vault_tool_actions())?;
-        trace::meta_set(&broker.fabric.conn, "tool_registered", "1")?;
+        trace::meta_set(&broker.fabric.conn, "tool_registered", TOOL_REF)?;
     }
     let (caveats, escalatable) = default_session_caveats();
     let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(2))

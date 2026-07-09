@@ -34,7 +34,10 @@ use std::thread;
 
 // @1.1: adds note.list — dogfooding found workflow 3 dead on arrival
 // without enumeration (can't summarize or reorganize what you can't see).
-pub const TOOL_REF: &str = "tool:vault@1.1";
+// @1.2: adds note.edit — whole-document rewrite was the only mutation
+// (DF-P2 finding), which is error-prone for link fixing and bloats the
+// payload store with full copies per touch.
+pub const TOOL_REF: &str = "tool:vault@1.2";
 
 fn vault_tool_actions() -> Value {
     json!([
@@ -45,6 +48,9 @@ fn vault_tool_actions() -> Value {
           "reversibility": "reversible", "domain": "files.vault",
           "class": "read", "store": "fs:vault", "path_args": ["path"] },
         { "name": "note.write", "side_effect": "local", "surface": "fixed",
+          "reversibility": "reversible", "domain": "files.vault",
+          "class": "write", "store": "fs:vault", "path_args": ["path"] },
+        { "name": "note.edit",  "side_effect": "local", "surface": "fixed",
           "reversibility": "reversible", "domain": "files.vault",
           "class": "write", "store": "fs:vault", "path_args": ["path"] },
         { "name": "note.move",  "side_effect": "local", "surface": "fixed",
@@ -64,7 +70,7 @@ fn default_session_caveats() -> (Vec<Value>, Vec<&'static str>) {
     (
         vec![
             json!({"dim":"action.allow","tools":[TOOL_REF],
-                   "actions":["note.list","note.read","note.write","note.move"]}),
+                   "actions":["note.list","note.read","note.write","note.edit","note.move"]}),
             json!({"dim":"reversibility.max","max":"compensable"}),
             json!({"dim":"paths.write","globs":["**"]}),
             json!({"dim":"budget.count","action_class":"write","max":20,"window":"run"}),

@@ -31,6 +31,12 @@ fn tool_defs() -> Value {
           "inputSchema": { "type": "object",
             "properties": { "path": { "type": "string" }, "content": { "type": "string" } },
             "required": ["path", "content"] } },
+        { "name": "note.edit",   "description": "Replace one exact occurrence of old_string with new_string in a note (old_string must match exactly once)",
+          "inputSchema": { "type": "object",
+            "properties": { "path": { "type": "string" },
+                            "old_string": { "type": "string" },
+                            "new_string": { "type": "string" } },
+            "required": ["path", "old_string", "new_string"] } },
         { "name": "note.move",   "description": "Move a note",
           "inputSchema": { "type": "object",
             "properties": { "src": { "type": "string" }, "dest": { "type": "string" } },
@@ -72,6 +78,22 @@ fn call(vault: &Path, name: &str, args: &Value) -> Result<String> {
             }
             fs::write(&p, s("content")?)?;
             format!("wrote {}", s("path")?)
+        }
+        "note.edit" => {
+            let p = safe_join(vault, s("path")?)?;
+            let (old, new) = (s("old_string")?, s("new_string")?);
+            let content = fs::read_to_string(&p)?;
+            match content.matches(old).count() {
+                0 => bail!("old_string not found in {}", s("path")?),
+                1 => {
+                    fs::write(&p, content.replacen(old, new, 1))?;
+                    format!("edited {}", s("path")?)
+                }
+                n => bail!(
+                    "old_string matches {n} times in {}; include more context to make it unique",
+                    s("path")?
+                ),
+            }
         }
         "note.move" => {
             let (src, dest) = (safe_join(vault, s("src")?)?, safe_join(vault, s("dest")?)?);

@@ -888,7 +888,7 @@ impl Broker {
             }
         }
         for prep in prepared {
-            snapshot::commit_restore(prep)?;
+            snapshot::commit_restore(&self.fabric.cas, prep)?;
         }
 
         let stores_json: Vec<Value> = plan

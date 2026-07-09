@@ -51,8 +51,11 @@ session branch. The client never sees trunk; the agent never holds a key.
    }
    ```
 3. Smoke-test against a **sacrificial** vault copy first (a throwaway dir):
-   drive a few note.read/write/move calls, quit the client (EOF → promotion),
-   confirm trunk updated and `asf ledger --home …` explains every root.
+   drive a few note.read/write/move calls, quit the client (session end →
+   promotion; if the client kills the daemon uncleanly, the next session's
+   bootstrap — or `asf recover --home … --vault …` — gates the stranded
+   branch, see RF-9), confirm trunk updated and `asf ledger --home …`
+   explains every root.
 4. Approvals happen on the daemon's own surface, never in the client:
    `asf approve --home … list | approve <id> --uses N | promotions |
    promote <id>`.

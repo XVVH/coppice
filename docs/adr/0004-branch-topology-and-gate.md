@@ -58,8 +58,10 @@ directly (observe-everything posture). Milestone 3 introduces the fork.
 
 ## Session granularity — v0 decision (2026-07-09)
 
-Promotion fires at proxy stdin EOF (`proxy.rs`), so one proxy process is one
-branch is one promotion. A real MCP client keeps that process alive for its
+Promotion fires when the proxy session ends (`proxy.rs` — stdin EOF or a
+catchable signal; sessions ended by SIGKILL are gated at the next bootstrap
+or via `asf recover`, see RF-9), so one proxy process is one branch is one
+promotion. A real MCP client keeps that process alive for its
 whole app run, so **"one session" currently equals "one app lifetime"**: many
 unrelated tasks pile onto one branch and promote as a single large merge on
 quit. This is in tension with M6 (small manifests).

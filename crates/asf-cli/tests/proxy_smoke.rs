@@ -70,6 +70,23 @@ impl Proxy {
     }
 }
 
+impl Proxy {
+    /// Kill without ceremony (SIGKILL): the promotion gate cannot run.
+    fn sigkill(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    /// What a real MCP client does on shutdown (RF-9): a signal, not EOF.
+    fn sigterm(mut self) {
+        Command::new("kill")
+            .args(["-TERM", &self.child.id().to_string()])
+            .status()
+            .expect("send SIGTERM");
+        let _ = self.child.wait();
+    }
+}
+
 impl Drop for Proxy {
     fn drop(&mut self) {
         let _ = self.child.kill();
@@ -91,6 +108,87 @@ fn approve_via_socket(home: &std::path::Path, cmd: Value) -> Value {
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).unwrap();
     serde_json::from_str(line.trim()).unwrap()
+}
+
+fn init_session(p: &mut Proxy) {
+    let init = p.request("initialize", json!({ "protocolVersion": "2025-03-26",
+        "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }));
+    assert_eq!(init["result"]["serverInfo"]["name"], "asf-vault-server");
+}
+
+fn promotion_count(home: &std::path::Path) -> i64 {
+    let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+    conn.query_row("SELECT COUNT(*) FROM events WHERE kind = 'promotion'", [], |r| r.get(0))
+        .unwrap()
+}
+
+/// RF-9, the crash-safe layer: a SIGKILLed proxy strands its session; the
+/// next bootstrap finds the live-marker, gates the branch, and the write
+/// lands on trunk before the new session takes its snapshot.
+#[test]
+fn sigkilled_session_is_recovered_by_next_bootstrap() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+    let r = p.call_tool("note.write", json!({ "path": "stranded.md", "content": "survives" }));
+    assert_eq!(r["isError"], false, "{r}");
+    p.sigkill();
+
+    assert!(!vault.join("stranded.md").exists(), "SIGKILL must strand the branch");
+    assert_eq!(promotion_count(&home), 0, "no gate ran");
+
+    // Next session's bootstrap recovers the strand. The initialize
+    // round-trip proves bootstrap (and therefore recovery) completed.
+    let mut p2 = Proxy::start(&home, &vault);
+    init_session(&mut p2);
+    assert_eq!(
+        std::fs::read_to_string(vault.join("stranded.md")).unwrap(),
+        "survives",
+        "recovery promoted the stranded session to trunk"
+    );
+    assert_eq!(promotion_count(&home), 1);
+
+    // The recovered state is the new session's base — visible through it.
+    let r = p2.call_tool("note.read", json!({ "path": "stranded.md" }));
+    assert_eq!(r["content"][0]["text"], "survives");
+    p2.finish();
+
+    // Recovery is once-only: the second session's own promotion is the
+    // only new gate run (no double-promotion of the stranded branch).
+    assert_eq!(promotion_count(&home), 2);
+}
+
+/// RF-9, the polish layer: SIGTERM (what MCP clients actually send) runs
+/// the gate before exit — work lands without waiting for the next session.
+#[test]
+fn sigterm_runs_the_gate_before_exit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+    let r = p.call_tool("note.write", json!({ "path": "graceful.md", "content": "landed" }));
+    assert_eq!(r["isError"], false, "{r}");
+    p.sigterm();
+
+    assert_eq!(
+        std::fs::read_to_string(vault.join("graceful.md")).unwrap(),
+        "landed",
+        "SIGTERM path promoted before exit"
+    );
+    assert_eq!(promotion_count(&home), 1);
+
+    // And the marker is cleared: the next bootstrap has nothing to recover.
+    let mut p2 = Proxy::start(&home, &vault);
+    init_session(&mut p2);
+    assert_eq!(promotion_count(&home), 1, "nothing re-gated");
+    p2.finish();
 }
 
 #[test]

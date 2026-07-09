@@ -253,3 +253,61 @@ fn p5_attenuation_implies_semantic_subset() {
     assert!(verified_pairs > 50, "generator should produce valid attenuations ({verified_pairs})");
     assert!(allows_checked > 500, "and child-allowed calls to check ({allows_checked})");
 }
+
+/// P6 (RF-1 guard) — instant comparison agrees with true chronology, and
+/// lexical string comparison provably does NOT. A regression to string
+/// comparison of timestamps would flip `string_disagreements` checks and be
+/// caught; the instant path must never disagree.
+#[test]
+fn p6_instant_compare_agrees_with_chronology_strings_do_not() {
+    use time::format_description::well_known::Rfc3339;
+    use time::{Duration, OffsetDateTime};
+
+    let base = OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+    let fmt = |t: OffsetDateTime| t.format(&Rfc3339).unwrap();
+
+    // Crafted SAME-second, mixed-precision pairs — the exact RF-1 hazard.
+    // Lexical order diverges from chronology only within one second, so this
+    // must be constructed, not hoped for from random spread.
+    let crafted = [
+        (base, base + Duration::milliseconds(500)),
+        (base + Duration::milliseconds(1), base + Duration::milliseconds(999)),
+        (base, base + Duration::nanoseconds(1)),
+    ];
+    let mut string_disagreements = 0;
+    for (ti, tj) in crafted {
+        let (si, sj) = (fmt(ti), fmt(tj));
+        // Instant path (what the kernel now uses) must match chronology.
+        assert_eq!(
+            asf_kernel::parse_instant(&si).unwrap() <= asf_kernel::parse_instant(&sj).unwrap(),
+            ti <= tj,
+            "instant compare wrong: {si} vs {sj}"
+        );
+        // Lexical path (the RF-1 bug) disagrees on these.
+        if (si <= sj) != (ti <= tj) {
+            string_disagreements += 1;
+        }
+    }
+    assert!(
+        string_disagreements > 0,
+        "crafted same-second pairs should expose the lexical hazard — if 0, the test lost its teeth"
+    );
+
+    // Random pairs (whole/sub-second mix): the instant path must ALWAYS
+    // agree with chronology, spread across the whole range.
+    let mut rng = Rng(0x5EED_0006);
+    let mk = |rng: &mut Rng| -> OffsetDateTime {
+        let secs = (rng.next() % 200_000_000) as i64;
+        let nanos = if rng.chance(50) { 0 } else { (rng.next() % 1_000_000_000) as i64 };
+        base + Duration::seconds(secs) + Duration::nanoseconds(nanos)
+    };
+    for _ in 0..4000 {
+        let (ti, tj) = (mk(&mut rng), mk(&mut rng));
+        let (si, sj) = (fmt(ti), fmt(tj));
+        assert_eq!(
+            asf_kernel::parse_instant(&si).unwrap() <= asf_kernel::parse_instant(&sj).unwrap(),
+            ti <= tj,
+            "instant compare disagreed with chronology: {si} vs {sj}"
+        );
+    }
+}

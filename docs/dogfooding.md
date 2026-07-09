@@ -35,7 +35,8 @@ session branch. The client never sees trunk; the agent never holds a key.
 1. Build release: `cargo build --release` (the proxy spawns `asf` as its own
    downstream, so use the release binary path for both).
 2. Point your MCP client at the proxy. For Claude Code, a project
-   `.mcp.json`:
+   `.mcp.json` — in the **dogfood workspace**, never the Coppice dev repo
+   (see "Session hygiene" below):
    ```json
    {
      "mcpServers": {
@@ -56,6 +57,51 @@ session branch. The client never sees trunk; the agent never holds a key.
 4. Approvals happen on the daemon's own surface, never in the client:
    `asf approve --home … list | approve <id> --uses N | promotions |
    promote <id>`.
+
+## Session hygiene — two surfaces, never mixed
+
+The dev machine collapses a topology the design assumes: agent and operator
+are the same Unix user. An MCP client with native filesystem tools has two
+paths to the vault — brokered and direct — and it will prefer the direct one
+*exactly when the broker frustrates it*, i.e. at a denial, i.e. at the event
+being measured. Bypass converts would-be denials into silence (the FP rate
+reads artificially clean), and direct trunk writes surface as drift
+**attributed to the human** (single-human default) — so pollution corrupts
+both the primary metric and the attribution ledger at once.
+
+Nor is trunk the only direct path: session branches under the fabric home are
+plain files, and the approval socket / `asf approve` are reachable by any
+same-user process — an agent with a shell could approve its own escalations,
+a C2 violation in spirit that the protocol topology cannot see.
+
+The rule, until agent sandboxing makes it structural:
+
+- **Agent surface** — dogfooding sessions run only in a dedicated workspace
+  (`~/temp/coppice-dogfood-workspace`): carries the `coppice-vault`
+  `.mcp.json`, a CLAUDE.md contract (denials are results to report, not
+  obstacles to solve; approvals belong to the operator), and client deny
+  rules blocking native file tools on the vault AND the fabric home, plus
+  shell entirely (workflow 3 needs none). Client-side permission prompts for
+  the brokered tools are deliberately OFF: governing calls is the broker's
+  job, and double-governance would mask the UX being measured. One dogfood
+  session at a time — concurrent proxies would contend for the fabric home
+  and steal each other's approval socket.
+- **Operator surface** — the Coppice dev repo session and your terminal:
+  `asf approve`/`ledger`/`stats`, git forensics, native fs access by design.
+  The dev repo intentionally carries **no** `.mcp.json`; never run
+  workflow-3 tasks from it.
+- **Detection backstop** — during dogfooding, any human-attributed drift you
+  didn't make, or any trunk change unexplained by a promotion event, is a
+  pollution incident: investigate before trusting that week's numbers.
+
+Scope honesty for the eventual writeup: v0 measures a *cooperative* agent's
+experience of the broker — the deny rules make cooperation structural, they
+are not the enforcement story. Enforcement against a non-cooperative agent
+is topological (a sandbox whose only door is the proxy), which is the
+intended deployment shape and out of scope for v0. This section is a
+recurring checklist, not a one-off: every new store, tool server, or channel
+must answer "does the agent surface have a native path to this state?"
+before it joins a dogfooding run.
 
 ## What to measure
 

@@ -18,15 +18,26 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
-## SI-20 — mid-session out-of-band edits are absorbed unattributed (A12 vs §5.3) — open
+## SI-20 — mid-session out-of-band edits can be absorbed unattributed (A12 vs §5.3) — open
 
-Found by dogfooding (2026-07-09, first verified real-client loop), not by
-code: the human hand-edited a trunk note *while a session was live*. At
-session end the gate's three-way merge took live trunk as the trunk side,
-merged cleanly, and installed roots that already contain the human's edit —
-so `expected_roots` matches, no boundary ever sees divergence, and **no
-drift event is emitted**. The same edit made *between* sessions produces
-`drift {attribution: human_local}` at the next step boundary.
+Prompted by dogfooding (2026-07-09, first verified real-client loop), then
+confirmed by code reading — importantly, NOT by observed misbehavior: the
+session in question did everything right. The operator's pre-session hand
+edit was caught at the next check and attributed `human_local`; an initial
+reading of the ledger misattributed the gap, which is itself a
+ledger-legibility data point. The gap the analysis exposed is a specific
+unexercised window:
+
+A trunk edit made *while a session is live*, to a path the branch does
+**not** touch, is folded into the gate's merged root as the trunk side —
+`expected_roots` is then updated to the merged result, no boundary ever
+sees divergence, and **no drift event is emitted** (`promote_manifest`
+never runs a drift check; `compute_merge` reads live trunk). The identical
+edit made *between* sessions produces `drift {attribution: human_local}`
+at the next step boundary or ledger check (verified working). A
+mid-session edit to a path the branch *did* touch surfaces as a trunk-wins
+conflict, so it is at least visible; the silent case is exactly the
+branch-untouched path.
 
 A12 promises out-of-band local edits are "logged, not alerted" — attributed
 quietly, but attributed. §5.3 specifies the merge but says nothing about

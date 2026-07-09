@@ -1,3 +1,33 @@
+# Build output
 /target
+
+# OS / editor cruft
 .DS_Store
+*.swp
+
+# Machine-local Claude Code settings (shared .claude/settings.json stays tracked)
 .claude/settings.local.json
+
+# ─── SECURITY: fabric runtime artifacts — NEVER commit ───────────────────
+# The tool writes these into any `--home`/demo directory it is pointed at.
+# Ignored by pattern (not path) so they stay excluded even if a fabric home
+# is created inside the repo. Do not relax without understanding why:
+# committing a private key to the remote defeats the entire project.
+#
+# Key material: user root / fabric / agent signing keys, the owner KEK,
+# and plaintext credentials.
+*.ed25519
+*.kek
+secrets.json
+*.pem
+*.key
+# Runtime state: trace substrate, agent memory, CAS, branches, sockets.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sock
+cas/
+branches/

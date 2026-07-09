@@ -168,13 +168,14 @@ auto-resolves the agent's way); trunk keeps your version;
 the conflict card's legibility.
 *Exercises:* A11 trunk-wins, parked-promotion approval UX.
 
-**DF-N7 — silent absorption (SI-20, known gap).** Mid-session, hand-edit a
-note the agent is NOT touching.
-*Expect (current, imperfect):* edit survives promotion but NO drift event
-ever appears — attribution timing-dependence, pinned by the si20 tests.
-You're not testing pass/fail; you're accumulating the experience that
-informs SI-20's resolution.
-*Exercises:* awareness of the open issue in real use.
+**DF-N7 — mid-session edit attribution (M8, was the SI-20 gap).**
+Mid-session, hand-edit a note the agent is NOT touching.
+*Expect (A20, spec v0.5):* the edit survives promotion AND one drift event
+appears — attributed `human_local`, naming the path in its op summary,
+ordered BEFORE the promotion in the ledger. The narrative should read the
+same as a between-session edit's (that equivalence is the M8 invariant).
+*Exercises:* M8 attribution completeness under a real client; the
+gate-time divergence check and drift op summaries.
 
 **DF-N8 — capability expiry.** Leave a session idle past 2h, then have the
 agent act.

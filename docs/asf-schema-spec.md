@@ -1,8 +1,8 @@
 # Agent State Fabric — Schema Specification
 
-**Draft v0.4 — July 2026 — Companion to the Architecture Brief**
+**Draft v0.5 — July 2026 — Companion to the Architecture Brief**
 
-*v0.3 integrated amendments A1–A14 from the wedge paper runs (Hermes agent; workflows: web research → vault distillation, Discord message management, vault maintenance). v0.4 integrates A15–A19 from the Stage 1–3 reference implementation (Coppice): the first amendments forced by running code rather than paper runs. Every A15–A19 decision traces to the implementation sessions via `docs/spec-issues.md` (SI-1…SI-19, all resolved in this version). Changelog at end. Risk-review requirements carried since v0.1: **(R2)** read authority is first-class, **(R3)** payloads are hash-referenced and destroyable, **(R6)** trust is domain-scoped, never scalar.*
+*v0.3 integrated amendments A1–A14 from the wedge paper runs (Hermes agent; workflows: web research → vault distillation, Discord message management, vault maintenance). v0.4 integrated A15–A19 from the Stage 1–3 reference implementation (Coppice): the first amendments forced by running code rather than paper runs. Every A15–A19 decision traces to the implementation sessions via `docs/spec-issues.md` (SI-1…SI-19, all resolved in that version). v0.5 integrates A20 (SI-20, M8 attribution completeness) — the first amendment forced by dogfooding rather than by implementation. Changelog at end. Risk-review requirements carried since v0.1: **(R2)** read authority is first-class, **(R3)** payloads are hash-referenced and destroyable, **(R6)** trust is domain-scoped, never scalar.*
 
 ---
 
@@ -92,6 +92,7 @@ Manifest {
 - **M5 — Re-manifest on behavior change (A2).** A bundle change mid-run (skill created or hot-loaded) triggers, at the next step boundary, a self-delegation: child manifest, new behavior hash, same capability (attenuation-identity is legal). Even self-modification has lineage; the trace shows which steps ran under which behavior.
 - **M6 — Small manifests (A11 guidance).** Prefer frequent re-manifesting over long-lived branches; promotion divergence (§5.3) grows with branch age, and M5 makes re-baselining cheap.
 - **M7 — Observed runs (A19).** `authority` is optional. A manifest without it denotes an *observed* run: snapshots, trace, drift attribution, and revert apply in full; no broker enforcement exists, and the manifest itself makes that ledger-visible. M1/M2 bind whenever a capability exists. Stage 2's observe-everything shipping posture is this mode by construction.
+- **M8 — Attribution completeness (A20).** Every window of out-of-band divergence (the net change between consecutive root attestations) is recorded by exactly one drift event — carrying A12 attribution and an A13 operation-class summary — before the diverged state is consumed by any merge or attested as expected by any subsequent event. Ledger attribution never depends on when a change occurred relative to session lifetime. Stated as a property of the ledger, not of the gate, so no future code path reopens the window by other means: every consumer of live state (auto-promotion, approval-time re-merge, revert) attributes first, and gates serialize per §5.3.
 - **Root encoding (A16 interim).** State roots become CIDv1 (F2, §9); `sha256:<hex>` is the sanctioned interim encoding until the F2 execution checkpoint. Readers MUST accept both during the transition. sqlite roots are the checkpointed main-file byte image in the interim; page-aligned chunked DAGs at F2 execution.
 
 ### 3.1 IntentArtifact
@@ -211,6 +212,7 @@ Promotion merges a completed branch to trunk and is the only mutation in the sys
 - **Class extensibility (A18).** The vocabulary extends by refinement only: `<root>.<refinement>` adds a predicate to (never replaces) one of the five structural roots, so a wrong predicate degrades to its parent class. Rules allowing a root allow its refinements; unknown classes fail closed at ratification and at the gate. Content-aware refinements require registered, versioned classifiers, and rules pin the classifier versions they were ratified under (the A1 pattern applied to classifiers).
 - **Promotion rules (A13).** Gate decisions are caveat-shaped (paths, operation classes, sizes), so auto-promotion rules are StandingRules in the same grammar — e.g., auto-merge iff paths ⊆ {/inbox, /MOCs}, ops ⊆ {add, modify}, no deletes — ratcheted from early manual approvals. Low-stakes by construction: Tier-1 promotion is always revertible.
 - **Trace-vs-capability check.** At the gate, the recorded trace is verified against the capability — did the run do anything its token shouldn't allow — before anything becomes durable.
+- **Divergence attribution and gate serialization (A20, M8).** Before any gate consumes live trunk — auto-promotion, approval-time re-merge, or revert — divergence from the attested roots is recorded as drift (A12 attribution, A13 op summary) and only then merged or erased. Gates serialize per fabric home, cross-process; the divergence check, the merge, and the expected-root attestation are atomic with respect to other gates. Per-store locking is explicitly wrong grain: gates consume and attest all roots as one coherent tuple. Note the A3 consequence: SI-18's whole-store memory merges pass the same pre-check, so the surface where cross-run taint would ride into trunk always produces an attributable event first — a monitored gap, not a silent one.
 
 ## 6. TraceEvent
 
@@ -234,7 +236,7 @@ Event { "id": "evt:…", "span": "span:…", "seq": 41, "prev": "evt:…",
 
 **escalation body — batching (A9):** violations aggregate per (caveat, action_class): `{ count: 28, sample: [5 refs], guard_status: "all_pass" }` → one approval covers the batch. Twenty-eight pings is the R1 fatigue machine rebuilt; one legible batch is not.
 
-**drift body — attribution classes (A12):** `{ store, expected_root, observed_root, between: [offset_lo, offset_hi], attribution: "human_local" | "tool_known" | "unattributed" }` — `between` brackets the unobserved change in substrate offsets (A19). Zero-authorship default for the solo operator: local edits outside agent spans attribute quietly to the human (logged, not alerted); only `unattributed` drift is loud. In a co-edited vault drift is Tuesday, not an incident.
+**drift body — attribution classes (A12), narrative (A20):** `{ store, expected_root, observed_root, between: [offset_lo, offset_hi], attribution: "human_local" | "tool_known" | "unattributed", ops: [A13 operation-class summary] }` — `between` brackets the unobserved change in substrate offsets (A19). `ops` names what changed in the same vocabulary rules and promotion previews speak (rename/move detection per A17; opaque stores degrade to whole-store `modify` per SI-18), so the ledger narrative is equivalent no matter when the edit happened (M8) — a drift that names its paths is much harder to misread than one that names two hashes. Paths land in the plaintext substrate: the same exposure promotion event bodies already accept; any future substrate-minimization pass treats both together. Zero-authorship default for the solo operator: local edits outside agent spans attribute quietly to the human (logged, not alerted); only `unattributed` drift is loud. In a co-edited vault drift is Tuesday, not an incident.
 
 **Human-originated events** (approvals, ratifications) carry `{ channel, auth_strength }` per C1.
 
@@ -309,6 +311,12 @@ Not a score: raw, trace-backed counters per (principal, domain, skill-version). 
 3. Broker mints capability bound to the manifest: action allowlist, `$0` money budget, count budget 3 sends/run, `recipients: known_contacts (scope: dm)`, read scope + volume, `reversibility.max: compensable`, +2h expiry.
 4. Run: each tool call traced with checks, meters, summary, `state_root_after`. Unknown-recipient draft → escalation → one-tap approval (channel-stamped). Third similar approval this month → clerk drafts a rule (k=3, least-general, counterfactuals attached, domain-matched, domain-scoped pin) for ratification at `approval.min_auth`.
 5. Promotion gate: trace re-verified against capability; three-way merge to trunk; promotion event. Sixty days on, email payloads hit TTL → shred events. The run stays forever explainable, no longer readable.
+
+## Changelog — v0.5 (amendment A20)
+
+*The first amendment forced by dogfooding (SI-20, found and ratified 2026-07-09; provenance in `docs/spec-issues.md`).*
+
+A20 — M8 attribution completeness: every consumer of live state (auto-promotion, approval-time re-merge, revert) records out-of-band divergence as drift — A12 attribution + A13 op-class summary — before consuming it; one drift event per divergence window; drift bodies gain `ops` for narrative parity across timings; gates serialize per fabric home (cross-process), with check/merge/attestation atomic with respect to other gates. Corollary: SI-18 whole-store memory merges always produce an attributable event before cross-run taint (A3) could land — the gap becomes monitored, not silent.
 
 ## Changelog — v0.4 (amendments A15–A19)
 

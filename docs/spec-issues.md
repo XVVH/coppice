@@ -5,7 +5,8 @@
 > adjudicated A19 conformance sweep, and integrated into
 > `asf-schema-spec.md` v0.4 (changelog A15–A19). This file is preserved
 > as the amendment provenance record; per-entry statuses below are
-> historical. New issues found under v0.4 start at **SI-20**.
+> historical. New issues found under v0.4 start at **SI-20** (resolved in
+> v0.5 as A20); new issues under v0.5 start at **SI-21**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -18,7 +19,32 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
-## SI-20 — mid-session out-of-band edits can be absorbed unattributed (A12 vs §5.3) — open
+## SI-20 — mid-session out-of-band edits can be absorbed unattributed (A12 vs §5.3) — RESOLVED (author, 2026-07-09)
+
+**Resolution: the candidate ratified as amendment A20 (spec v0.5), with two
+author strengthenings and two implementation-review adjustments.**
+- Core: pre-consumption divergence check — drift (A12 attribution) emitted
+  before any merge consumes live trunk. New invariant **M8 (attribution
+  completeness)**, phrased as a property of the ledger, not the gate.
+- Strengthening 1 (author): narrative parity — drift bodies carry the A13
+  op-class summary; extended in review to ALL drift emissions (boundary
+  checks too), not only gate-time ones.
+- Strengthening 2 (author): gates serialize; adjusted in review from
+  per-store to per-fabric-home grain (gates consume all roots as one
+  coherent tuple; per-store locks could deadlock), cross-process via flock.
+- Review additions: **revert is a fourth consumer** of live state and gets
+  the same pre-check (a gate-scoped fix would have missed it); M8's unit
+  is the **divergence window** (net change between consecutive
+  attestations), or the exactly-once clause fails honestly on multi-edit
+  windows — the op summary restores per-path narrative inside the single
+  event.
+- A3 corollary (author): SI-18 whole-store memory merges pass the same
+  pre-check — cross-run taint's landing zone is monitored, never silent.
+
+Implemented with four-timing property tests
+(`m8_attribution_is_timing_independent`, the conflict-park drift
+assertion, `m8_revert_attributes_divergence_before_erasing_it`). Original
+analysis below, preserved as provenance.
 
 Prompted by dogfooding (2026-07-09, first verified real-client loop), then
 confirmed by code reading — importantly, NOT by observed misbehavior: the

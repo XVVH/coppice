@@ -316,6 +316,49 @@ fn revert_is_all_or_nothing() {
     assert_eq!(read_memory_facts(&w.memory_db).len(), 2);
 }
 
+/// M8 (A20): revert consumes live state like a merge does — the fourth
+/// timing. An out-of-band edit followed by revert must be attributed
+/// (drift with A12 attribution + A13 op summary) BEFORE the restore
+/// erases it, and the window closes cleanly (no residual drift after).
+#[test]
+fn m8_revert_attributes_divergence_before_erasing_it() {
+    let mut w = setup();
+    let (human, agent, intent) = boot(&mut w);
+    let s1 = w
+        .fabric
+        .step_boundary(&human, &agent, &intent, behavior_v1())
+        .unwrap();
+
+    fs::write(w.vault.join("index.md"), "# Vault\nhand edit, then regretted\n").unwrap();
+    w.fabric.revert_to(&s1.manifest).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(w.vault.join("index.md")).unwrap(),
+        "# Vault\n",
+        "revert restored the manifest state"
+    );
+    let events = trace::all_events(&w.fabric.conn).unwrap();
+    let drift = events
+        .iter()
+        .find(|e| e.kind == "drift")
+        .expect("M8: revert must attribute the divergence it erases");
+    let revert = events.iter().find(|e| e.kind == "revert").unwrap();
+    assert!(
+        drift.offset < revert.offset,
+        "attribution must precede the consuming revert"
+    );
+    assert_eq!(drift.raw["body"]["attribution"], "human_local");
+    assert!(
+        drift.raw["body"]["ops"].to_string().contains("index.md"),
+        "drift narrative must name its paths: {}",
+        drift.raw["body"]
+    );
+    assert!(
+        w.fabric.check_drift().unwrap().is_empty(),
+        "the window closed with the revert's re-attestation"
+    );
+}
+
 #[test]
 fn conservative_default_reversibility_is_irreversible() {
     let mut w = setup();

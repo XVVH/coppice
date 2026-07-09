@@ -25,9 +25,23 @@ stream has no approval verb), credential injection that never touches the
 ledger, mint-time M1 enforcement, and the MCP stdio proxy (`asf proxy`)
 fronting a downstream server. ADR 0003 covers the hand-rolled passthrough.
 
-Still open for later milestones: promotion gate three-way merge, Tier-2/3
-stores, judge/clerk, StandingRules/TrustRecords, taint dimensions
-(currently fail closed by design).
+**Milestone 3 — promotion gate + branch topology: complete.**
+Sessions run on a branch (materialized fork of the manifest's roots);
+trunk changes only at promotion. The gate (§5.3): span verification →
+trace-vs-capability re-check (a run that exceeded its token merges
+nothing) → per-store three-way merge with trunk-wins conflicts and
+add/modify/delete/move/rename operation classes (rename detection: a
+reorganization never renders as mass deletion) → zero-authorship policy
+(clean additive runs auto-promote; anything destructive or conflicted
+parks for `asf approve`). Promoted changes remain revertible. Operator
+commands: `asf revert / ledger / stats` (stats prints the ADR 0002
+tripwire numbers). Property tests cover merge identities, conflict
+soundness, glob-cover soundness (exhaustive), and the attenuation
+semantic-subset property (ADR 0004, testing-theory G1).
+
+Still open for later milestones: Tier-2/3 stores, judge/clerk,
+StandingRules/TrustRecords, taint dimensions (currently fail closed by
+design), `tools/list_changed` on mid-session re-manifest.
 
 ## Build & run
 
@@ -53,4 +67,5 @@ unknown dimensions.
 ## Layout
 
 See [docs/adr/0001-language-and-repo-layout.md](docs/adr/0001-language-and-repo-layout.md)
-for the language decision (Rust) and module map.
+for the language decision (Rust) and module map. Testing philosophy and the
+deep-dive agenda live in [docs/testing-theory.md](docs/testing-theory.md).

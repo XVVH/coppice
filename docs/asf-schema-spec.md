@@ -1,14 +1,14 @@
 # Agent State Fabric — Schema Specification
 
-**Draft v0.3 — July 2026 — Companion to the Architecture Brief**
+**Draft v0.4 — July 2026 — Companion to the Architecture Brief**
 
-*v0.3 integrates amendments A1–A14 from the wedge paper runs (Hermes agent; workflows: web research → vault distillation, Discord message management, vault maintenance). Changelog at end. Risk-review requirements carried since v0.1: **(R2)** read authority is first-class, **(R3)** payloads are hash-referenced and destroyable, **(R6)** trust is domain-scoped, never scalar.*
+*v0.3 integrated amendments A1–A14 from the wedge paper runs (Hermes agent; workflows: web research → vault distillation, Discord message management, vault maintenance). v0.4 integrates A15–A19 from the Stage 1–3 reference implementation (Coppice): the first amendments forced by running code rather than paper runs. Every A15–A19 decision traces to the implementation sessions via `docs/spec-issues.md` (SI-1…SI-19, all resolved in this version). Changelog at end. Risk-review requirements carried since v0.1: **(R2)** read authority is first-class, **(R3)** payloads are hash-referenced and destroyable, **(R6)** trust is domain-scoped, never scalar.*
 
 ---
 
 ## 0. Conventions
 
-- **Serialization:** canonical JSON (JCS, RFC 8785). Every object's `id` is the SHA-256 of its canonical body excluding `sig`. All cross-references are by id; lineage is tamper-evident by construction.
+- **Serialization:** canonical JSON (JCS, RFC 8785). Every object's `id` is `<prefix>:<hex sha256>` of its canonical body excluding **both `id` and `sig`** (A19); the Ed25519 signature covers those same body bytes, so id-check and signature-check attest identical content. Numbers in fabric objects MUST be integers with |n| < 2^53 and floats are forbidden (A16): RFC 8785 serializes numbers ECMAScript-style, which diverges across implementations beyond that range. All cross-references are by id; lineage is tamper-evident by construction.
 - **Signatures:** Ed25519. `sig: { key_id, alg, value }`. Key hierarchy §8.
 - **Timestamps:** RFC 3339 UTC.
 - **Extensibility:** unknown fields MUST be preserved and hashed; unknown *caveat dimensions* MUST fail closed (an unrecognized restriction cannot be safely ignored).
@@ -27,6 +27,8 @@ PayloadRef { "hash": "sha256:…", "size": 18742,
 **Erasure = crypto-shredding.** Destroying the per-payload DEK destroys content everywhere at once; hash and lineage persist. A destroyed payload resolves to a tombstone `{hash, shredded_at, reason}`. Substance is destroyable; structure is not.
 
 **Redactable inline fields.** Objects carrying small structured summaries mark fields `redactable`; redaction replaces the value with a salted commitment `{"redacted": "sha256:salt‖value"}` via tombstone-and-reissue (§8.4), preserving hash chains.
+
+**Cipher suite (A19).** v1 payload encryption and DEK wrapping are AES-256-GCM; each DEK record carries its `alg`, so the suite is per-payload upgradable without a schema change.
 
 ## 2. Principals
 
@@ -56,6 +58,7 @@ Channel { "id": "chan:…", "principal": "prin:… (human)",
 - **C3** Fabric→user messages are signed and verifiable as fabric-originated.
 - **C4** Outbound delivery to a channel is egress. Derived-sensitive content (§4) inherits the channel's zero-authorship ceiling: full detail on `local_session`/`passkey` surfaces; summary-with-deep-link on weaker ones. Overrides ride the ratchet as `delivery.detail` rules only.
 - **C5 — Sender binding (A6).** A message from an unregistered sender on a registered transport (e.g., a stranger messaging the Telegram bot) is not a weaker instruction; it is not an instruction at all. It is data: logged, ignored, surfaced as signal.
+- **C6 — Auth-strength order (A19).** Wherever strengths are compared (`approval.min_auth`, expanding amendments): `unverified < platform_oauth < passkey = local_session` — C4 already groups the last two as the strong tier. Unrankable strengths fail closed.
 
 ## 3. DelegationManifest
 
@@ -88,6 +91,8 @@ Manifest {
 - **M4** `behavior.bundle` matches the bundle actually loaded; runtime attests at first tool call.
 - **M5 — Re-manifest on behavior change (A2).** A bundle change mid-run (skill created or hot-loaded) triggers, at the next step boundary, a self-delegation: child manifest, new behavior hash, same capability (attenuation-identity is legal). Even self-modification has lineage; the trace shows which steps ran under which behavior.
 - **M6 — Small manifests (A11 guidance).** Prefer frequent re-manifesting over long-lived branches; promotion divergence (§5.3) grows with branch age, and M5 makes re-baselining cheap.
+- **M7 — Observed runs (A19).** `authority` is optional. A manifest without it denotes an *observed* run: snapshots, trace, drift attribution, and revert apply in full; no broker enforcement exists, and the manifest itself makes that ledger-visible. M1/M2 bind whenever a capability exists. Stage 2's observe-everything shipping posture is this mode by construction.
+- **Root encoding (A16 interim).** State roots become CIDv1 (F2, §9); `sha256:<hex>` is the sanctioned interim encoding until the F2 execution checkpoint. Readers MUST accept both during the transition. sqlite roots are the checkpointed main-file byte image in the interim; page-aligned chunked DAGs at F2 execution.
 
 ### 3.1 IntentArtifact
 
@@ -103,6 +108,8 @@ Intent { "id": "int:…", "principal": "prin:… (human)", "created_at": "…",
          "amends": "int:… | null",
          "sig": { … } }
 ```
+
+**Capture proof (A19).** `captured_before` is a convenience field; the *proof* of pre-contamination is the substrate `intent` event (§6) countersigning the intent id at its actual offset. Verifiers MUST check the event, not trust the field.
 
 **Amendments.** Mid-run instructions are amendments — signed, channel-stamped, offset-stamped, chained via `amends`; the judge evaluates against the chain. **Directionality rule:** narrowing amendments are accepted from any registered channel; *expanding* amendments (new recipients, new stores, higher budgets, wider destructive scope) require `auth_strength ≥` the capability's `approval.min_auth`, else they park queued. Expansion is the attack direction; narrowing is free. Text without channel provenance (e.g., inside fetched content, claiming to speak for the user) is not an amendment; it is data.
 
@@ -132,6 +139,7 @@ Tool { "id": "tool:discord@1.0",
 
 **Registration rules.**
 - Undeclared actions cannot be called. Missing `reversibility` = `irreversible`.
+- **Enforcement bindings (A19).** Each action declares `store` (which registered store it operates on — the input to the M1 check at mint time), `class` (its action class for `budget.count` metering and §5.3 `ops` matching), and `path_args` (which argument fields carry write paths, for `paths.write` extraction). Declared, trusted-mechanical, same tier as `writes`.
 - **Egress declaration.** Any action whose reads can carry outbound content MUST declare `egress: true`; undeclared egress fails closed.
 - **Surface class (A10).** `surface: open` (arbitrary hosts / URL-shaped exfiltration possible — full egress caveat family applies) vs `fixed` (single-host, schema-constrained API — external-but-contained; egress caveats relax to recipient/budget control).
 - **Audience visibility (A4).** `visibility: human_audience` marks actions whose effects humans will read. Orthogonal to reversibility: a deletable message is still socially irreversible once seen. Judge scrutiny and `approval.min_auth` zero-authorship defaults elevate on it.
@@ -190,14 +198,18 @@ Mechanically checkable at call time; conjunctive; unknown dims fail closed. The 
 
 Per dimension, the child's permitted set MUST be a subset of the parent's: caps ≤, windows within, globs narrower, allowlists ⊆, reversibility no worse, expiry no later. Absent-in-parent = unrestricted there; children may add dimensions, never remove or widen. Verification is mechanical subset-checking; failure invalidates the capability outright.
 
+**Glob dialect (A19).** Path globs use `**` (any depth) and `*` (within one segment). "Narrower" is verified conservatively: a child glob counts as covered only when provably so (identical; parent `**`; parent `literal/**` whose prefix covers the child). Anything else is not-a-subset — fail closed; rewrite the child glob plainly rather than cleverly.
+
 ### 5.3 Promotion (A11, A12, A13)
 
 Promotion merges a completed branch to trunk and is the only mutation in the system.
 
 - **Merge semantics (A11).** Three-way merge: base = the manifest's state root; reconcile agent branch and current trunk against it. **Conflicts never auto-resolve in the agent's favor** — human trunk edits win by default; true collisions surface as conflict cards. Snapshot ancestry survives the merge: promoted changes remain revertible.
+- **Opaque stores (A19).** Stores with no sub-file merge (the agent memory db) merge whole-store: a branch-only change installs the branch image (class `modify`); divergence on both sides is a single conflict card, trunk wins, the branch image stays CAS-reachable. Cross-run memory taint (A3) concentrates exactly at this promotion point; the gap remains open and named.
 - **Coherent revert.** Revert restores *all* state roots of the manifest atomically — vault and agent memory together — so undo never gaslights the agent with a world its memory contradicts. (This is the cross-layer-consistency thesis, operational.)
-- **Operation classes (A13).** Diffs and rules speak `add | modify | delete | move | rename`, with rename detection — a reorganization must never render as mass deletion; that failure of legibility either blocks good work or habituates users to scary diffs.
-- **Promotion rules (A13).** Gate decisions are caveat-shaped (paths, operation classes, sizes), so auto-promotion rules are StandingRules in the same grammar — e.g., auto-merge iff paths ⊆ {/inbox, /MOCs}, ops ⊆ {add, modify, link}, no deletes — ratcheted from early manual approvals. Low-stakes by construction: Tier-1 promotion is always revertible.
+- **Operation classes (A13, definitions A17).** Diffs and rules speak `add | modify | delete | move | rename`, with rename detection — a reorganization must never render as mass deletion; that failure of legibility either blocks good work or habituates users to scary diffs. Definitions: `rename` = same content, same parent directory, new name; `move` = same content, new parent directory. Classes are ordered `rename < move`: a rule allowing `move` allows `rename`, never the reverse. Detection at the authority layer is exact-hash and unambiguous-pairs-only; similarity heuristics MAY annotate diff cards for legibility but never produce a class rules can match — a heuristic class is a gameable class.
+- **Class extensibility (A18).** The vocabulary extends by refinement only: `<root>.<refinement>` adds a predicate to (never replaces) one of the five structural roots, so a wrong predicate degrades to its parent class. Rules allowing a root allow its refinements; unknown classes fail closed at ratification and at the gate. Content-aware refinements require registered, versioned classifiers, and rules pin the classifier versions they were ratified under (the A1 pattern applied to classifiers).
+- **Promotion rules (A13).** Gate decisions are caveat-shaped (paths, operation classes, sizes), so auto-promotion rules are StandingRules in the same grammar — e.g., auto-merge iff paths ⊆ {/inbox, /MOCs}, ops ⊆ {add, modify}, no deletes — ratcheted from early manual approvals. Low-stakes by construction: Tier-1 promotion is always revertible.
 - **Trace-vs-capability check.** At the gate, the recorded trace is verified against the capability — did the run do anything its token shouldn't allow — before anything becomes durable.
 
 ## 6. TraceEvent
@@ -209,15 +221,20 @@ Event { "id": "evt:…", "span": "span:…", "seq": 41, "prev": "evt:…",
         "manifest": "man:…", "at": "…",
         "kind": "tool_call" | "verdict" | "escalation" | "ratification" | "promotion"
               | "revert" | "compensation" | "grant" | "expiry" | "snapshot"
-              | "drift" | "shred" | "amendment" | "remanifest",
+              | "drift" | "shred" | "amendment" | "remanifest"
+              | "register" | "intent" | "approval",
         "body": { … }, "sig": { … } }
 ```
 
+**Registration and capture events (A15).** `register` records an object joining the fabric — `{object, object_kind}` for principals, channels, tools. `intent` countersigns intent capture into the substrate — `{intent, channel, auth_strength, captured_before}` (this event is what makes §3.1's capture proof real). `approval` records the resolution of an escalation or parked promotion — `{escalation | promotion, resolution, uses?, channel, auth_strength}` per C1. **Objects are materialized views of the event stream:** an object is live only once its register event is on a chain; a stored object row without one fails closed. Events standing outside any manifest (registrations, intent capture, drift between runs) belong to the fabric-lifetime span with `manifest: null`. Chain heads have `prev: null`, `seq: 0`.
+
 **tool_call body:** `{ tool, action, args: PayloadRef, result: PayloadRef, summary: {…redactable, caveat-relevant extract only (F4 default: fields the capability's caveats actually reference)}, checks: [{caveat, ok, meter}], reversibility, compensator, mirror_content: PayloadRef?, state_root_after }`.
+
+**verdict body (A19):** carries `source` — `"broker"` for layer-1 mechanical denials (full `checks` attached), `"judge"` for layer-3 model verdicts (brief §5.4). One kind, one query surface, per-layer attribution.
 
 **escalation body — batching (A9):** violations aggregate per (caveat, action_class): `{ count: 28, sample: [5 refs], guard_status: "all_pass" }` → one approval covers the batch. Twenty-eight pings is the R1 fatigue machine rebuilt; one legible batch is not.
 
-**drift body — attribution classes (A12):** `{ store, expected_root, observed_root, between, attribution: "human_local" | "tool_known" | "unattributed" }`. Zero-authorship default for the solo operator: local edits outside agent spans attribute quietly to the human (logged, not alerted); only `unattributed` drift is loud. In a co-edited vault drift is Tuesday, not an incident.
+**drift body — attribution classes (A12):** `{ store, expected_root, observed_root, between: [offset_lo, offset_hi], attribution: "human_local" | "tool_known" | "unattributed" }` — `between` brackets the unobserved change in substrate offsets (A19). Zero-authorship default for the solo operator: local edits outside agent spans attribute quietly to the human (logged, not alerted); only `unattributed` drift is loud. In a co-edited vault drift is Tuesday, not an incident.
 
 **Human-originated events** (approvals, ratifications) carry `{ channel, auth_strength }` per C1.
 
@@ -268,7 +285,7 @@ Not a score: raw, trace-backed counters per (principal, domain, skill-version). 
 
 ## 8. Keys, signing, lineage
 
-**8.1 Hierarchy.** User root (device-held, passkey-backed) → Principals, Intents. Broker key → events, capabilities, tool countersignatures. Agent instance keys → runtime attestations (M4). Org mode adds an org root; nothing else changes.
+**8.1 Hierarchy.** User root (device-held, passkey-backed) → Principals (human), Intents. Broker/fabric key → events, capabilities, tool countersignatures, **manifests, channel registrations, non-human principals** (A19 — the component that constructs a record at the step boundary signs it). Agent instance keys → runtime attestations (M4). Org mode adds an org root; nothing else changes.
 
 **8.2 KEK/DEK.** Per-payload DEKs wrapped to owners' KEKs; multi-actor visibility is key distribution — asymmetric visibility (attribution without panopticon) implementable in cryptography, policy deferred, mechanism reserved.
 
@@ -279,7 +296,7 @@ Not a score: raw, trace-backed counters per (principal, domain, skill-version). 
 ## 9. Forks
 
 - **F1 — resolved (v1):** broker-minted capabilities. Central, revocable, meterable; format stays compatible with offline attenuation (the `parent` chain + §5.2); revisit when deep delegation trees arrive and metering has an answer.
-- **F2 — open:** JCS-everywhere vs IPLD/CIDs for state roots. Decide before the spec goes public.
+- **F2 — resolved in direction (A16; ADR 0002 in the reference implementation):** the control plane stays JCS (with the §0 integer rule); state roots become CIDv1 over DAG-CBOR tree nodes with raw leaf blobs and chunked large objects (sqlite chunked on page boundaries). `sha256:<hex>` is the sanctioned interim root encoding until the execution checkpoint (post-dogfooding storage tripwires); readers MUST accept both during the transition. Scope fence: CIDs ≠ IPFS — an addressing/serialization format only; no DHT, no gateways, no sync protocol.
 - **F3 — partially resolved:** sensitivity derived (domain defaults × taint propagation), ceilings from channel strength. Only finer-than-domain granularity remains open.
 - **F4 — resolved (default):** `summary` carries only fields the capability's caveats reference — minimization is automatic because the consent-relevant extract is definitionally the caveat-relevant extract. All fields redactable. Per-tool overrides possible at registration.
 
@@ -293,10 +310,16 @@ Not a score: raw, trace-backed counters per (principal, domain, skill-version). 
 4. Run: each tool call traced with checks, meters, summary, `state_root_after`. Unknown-recipient draft → escalation → one-tap approval (channel-stamped). Third similar approval this month → clerk drafts a rule (k=3, least-general, counterfactuals attached, domain-matched, domain-scoped pin) for ratification at `approval.min_auth`.
 5. Promotion gate: trace re-verified against capability; three-way merge to trunk; promotion event. Sixty days on, email payloads hit TTL → shred events. The run stays forever explainable, no longer readable.
 
+## Changelog — v0.4 (amendments A15–A19)
+
+*First amendments forced by running code (Coppice, Stage 1–3). Full per-issue provenance in `docs/spec-issues.md` (SI-1…SI-19); design exchanges in the implementation sessions of 2026-07-08/09.*
+
+A15 registration/capture/approval event kinds, objects-as-materialized-views fail-closed rule, fabric-lifetime span, chain-head `prev: null`/`seq: 0` (SI-4, SI-5, SI-10, SI-11, SI-13) · A16 F2 resolved in direction — JCS control plane with the §0 integer rule, CID/DAG-CBOR data plane, interim `sha256:` root encoding (SI-6; F2) · A17 move/rename definitions, `rename < move` ordering, exact-hash authority layer with similarity as display-annotation only (SI-17) · A18 `link` removed from the §5.3 example; refinement-only class extensibility with pinned classifiers (SI-19) · A19 conformance sweep — id/signature hashing precision (SI-1, SI-2), signer assignments (SI-3), cipher suite naming (SI-9), auth-strength order C6 (SI-15), observed-run manifests M7 (SI-7), §4 enforcement bindings (SI-16), conservative glob dialect (SI-12), verdict `source` field (SI-14), drift `between` offsets (SI-8), opaque-store merge (SI-18).
+
 ## Changelog — v0.3 (amendments A1–A14)
 
 A1 domain-scoped behavior pinning · A2 re-manifest on bundle change (M5) · A3 cross-run memory taint named as open problem (§6.1) · A4 `visibility: human_audience` · A5 StandingIntent (§3.2) · A6 sender binding C5, `local_session` tier, daemon-owned approval surface in C2 · A7 platform-truthful per-action reversibility, mirror-freshness preconditions, mirror-as-only-undo, recipient scope classes · A8 broker-verified object guards · A9 batch escalation · A10 `surface: fixed|open` · A11 three-way merge, agent-never-wins conflicts, small-manifests guidance (M6) · A12 drift attribution classes · A13 operation classes + promotion rules as StandingRules · A14 derived-content provenance stamps.
 
 ---
 
-*Status: v0.3, post-wedge. The grammar survived three dissimilar workflows with amendments but no redesign; next pressure comes from code, not paper.*
+*Status: v0.4, post-implementation of Stages 1–3. v0.3's grammar survived three dissimilar paper workflows with amendments but no redesign; v0.4's amendments came from running code and again cluster on precision, not missing concepts — the compositional-grammar thesis is holding. Next pressure comes from dogfooding.*

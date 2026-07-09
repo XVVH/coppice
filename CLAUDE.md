@@ -4,8 +4,10 @@ Neutral, agent-agnostic state fabric: delegation manifests binding four lineages
 (state, authority, behavior, trace), snapshot-backed undo for owned state, brokered
 capabilities for external effects, human-ratified compilation loops (skills up,
 caveats down). Read `docs/agent-state-fabric-brief.md` (why/what, v0.2) and
-`docs/asf-schema-spec.md` (the constitution, v0.3) before writing any code.
-The spec wins over this file wherever they disagree.
+`docs/asf-schema-spec.md` (the constitution, v0.4) before writing any code.
+The spec wins over this file wherever they disagree. Spec ambiguities found
+while implementing go to `docs/spec-issues.md` (never silently interpret);
+SI-1…SI-19 are resolved in v0.4, new issues start at SI-20.
 
 ## Current build target — Stage 1 (Kernel) + Stage 2 (Spine)
 

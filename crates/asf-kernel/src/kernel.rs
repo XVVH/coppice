@@ -50,6 +50,10 @@ pub struct Fabric {
     fabric_sk: SigningKey,
     user_sk: SigningKey,
     substrate_span: String,
+    home: std::path::PathBuf,
+    /// When set, the agent's writes land here instead of the live stores
+    /// (store name → branch path); tool_call events capture branch roots.
+    branch: Option<std::collections::BTreeMap<String, std::path::PathBuf>>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +107,20 @@ impl Fabric {
                 s
             }
         };
+        // Persist store specs so operator tools can reopen this home
+        // without re-supplying the topology (asf revert/ledger/stats).
+        let stores_json = serde_json::to_string(
+            &stores
+                .iter()
+                .map(|s| {
+                    json!({ "store": s.store, "tier": s.tier,
+                            "kind": s.kind.as_str(), "path": s.path })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .expect("stores serialize");
+        trace::meta_set(&conn, "stores", &stores_json)?;
+
         Ok(Self {
             conn,
             cas,
@@ -112,7 +130,76 @@ impl Fabric {
             fabric_sk,
             user_sk,
             substrate_span,
+            home: dir.to_path_buf(),
+            branch: None,
         })
+    }
+
+    /// Reopen an existing fabric home using the store topology persisted
+    /// at first open. Errors if the home was never initialized.
+    pub fn open_existing(dir: impl AsRef<Path>) -> Result<Self, KernelError> {
+        let dir = dir.as_ref();
+        let conn = Connection::open(dir.join("fabric.db"))?;
+        let raw = trace::meta_get(&conn, "stores")?
+            .ok_or_else(|| KernelError::UnknownStore("no stores recorded in this home".into()))?;
+        drop(conn);
+        let specs: Vec<Value> = serde_json::from_str(&raw).expect("stored specs are valid JSON");
+        let stores = specs
+            .iter()
+            .map(|s| StoreSpec {
+                store: s["store"].as_str().unwrap_or_default().to_string(),
+                tier: s["tier"].as_u64().unwrap_or(1) as u8,
+                kind: if s["kind"] == "sqlite" {
+                    crate::snapshot::StoreKind::Sqlite
+                } else {
+                    crate::snapshot::StoreKind::Fs
+                },
+                path: std::path::PathBuf::from(s["path"].as_str().unwrap_or_default()),
+            })
+            .collect();
+        Self::open(dir, stores)
+    }
+
+    /// Fork a manifest's state into a working branch (brief §3 principle 2:
+    /// working state lives on branches; promotion is the only mutation).
+    /// Materializes every root under `<home>/branches/<manifest>/` and
+    /// switches tool-call capture to the branch. Returns store → path.
+    pub fn create_branch(
+        &mut self,
+        manifest_id: &str,
+    ) -> Result<std::collections::BTreeMap<String, std::path::PathBuf>, KernelError> {
+        let man = trace::get_object(&self.conn, manifest_id)?;
+        let short = manifest_id.strip_prefix("man:").unwrap_or(manifest_id);
+        let base = self.home.join("branches").join(&short[..12.min(short.len())]);
+        let mut map = std::collections::BTreeMap::new();
+        for r in man["state"]["roots"].as_array().into_iter().flatten() {
+            let store = r["store"].as_str().unwrap_or_default().to_string();
+            let root = r["root"].as_str().unwrap_or_default();
+            let spec = self.store(&store)?.clone();
+            let dest = base.join(store.replace([':', '/'], "_"));
+            if dest.exists() {
+                if dest.is_dir() {
+                    std::fs::remove_dir_all(&dest).ok();
+                } else {
+                    std::fs::remove_file(&dest).ok();
+                }
+            }
+            match spec.kind {
+                crate::snapshot::StoreKind::Fs => {
+                    snapshot::materialize_fs(&self.cas, root, &dest)?
+                }
+                crate::snapshot::StoreKind::Sqlite => {
+                    snapshot::materialize_sqlite(&self.cas, root, &dest)?
+                }
+            }
+            map.insert(store, dest);
+        }
+        self.branch = Some(map.clone());
+        Ok(map)
+    }
+
+    pub fn branch_paths(&self) -> Option<&std::collections::BTreeMap<String, std::path::PathBuf>> {
+        self.branch.as_ref()
     }
 
     pub(crate) fn fabric_sk(&self) -> &SigningKey {
@@ -317,6 +404,15 @@ impl Fabric {
         Ok(reports)
     }
 
+    pub(crate) fn set_expected_root(
+        &self,
+        store: &str,
+        root: &str,
+        offset: i64,
+    ) -> Result<(), KernelError> {
+        self.set_expected(store, root, offset)
+    }
+
     fn set_expected(&self, store: &str, root: &str, offset: i64) -> Result<(), KernelError> {
         self.conn.execute(
             "INSERT INTO expected_roots (store, root, since_offset) VALUES (?1,?2,?3)
@@ -457,12 +553,31 @@ impl Fabric {
         let result_ref =
             payload::put(&self.conn, &self.kek, result, "application/json", &now_rfc3339())?;
 
+        // Branched runs capture the agent's world (the branch) under
+        // "branch:" keys and leave trunk expectations alone — trunk only
+        // moves at promotion. Unbranched runs capture live stores.
         let mut roots_after = Map::new();
-        for spec in &self.stores {
-            roots_after.insert(
-                spec.store.clone(),
-                Value::String(snapshot::capture(&self.cas, spec)?),
-            );
+        match &self.branch {
+            Some(branch) => {
+                for spec in &self.stores {
+                    if let Some(bpath) = branch.get(&spec.store) {
+                        let mut bspec = spec.clone();
+                        bspec.path = bpath.clone();
+                        roots_after.insert(
+                            format!("branch:{}", spec.store),
+                            Value::String(snapshot::capture(&self.cas, &bspec)?),
+                        );
+                    }
+                }
+            }
+            None => {
+                for spec in &self.stores {
+                    roots_after.insert(
+                        spec.store.clone(),
+                        Value::String(snapshot::capture(&self.cas, spec)?),
+                    );
+                }
+            }
         }
 
         let ev = trace::append(
@@ -485,6 +600,9 @@ impl Fabric {
             &now_rfc3339(),
         )?;
         for (store, root) in &roots_after {
+            if store.starts_with("branch:") {
+                continue; // trunk expectations move only at promotion
+            }
             self.set_expected(store, root.as_str().expect("root is string"), ev.offset)?;
         }
         Ok(ev)
@@ -628,7 +746,11 @@ impl Fabric {
                 "tool_call" => {
                     if let Some(after) = body["state_root_after"].as_object() {
                         for (store, root) in after {
-                            roots.insert(store.clone(), root.as_str().unwrap_or("?").into());
+                            // "branch:" roots are the agent's fork, not
+                            // trunk state; trunk moves at promotion.
+                            if !store.starts_with("branch:") {
+                                roots.insert(store.clone(), root.as_str().unwrap_or("?").into());
+                            }
                         }
                     }
                     format!(
@@ -670,6 +792,23 @@ impl Fabric {
                     short(body["payload_hash"].as_str().unwrap_or("?")),
                     body["reason"].as_str().unwrap_or("?")
                 ),
+                "promotion" => {
+                    let mut parts = Vec::new();
+                    for s in body["stores"].as_array().into_iter().flatten() {
+                        let store = s["store"].as_str().unwrap_or("?").to_string();
+                        let merged = s["merged"].as_str().unwrap_or("?").to_string();
+                        roots.insert(store.clone(), merged.clone());
+                        parts.push(format!("{store}={}", short(&merged)));
+                    }
+                    format!(
+                        "PROMOTED manifest {} to trunk [{}] — {} op(s), {} conflict(s), policy {}",
+                        body["manifest"].as_str().unwrap_or("?"),
+                        parts.join(", "),
+                        body["ops"].as_array().map(Vec::len).unwrap_or(0),
+                        body["conflicts"].as_array().map(Vec::len).unwrap_or(0),
+                        body["policy"].as_str().unwrap_or("?")
+                    )
+                }
                 "grant" => format!(
                     "capability {} granted{}",
                     body["capability"].as_str().unwrap_or("?"),

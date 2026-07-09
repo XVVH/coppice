@@ -12,6 +12,7 @@ pub mod evaluate;
 pub mod keys;
 pub mod kernel;
 pub mod payload;
+pub mod promote;
 pub mod snapshot;
 pub mod tools;
 pub mod trace;

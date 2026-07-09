@@ -73,6 +73,10 @@ pub struct Session {
     pub broker: Arc<Mutex<Broker>>,
     pub cap: String,
     pub channel: String,
+    pub manifest: String,
+    /// store → branch path. The agent's whole session runs on this fork;
+    /// trunk only changes at promotion (brief §3 principle 2).
+    pub branch: std::collections::BTreeMap<String, std::path::PathBuf>,
 }
 
 /// Open (bootstrapping on first run) the fabric home and start a session:
@@ -118,6 +122,10 @@ pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
     for d in &step.drift {
         eprintln!("asfd: drift in {} attributed {} (ledger evt {})", d.store, d.attribution, d.event_id);
     }
+    // Fork the session's working state: the downstream tool server gets
+    // pointed at the branch; the live vault is trunk, mutated only by the
+    // human and by promotion.
+    let branch = fabric.create_branch(&step.manifest)?;
 
     let mut broker = Broker::new(fabric)?;
     if trace::meta_get(&broker.fabric.conn, "tool_registered")?.is_none() {
@@ -129,11 +137,17 @@ pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
         .format(&time::format_description::well_known::Rfc3339)?;
     let cap = broker.mint(&step.manifest, &agent, caveats, escalatable, &expires)?;
     eprintln!("asfd: session manifest {} cap {cap}", step.manifest);
+    eprintln!(
+        "asfd: branch at {}",
+        branch.get("fs:vault").map(|p| p.display().to_string()).unwrap_or_default()
+    );
 
     Ok(Session {
         broker: Arc::new(Mutex::new(broker)),
         cap,
         channel,
+        manifest: step.manifest,
+        branch,
     })
 }
 
@@ -167,33 +181,49 @@ fn spawn_approval_surface(
                 Err(_) => continue,
             };
             let mut b = broker.lock().expect("broker lock");
-            let reply = match req["cmd"].as_str() {
-                Some("list") => match b.list_escalations("pending") {
-                    Ok(v) => json!({ "ok": true, "escalations": v }),
-                    Err(e) => json!({ "ok": false, "error": e.to_string() }),
-                },
-                Some("approve") => {
-                    let id = req["id"].as_i64().unwrap_or(-1);
-                    let uses = req["uses"].as_i64().unwrap_or(1);
-                    match b.approve_escalation(id, uses, &channel, "local_session") {
-                        Ok(()) => json!({ "ok": true }),
-                        Err(e) => json!({ "ok": false, "error": e.to_string() }),
-                    }
-                }
-                Some("deny") => {
-                    let id = req["id"].as_i64().unwrap_or(-1);
-                    match b.deny_escalation(id, &channel, "local_session") {
-                        Ok(()) => json!({ "ok": true }),
-                        Err(e) => json!({ "ok": false, "error": e.to_string() }),
-                    }
-                }
-                _ => json!({ "ok": false, "error": "unknown cmd" }),
-            };
+            let reply = dispatch_approval_cmd(&mut b, &req, &channel);
             drop(b);
             let _ = writeln!(stream, "{reply}");
         }
     });
     Ok(())
+}
+
+/// One command dispatcher for both C2 surfaces: the daemon socket and the
+/// offline `asf approve` fallback. Everything here is local_session by
+/// construction (same-machine, operating-user-only paths).
+fn dispatch_approval_cmd(b: &mut Broker, req: &Value, channel: &str) -> Value {
+    let id = req["id"].as_i64().unwrap_or(-1);
+    match req["cmd"].as_str() {
+        Some("list") => match b.list_escalations("pending") {
+            Ok(v) => json!({ "ok": true, "escalations": v }),
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        },
+        Some("approve") => {
+            let uses = req["uses"].as_i64().unwrap_or(1);
+            match b.approve_escalation(id, uses, channel, "local_session") {
+                Ok(()) => json!({ "ok": true }),
+                Err(e) => json!({ "ok": false, "error": e.to_string() }),
+            }
+        }
+        Some("deny") => match b.deny_escalation(id, channel, "local_session") {
+            Ok(()) => json!({ "ok": true }),
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        },
+        Some("promotions") => match b.list_promotions("pending") {
+            Ok(v) => json!({ "ok": true, "promotions": v }),
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        },
+        Some("promote") => match b.approve_promotion(id, channel, "local_session") {
+            Ok(event) => json!({ "ok": true, "event": event }),
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        },
+        Some("reject") => match b.reject_promotion(id, channel, "local_session") {
+            Ok(()) => json!({ "ok": true }),
+            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+        },
+        _ => json!({ "ok": false, "error": "unknown cmd" }),
+    }
 }
 
 /// Should `action_name` be advertised to the agent at all?
@@ -265,6 +295,20 @@ fn filter_tools_result(broker: &Broker, cap_id: &str, mut resp: Value) -> Value 
 pub fn run(home: PathBuf, vault: PathBuf, downstream: Vec<String>) -> Result<()> {
     let session = bootstrap(&home, &vault)?;
     spawn_approval_surface(&home, session.broker.clone(), session.channel.clone())?;
+
+    // Point the downstream tool server at the session branch: any argument
+    // naming the live vault path is rewritten to the branch path. The
+    // downstream never learns where trunk lives.
+    let branch_vault = session.branch.get("fs:vault").cloned();
+    let downstream: Vec<String> = downstream
+        .into_iter()
+        .map(|arg| {
+            match (&branch_vault, arg == vault.to_string_lossy()) {
+                (Some(b), true) => b.to_string_lossy().into_owned(),
+                _ => arg,
+            }
+        })
+        .collect();
 
     let mut child: Child = Command::new(&downstream[0])
         .args(&downstream[1..])
@@ -372,26 +416,60 @@ pub fn run(home: PathBuf, vault: PathBuf, downstream: Vec<String>) -> Result<()>
         }
     }
 
+    // Session over: the branch faces the gate. §5.3 — trace verified
+    // against capability, three-way merge, zero-authorship policy; clean
+    // additive runs land, anything else parks for `asf approve`.
+    {
+        let mut b = session.broker.lock().expect("broker lock");
+        match b.promote_manifest(&session.manifest, &session.branch) {
+            Ok(asf_kernel::broker::PromotionOutcome::Applied { event }) => {
+                eprintln!("asfd: session promoted to trunk ({event})");
+            }
+            Ok(asf_kernel::broker::PromotionOutcome::Parked { promotion }) => {
+                eprintln!(
+                    "asfd: promotion #{promotion} parked for approval — \
+                     `asf approve --home {} promotions`",
+                    home.display()
+                );
+            }
+            Err(e) => eprintln!("asfd: promotion blocked: {e}"),
+        }
+    }
+
     let _ = child.kill();
     Ok(())
 }
 
-/// `asf approve` — the human side of the C2 surface.
+/// `asf approve` — the human side of the C2 surface. Talks to the daemon
+/// socket when one is up; otherwise operates directly on the fabric home
+/// (same machine, same operating user: still a local_session surface —
+/// C2 forbids the *agent* carrying approvals, not offline operators).
 pub fn approve_cli(home: &Path, cmd: &str, id: Option<i64>, uses: i64) -> Result<()> {
     use std::os::unix::net::UnixStream;
-    let sock = home.join("approvals.sock");
-    let mut stream = UnixStream::connect(&sock)
-        .with_context(|| format!("no daemon at {} — is asf proxy running?", sock.display()))?;
     let req = match cmd {
         "list" => json!({ "cmd": "list" }),
         "approve" => json!({ "cmd": "approve", "id": id, "uses": uses }),
         "deny" => json!({ "cmd": "deny", "id": id }),
+        "promotions" => json!({ "cmd": "promotions" }),
+        "promote" => json!({ "cmd": "promote", "id": id }),
+        "reject" => json!({ "cmd": "reject", "id": id }),
         other => anyhow::bail!("unknown approve subcommand {other}"),
     };
-    writeln!(stream, "{req}")?;
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    println!("{}", line.trim());
+    let sock = home.join("approvals.sock");
+    if let Ok(mut stream) = UnixStream::connect(&sock) {
+        writeln!(stream, "{req}")?;
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        println!("{}", line.trim());
+        return Ok(());
+    }
+    // Offline: open the home directly.
+    let fabric = Fabric::open_existing(home.join("fabric"))
+        .with_context(|| format!("no daemon socket and no fabric home under {}", home.display()))?;
+    let channel = trace::meta_get(&fabric.conn, "channel")?
+        .unwrap_or_else(|| "chan:local".to_string());
+    let mut broker = Broker::new(fabric)?;
+    println!("{}", dispatch_approval_cmd(&mut broker, &req, &channel));
     Ok(())
 }

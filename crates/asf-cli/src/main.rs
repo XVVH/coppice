@@ -73,7 +73,7 @@ fn main() -> Result<()> {
             let home = flag(&args, "--home").context("approve needs --home <dir>")?;
             let sub = args.get(args.iter().position(|a| a == "--home").unwrap() + 2)
                 .map(String::as_str)
-                .context("approve needs list|approve <id>|deny <id>")?;
+                .context("approve needs list|approve <id>|deny <id>|promotions|promote <id>|reject <id>")?;
             let id = args
                 .iter()
                 .filter_map(|a| a.parse::<i64>().ok())
@@ -81,13 +81,120 @@ fn main() -> Result<()> {
             let uses = flag(&args, "--uses").and_then(|u| u.parse().ok()).unwrap_or(1);
             proxy::approve_cli(Path::new(&home), sub, id, uses)
         }
+        Some("revert") => {
+            let home = flag(&args, "--home").context("revert needs --home <dir>")?;
+            let manifest = args
+                .iter()
+                .find(|a| a.starts_with("man:"))
+                .context("revert needs a manifest id (man:…)")?
+                .clone();
+            let mut fabric = Fabric::open_existing(Path::new(&home).join("fabric"))?;
+            fabric.revert_to(&manifest)?;
+            println!("reverted all roots to {manifest}");
+            Ok(())
+        }
+        Some("ledger") => {
+            let home = flag(&args, "--home").context("ledger needs --home <dir>")?;
+            let mut fabric = Fabric::open_existing(Path::new(&home).join("fabric"))?;
+            // Attribute any out-of-band edits first so the accounting below
+            // is against a current picture, not a stale one.
+            for d in fabric.check_drift()? {
+                println!(
+                    "note: drift in {} attributed {} ({})",
+                    d.store, d.attribution, d.event_id
+                );
+            }
+            let explanation = fabric.explain()?;
+            for l in &explanation.lines {
+                println!("[{:>4}] {:<11} {}", l.offset, l.kind, l.line);
+            }
+            if explanation.unexplained.is_empty() {
+                println!("\nevery live root is explained by the ledger.");
+                Ok(())
+            } else {
+                bail!("UNEXPLAINED STATE: {:?}", explanation.unexplained)
+            }
+        }
+        Some("stats") => {
+            let home = flag(&args, "--home").context("stats needs --home <dir>")?;
+            stats(Path::new(&home))
+        }
         _ => {
             eprintln!(
-                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>"
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>"
             );
             std::process::exit(2);
         }
     }
+}
+
+/// The tripwire numbers (ADR 0002) plus general substrate health.
+fn stats(home: &Path) -> Result<()> {
+    let fabric_dir = home.join("fabric");
+    let conn = Connection::open(fabric_dir.join("fabric.db"))?;
+    println!("── events ──");
+    let mut stmt = conn.prepare("SELECT kind, COUNT(*) FROM events GROUP BY kind ORDER BY 2 DESC")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    let mut total = 0;
+    for row in rows {
+        let (kind, n) = row?;
+        total += n;
+        println!("  {kind:<12} {n}");
+    }
+    let spans: i64 = conn.query_row("SELECT COUNT(DISTINCT span) FROM events", [], |r| r.get(0))?;
+    println!("  total        {total} across {spans} span(s)");
+
+    println!("── objects ──");
+    let mut stmt = conn.prepare("SELECT kind, COUNT(*) FROM objects GROUP BY kind ORDER BY 2 DESC")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    for row in rows {
+        let (kind, n) = row?;
+        println!("  {kind:<12} {n}");
+    }
+
+    println!("── payloads ──");
+    let (n, bytes): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM payloads",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let tomb: i64 = conn.query_row("SELECT COUNT(*) FROM tombstones", [], |r| r.get(0))?;
+    println!("  {n} payload(s), {bytes} plaintext byte(s), {tomb} shredded");
+
+    println!("── storage (ADR 0002 tripwires) ──");
+    let mut cas_blobs = 0u64;
+    let mut cas_bytes = 0u64;
+    for entry in walk(&fabric_dir.join("cas")) {
+        cas_blobs += 1;
+        cas_bytes += entry;
+    }
+    let db_bytes = fs::metadata(fabric_dir.join("fabric.db")).map(|m| m.len()).unwrap_or(0);
+    println!("  CAS: {cas_blobs} blob(s), {} KiB", cas_bytes / 1024);
+    println!("  fabric.db: {} KiB", db_bytes / 1024);
+    let branches = fabric_dir
+        .join("branches")
+        .read_dir()
+        .map(|d| d.count())
+        .unwrap_or(0);
+    println!("  branches on disk: {branches}");
+    Ok(())
+}
+
+fn walk(dir: &Path) -> Vec<u64> {
+    let mut sizes = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if let Ok(m) = e.metadata() {
+                sizes.push(m.len());
+            }
+        }
+    }
+    sizes
 }
 
 fn banner(s: &str) {

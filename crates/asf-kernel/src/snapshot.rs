@@ -192,6 +192,87 @@ fn capture_sqlite(cas: &Cas, db_path: &Path) -> Result<String, SnapError> {
     cas.put(&bytes)
 }
 
+/// Load and parse a stored fs_tree object.
+pub fn load_tree_object(cas: &Cas, root: &str) -> Result<Value, SnapError> {
+    let bytes = cas.get(root)?;
+    serde_json::from_slice(&bytes).map_err(|_| SnapError::MalformedTree(root.into()))
+}
+
+/// Materialize an fs tree root into `dest` (created; must not be live —
+/// callers stage or branch, never write a live store directly).
+pub fn materialize_fs(cas: &Cas, root: &str, dest: &Path) -> Result<(), SnapError> {
+    let tree = load_tree_object(cas, root)?;
+    let entries = tree["entries"]
+        .as_array()
+        .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+    fs::create_dir_all(dest).map_err(io_err(dest))?;
+    for e in entries {
+        let (rel, hash) = (
+            e["path"].as_str().ok_or_else(|| SnapError::MalformedTree(root.into()))?,
+            e["hash"].as_str().ok_or_else(|| SnapError::MalformedTree(root.into()))?,
+        );
+        let target = dest.join(rel);
+        if let Some(p) = target.parent() {
+            fs::create_dir_all(p).map_err(io_err(p))?;
+        }
+        let content = cas.get(hash)?;
+        fs::write(&target, &content).map_err(io_err(&target))?;
+        #[cfg(unix)]
+        if e["mode"].as_str() == Some("755") {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+                .map_err(io_err(&target))?;
+        }
+    }
+    Ok(())
+}
+
+/// Materialize a sqlite byte-image root as a file at `dest`.
+pub fn materialize_sqlite(cas: &Cas, root: &str, dest: &Path) -> Result<(), SnapError> {
+    let bytes = cas.get(root)?;
+    if let Some(p) = dest.parent() {
+        fs::create_dir_all(p).map_err(io_err(p))?;
+    }
+    fs::write(dest, &bytes).map_err(io_err(dest))?;
+    Ok(())
+}
+
+/// Build (and store) an fs_tree object for a merged `path → hash` map,
+/// pulling per-entry metadata (mode, size) from the source tree objects
+/// in priority order. Every (path, hash) pair in a merge came from one of
+/// the sources, so lookup cannot miss on well-formed input.
+pub fn compose_tree(
+    cas: &Cas,
+    merged: &std::collections::BTreeMap<String, String>,
+    sources: &[&Value],
+) -> Result<String, SnapError> {
+    let mut entries: Vec<Value> = Vec::new();
+    'outer: for (path, hash) in merged {
+        // Exact (path, hash) match first (covers moves/renames via the
+        // side that has the new path), then any entry with this hash.
+        for pass in 0..2 {
+            for src in sources {
+                for e in src["entries"].as_array().into_iter().flatten() {
+                    let hash_match = e["hash"].as_str() == Some(hash.as_str());
+                    let path_match = e["path"].as_str() == Some(path.as_str());
+                    if hash_match && (path_match || pass == 1) {
+                        let mut entry = e.clone();
+                        entry["path"] = json!(path);
+                        entries.push(entry);
+                        continue 'outer;
+                    }
+                }
+            }
+        }
+        return Err(SnapError::MalformedTree(format!(
+            "merged entry {path}={hash} not found in any source tree"
+        )));
+    }
+    entries.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+    let tree = json!({ "kind": "fs_tree", "entries": entries });
+    cas.put(&serde_json_canonicalizer::to_vec(&tree).expect("tree serializes"))
+}
+
 /// A restore staged but not yet applied. Dropping it without `commit`
 /// leaves the live store untouched.
 pub struct PreparedRestore {
@@ -224,41 +305,8 @@ pub fn prepare_restore(
         }
     }
     match spec.kind {
-        StoreKind::Fs => {
-            let tree_bytes = cas.get(root)?;
-            let tree: Value = serde_json::from_slice(&tree_bytes)
-                .map_err(|_| SnapError::MalformedTree(root.into()))?;
-            let entries = tree["entries"]
-                .as_array()
-                .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
-            fs::create_dir_all(&staging).map_err(io_err(&staging))?;
-            for e in entries {
-                let (rel, hash) = (
-                    e["path"]
-                        .as_str()
-                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?,
-                    e["hash"]
-                        .as_str()
-                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?,
-                );
-                let dest = staging.join(rel);
-                if let Some(p) = dest.parent() {
-                    fs::create_dir_all(p).map_err(io_err(p))?;
-                }
-                let content = cas.get(hash)?;
-                fs::write(&dest, &content).map_err(io_err(&dest))?;
-                #[cfg(unix)]
-                if e["mode"].as_str() == Some("755") {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))
-                        .map_err(io_err(&dest))?;
-                }
-            }
-        }
-        StoreKind::Sqlite => {
-            let bytes = cas.get(root)?;
-            fs::write(&staging, &bytes).map_err(io_err(&staging))?;
-        }
+        StoreKind::Fs => materialize_fs(cas, root, &staging)?,
+        StoreKind::Sqlite => materialize_sqlite(cas, root, &staging)?,
     }
     Ok(PreparedRestore {
         spec: spec.clone(),

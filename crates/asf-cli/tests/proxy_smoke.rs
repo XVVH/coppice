@@ -11,7 +11,7 @@ use std::time::Duration;
 
 struct Proxy {
     child: Child,
-    stdin: std::process::ChildStdin,
+    stdin: Option<std::process::ChildStdin>,
     stdout: BufReader<std::process::ChildStdout>,
     next_id: i64,
 }
@@ -31,7 +31,7 @@ impl Proxy {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn proxy");
-        let stdin = child.stdin.take().unwrap();
+        let stdin = Some(child.stdin.take().unwrap());
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Self { child, stdin, stdout, next_id: 1 }
     }
@@ -40,8 +40,9 @@ impl Proxy {
         let id = self.next_id;
         self.next_id += 1;
         let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        writeln!(self.stdin, "{msg}").unwrap();
-        self.stdin.flush().unwrap();
+        let stdin = self.stdin.as_mut().expect("session still open");
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
         loop {
             let mut line = String::new();
             if self.stdout.read_line(&mut line).unwrap() == 0 {
@@ -59,6 +60,13 @@ impl Proxy {
 
     fn call_tool(&mut self, name: &str, args: Value) -> Value {
         self.request("tools/call", json!({ "name": name, "arguments": args }))["result"].clone()
+    }
+
+    /// End the session cleanly: EOF on stdin triggers the promotion gate,
+    /// then the daemon exits.
+    fn finish(mut self) {
+        drop(self.stdin.take());
+        let _ = self.child.wait();
     }
 }
 
@@ -112,10 +120,14 @@ fn proxied_session_end_to_end() {
         .collect();
     assert_eq!(names, ["note.read", "note.write", "note.move"], "filtered advertisement");
 
-    // Allowed write goes through and lands on disk.
+    // Allowed write goes through — landing on the session BRANCH, not
+    // trunk: the live vault only changes at promotion.
     let r = p.call_tool("note.write", json!({ "path": "inbox/hello.md", "content": "hi" }));
     assert_eq!(r["isError"], false, "{r}");
-    assert_eq!(std::fs::read_to_string(vault.join("inbox/hello.md")).unwrap(), "hi");
+    assert!(
+        !vault.join("inbox/hello.md").exists(),
+        "trunk must not change before promotion"
+    );
 
     // Even though note.delete was never advertised, enforcement does not
     // depend on the advertisement: calling it anyway is denied at the
@@ -142,26 +154,36 @@ fn proxied_session_end_to_end() {
     let ok = approve_via_socket(&home, json!({ "cmd": "approve", "id": esc_id, "uses": 1 }));
     assert_eq!(ok["ok"], true, "{ok}");
 
-    // Retry now passes under the approved exemption.
+    // Retry now passes under the approved exemption — still branch-only.
     let r = p.call_tool("note.write", json!({ "path": "inbox/overflow.md", "content": "x" }));
     assert_eq!(r["isError"], false, "{r}");
-    assert!(vault.join("inbox/overflow.md").exists());
+    assert!(!vault.join("inbox/overflow.md").exists(), "still pre-promotion");
 
     // And there is no in-band approval verb: an invented method falls
     // through to the downstream, which rejects it.
     let resp = p.request("asf/approve", json!({ "id": esc_id }));
     assert!(resp.get("error").is_some(), "in-band approval must not exist: {resp}");
 
-    drop(p); // kill daemon before inspecting the ledger
+    // Session end (EOF) → promotion gate. This session is pure adds with
+    // no trunk divergence → zero-authorship policy auto-promotes.
+    p.finish();
+    assert_eq!(
+        std::fs::read_to_string(vault.join("inbox/hello.md")).unwrap(),
+        "hi",
+        "promotion landed the session's writes on trunk"
+    );
+    assert!(vault.join("inbox/overflow.md").exists());
+    assert!(vault.join("inbox/todo.md").exists(), "denied delete never happened");
 
-    // The ledger recorded the whole session.
+    // The ledger recorded the whole session including the promotion.
     let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
     let kinds: Vec<String> = {
         let mut stmt = conn.prepare("SELECT DISTINCT kind FROM events").unwrap();
         let rows = stmt.query_map([], |r| r.get(0)).unwrap();
         rows.collect::<Result<_, _>>().unwrap()
     };
-    for k in ["register", "intent", "snapshot", "grant", "tool_call", "verdict", "escalation", "approval"] {
+    for k in ["register", "intent", "snapshot", "grant", "tool_call", "verdict",
+              "escalation", "approval", "promotion"] {
         assert!(kinds.contains(&k.to_string()), "ledger missing {k} events (has {kinds:?})");
     }
     let n: i64 = conn

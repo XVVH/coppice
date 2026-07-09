@@ -12,13 +12,17 @@
 //! tools must be covered by the bound manifest's state roots. M2 is
 //! enforced at call time by the evaluator.
 
-use crate::capability::{self, auth_rank};
+use crate::capability::{self, auth_rank, glob_matches, reversibility_rank};
 use crate::evaluate::{self, CallCtx, Outcome};
 use crate::kernel::{Fabric, KernelError};
+use crate::promote::{self, Conflict, Op};
+use crate::snapshot::{self, StoreKind};
 use crate::tools::{self, ToolError};
 use crate::{canon, now_rfc3339, trace};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BrokerError {
@@ -32,6 +36,8 @@ pub enum BrokerError {
     Trace(#[from] trace::TraceError),
     #[error(transparent)]
     Canon(#[from] canon::CanonError),
+    #[error(transparent)]
+    Snapshot(#[from] snapshot::SnapError),
     #[error("sqlite: {0}")]
     Db(#[from] rusqlite::Error),
     #[error("M1 violation: capability would grant access to store {store} not covered by manifest {manifest} roots")]
@@ -44,6 +50,10 @@ pub enum BrokerError {
     ChannelTooWeak { have: String, need: String },
     #[error("no pending call {0}")]
     NoPendingCall(u64),
+    #[error("promotion gate: trace exceeds capability — {0} (nothing merged)")]
+    GateTraceViolation(String),
+    #[error("promotion {0} not found or not pending")]
+    NoSuchPromotion(i64),
 }
 
 /// The broker's decision on a proposed call.
@@ -101,6 +111,15 @@ impl Broker {
                 cap        TEXT NOT NULL,
                 key        TEXT NOT NULL,
                 remaining  INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS promotions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                manifest     TEXT NOT NULL,
+                branch_paths TEXT NOT NULL,
+                preview      TEXT NOT NULL,
+                status       TEXT NOT NULL DEFAULT 'pending',
+                created_at   TEXT NOT NULL,
+                decided_at   TEXT
             );",
         )?;
         Ok(Self { fabric, pending: Vec::new(), next_ticket: 1 })
@@ -560,6 +579,495 @@ impl Broker {
             p.checks.clone(),
             Some(&p.reversibility),
         )?)
+    }
+}
+
+#[derive(Debug)]
+pub enum PromotionOutcome {
+    Applied { event: String },
+    Parked { promotion: i64 },
+}
+
+/// One store's merge plan.
+struct StorePlan {
+    store: String,
+    base: String,
+    branch: String,
+    trunk: String,
+    /// Root to install on trunk; None = trunk already has the merge result.
+    install: Option<String>,
+}
+
+struct MergePlan {
+    stores: Vec<StorePlan>,
+    ops: Vec<Op>,
+    conflicts: Vec<Conflict>,
+}
+
+impl Broker {
+    /// Promote a completed branch to trunk (§5.3) — the only mutation in
+    /// the system. Order is load-bearing: (1) the recorded trace is
+    /// verified against the capabilities that authorized it — a violating
+    /// run merges nothing; (2) three-way merge per store, trunk-wins
+    /// conflicts; (3) the zero-authorship policy decides auto-apply vs
+    /// park for human approval on the C2 surface.
+    pub fn promote_manifest(
+        &mut self,
+        manifest_id: &str,
+        branch_paths: &BTreeMap<String, PathBuf>,
+    ) -> Result<PromotionOutcome, BrokerError> {
+        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
+        let span = man["trace"]["span"]
+            .as_str()
+            .ok_or_else(|| KernelError::MalformedManifest(manifest_id.into(), "no trace.span".into()))?
+            .to_string();
+
+        let trace_report = self.gate_trace_check(manifest_id, &span)?;
+        let plan = self.compute_merge(&man, branch_paths)?;
+
+        if promote::default_policy_allows(&plan.ops, &plan.conflicts) {
+            let event = self.apply_plan(manifest_id, &plan, &trace_report, "auto")?;
+            Ok(PromotionOutcome::Applied { event })
+        } else {
+            let preview = json!({
+                "ops": plan.ops.iter().map(Op::to_json).collect::<Vec<_>>(),
+                "conflicts": plan.conflicts.iter().map(Conflict::to_json).collect::<Vec<_>>(),
+                "trace_check": trace_report,
+            });
+            let bp = serde_json::to_string(
+                &branch_paths.iter().map(|(k, v)| (k, v.to_string_lossy())).collect::<BTreeMap<_, _>>(),
+            )
+            .expect("paths serialize");
+            self.fabric.conn.execute(
+                "INSERT INTO promotions (manifest, branch_paths, preview, status, created_at)
+                 VALUES (?1, ?2, ?3, 'pending', ?4)",
+                params![manifest_id, bp, serde_json::to_string(&preview).expect("serialize"), now_rfc3339()],
+            )?;
+            let id = self.fabric.conn.last_insert_rowid();
+            let sk = self.fabric.fabric_sk().clone();
+            let sspan = self.fabric.substrate_span().to_string();
+            trace::append(
+                &mut self.fabric.conn,
+                &sk,
+                &sspan,
+                Some(manifest_id),
+                "escalation",
+                json!({
+                    "promotion": id, "caveat": "promotion.policy",
+                    "count": 1,
+                    "sample": [{
+                        "ops": plan.ops.iter().map(|o| o.class()).collect::<Vec<_>>(),
+                        "conflicts": plan.conflicts.len(),
+                    }],
+                }),
+                &now_rfc3339(),
+            )?;
+            Ok(PromotionOutcome::Parked { promotion: id })
+        }
+    }
+
+    /// §5.3 trace-vs-capability: re-verify the span's chain, then recheck
+    /// every recorded tool_call against the capability that authorized it
+    /// — action allowlist, reversibility ceiling, path scope, and budget
+    /// totals net of channel-stamped approvals. The broker checking its
+    /// own homework matters because the gate runs later, under a different
+    /// code path, over signed records: a bug (or tamper) between decision
+    /// time and merge time surfaces here, before anything becomes durable.
+    fn gate_trace_check(&self, manifest_id: &str, span: &str) -> Result<Value, BrokerError> {
+        trace::verify_span(&self.fabric.conn, &self.fabric.fabric_vk(), span)?;
+        let events = trace::events_in_span(&self.fabric.conn, span)?;
+
+        // Approved budget headroom: approval events grant `uses` against an
+        // escalation's (cap, caveat-key).
+        let mut approved: BTreeMap<(String, String), i64> = BTreeMap::new();
+        for ev in trace::all_events(&self.fabric.conn)? {
+            if ev.kind == "approval" && ev.raw["body"]["resolution"] == "approved" {
+                if let Some(esc) = ev.raw["body"]["escalation"].as_i64() {
+                    let row: Option<(String, String)> = self
+                        .fabric
+                        .conn
+                        .query_row(
+                            "SELECT cap, key FROM escalations WHERE id = ?1",
+                            [esc],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
+                        )
+                        .optional()?;
+                    if let Some(k) = row {
+                        *approved.entry(k).or_insert(0) += ev.raw["body"]["uses"].as_i64().unwrap_or(0);
+                    }
+                }
+            }
+        }
+
+        let mut caps: BTreeMap<String, Value> = BTreeMap::new();
+        let mut class_counts: BTreeMap<(String, String), i64> = BTreeMap::new();
+        let mut tool_calls = 0;
+        let mut unattributed = 0;
+        let violation = |msg: String| BrokerError::GateTraceViolation(msg);
+
+        for ev in &events {
+            if ev.kind != "tool_call" {
+                continue;
+            }
+            tool_calls += 1;
+            let body = &ev.raw["body"];
+            let Some(cap_id) = body["summary"]["capability"].as_str() else {
+                unattributed += 1; // pre-broker record (SI-7): nothing to check against
+                continue;
+            };
+            let cap = match caps.get(cap_id) {
+                Some(c) => c.clone(),
+                None => {
+                    let c = trace::get_object(&self.fabric.conn, cap_id)?;
+                    canon::verify(&c, &self.fabric.fabric_vk())
+                        .map_err(|e| violation(format!("capability {cap_id} unverifiable: {e}")))?;
+                    if c["bound_manifest"].as_str() != Some(manifest_id) {
+                        return Err(violation(format!(
+                            "event {} authorized by capability bound to a different manifest (M2)",
+                            ev.id
+                        )));
+                    }
+                    caps.insert(cap_id.into(), c.clone());
+                    c
+                }
+            };
+            let caveat = |dim: &str| -> Option<Value> {
+                cap["caveats"].as_array()?.iter().find(|c| c["dim"] == dim).cloned()
+            };
+            let (tool, action) = (
+                body["tool"].as_str().unwrap_or(""),
+                body["action"].as_str().unwrap_or(""),
+            );
+            if let Some(allow) = caveat("action.allow") {
+                let ok = allow["tools"].as_array().is_some_and(|t| t.iter().any(|x| x == tool))
+                    && allow["actions"].as_array().is_some_and(|a| a.iter().any(|x| x == action));
+                if !ok {
+                    return Err(violation(format!("event {} calls {tool}.{action} outside action.allow", ev.id)));
+                }
+            }
+            if let Some(rev) = caveat("reversibility.max") {
+                let max = rev["max"].as_str().and_then(reversibility_rank);
+                let have = body["reversibility"].as_str().and_then(reversibility_rank);
+                if !matches!((max, have), (Some(m), Some(h)) if h <= m) {
+                    return Err(violation(format!("event {} exceeds reversibility.max", ev.id)));
+                }
+            }
+            if let (Some(pw), Some(paths)) = (caveat("paths.write"), body["summary"]["paths"].as_array()) {
+                let globs: Vec<&str> = pw["globs"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                for p in paths.iter().filter_map(Value::as_str) {
+                    if !globs.iter().any(|g| glob_matches(g, p)) {
+                        return Err(violation(format!("event {} wrote {p} outside paths.write", ev.id)));
+                    }
+                }
+            }
+            if let Some(class) = body["summary"]["action_class"].as_str() {
+                *class_counts.entry((cap_id.to_string(), class.to_string())).or_insert(0) += 1;
+            }
+        }
+
+        for ((cap_id, class), count) in &class_counts {
+            let cap = &caps[cap_id];
+            let budget = cap["caveats"].as_array().into_iter().flatten().find(|c| {
+                c["dim"] == "budget.count" && c["action_class"].as_str() == Some(class.as_str())
+            });
+            if let Some(b) = budget {
+                let max = b["max"].as_i64().unwrap_or(0);
+                let extra = approved
+                    .get(&(cap_id.clone(), format!("budget.count:{class}")))
+                    .copied()
+                    .unwrap_or(0);
+                if *count > max + extra {
+                    return Err(violation(format!(
+                        "{count} {class} calls under {cap_id} exceed budget {max} + {extra} approved"
+                    )));
+                }
+            }
+        }
+
+        Ok(json!({
+            "events": events.len(), "tool_calls": tool_calls,
+            "unattributed_tool_calls": unattributed,
+            "capabilities": caps.keys().collect::<Vec<_>>(), "ok": true,
+        }))
+    }
+
+    fn compute_merge(
+        &mut self,
+        man: &Value,
+        branch_paths: &BTreeMap<String, PathBuf>,
+    ) -> Result<MergePlan, BrokerError> {
+        let mut stores = Vec::new();
+        let mut all_ops = Vec::new();
+        let mut all_conflicts = Vec::new();
+        for r in man["state"]["roots"].as_array().into_iter().flatten() {
+            let store = r["store"].as_str().unwrap_or_default().to_string();
+            let base_root = r["root"].as_str().unwrap_or_default().to_string();
+            let spec = self.fabric.store(&store)?.clone();
+            let branch_path = branch_paths
+                .get(&store)
+                .ok_or_else(|| KernelError::UnknownStore(format!("{store} has no branch")))?;
+            let mut bspec = spec.clone();
+            bspec.path = branch_path.clone();
+            let branch_root = snapshot::capture(&self.fabric.cas, &bspec)?;
+            let trunk_root = snapshot::capture(&self.fabric.cas, &spec)?;
+
+            let install = match spec.kind {
+                StoreKind::Fs => {
+                    let base_obj = snapshot::load_tree_object(&self.fabric.cas, &base_root)?;
+                    let branch_obj = snapshot::load_tree_object(&self.fabric.cas, &branch_root)?;
+                    let trunk_obj = snapshot::load_tree_object(&self.fabric.cas, &trunk_root)?;
+                    let result = promote::three_way(
+                        &promote::tree_from_object(&base_obj),
+                        &promote::tree_from_object(&branch_obj),
+                        &promote::tree_from_object(&trunk_obj),
+                    );
+                    let merged_root = snapshot::compose_tree(
+                        &self.fabric.cas,
+                        &result.merged,
+                        &[&trunk_obj, &branch_obj, &base_obj],
+                    )?;
+                    all_ops.extend(result.ops);
+                    all_conflicts.extend(result.conflicts);
+                    (merged_root != trunk_root).then_some(merged_root)
+                }
+                StoreKind::Sqlite => {
+                    // Opaque store: no sub-file merge exists (SI-18).
+                    // Branch-only change installs the branch image; both-
+                    // changed is a conflict card and trunk stands.
+                    if branch_root == base_root || branch_root == trunk_root {
+                        None
+                    } else if trunk_root == base_root {
+                        all_ops.push(Op::Modify { path: format!("{store} (whole store)") });
+                        Some(branch_root.clone())
+                    } else {
+                        all_conflicts.push(Conflict {
+                            path: format!("{store} (opaque sqlite, whole store)"),
+                            base: Some(base_root.clone()),
+                            branch: Some(branch_root.clone()),
+                            trunk: Some(trunk_root.clone()),
+                            resolution: "trunk_wins",
+                        });
+                        None
+                    }
+                }
+            };
+            stores.push(StorePlan { store, base: base_root, branch: branch_root, trunk: trunk_root, install });
+        }
+        Ok(MergePlan { stores, ops: all_ops, conflicts: all_conflicts })
+    }
+
+    /// Stage every store, then swap — same coherence discipline as revert.
+    fn apply_plan(
+        &mut self,
+        manifest_id: &str,
+        plan: &MergePlan,
+        trace_report: &Value,
+        policy: &str,
+    ) -> Result<String, BrokerError> {
+        let mut prepared = Vec::new();
+        for sp in &plan.stores {
+            if let Some(root) = &sp.install {
+                let spec = self.fabric.store(&sp.store)?.clone();
+                prepared.push(snapshot::prepare_restore(&self.fabric.cas, &spec, root)?);
+            }
+        }
+        for prep in prepared {
+            snapshot::commit_restore(prep)?;
+        }
+
+        let stores_json: Vec<Value> = plan
+            .stores
+            .iter()
+            .map(|sp| {
+                json!({
+                    "store": sp.store, "base": sp.base, "branch": sp.branch,
+                    "trunk_before": sp.trunk,
+                    "merged": sp.install.clone().unwrap_or_else(|| sp.trunk.clone()),
+                })
+            })
+            .collect();
+        let sk = self.fabric.fabric_sk().clone();
+        let span = self.fabric.substrate_span().to_string();
+        let ev = trace::append(
+            &mut self.fabric.conn,
+            &sk,
+            &span,
+            Some(manifest_id),
+            "promotion",
+            json!({
+                "manifest": manifest_id,
+                "stores": stores_json,
+                "ops": plan.ops.iter().map(Op::to_json).collect::<Vec<_>>(),
+                "conflicts": plan.conflicts.iter().map(Conflict::to_json).collect::<Vec<_>>(),
+                "trace_check": trace_report,
+                "policy": policy,
+            }),
+            &now_rfc3339(),
+        )?;
+        for sp in &plan.stores {
+            let merged = sp.install.clone().unwrap_or_else(|| sp.trunk.clone());
+            self.fabric.set_expected_root(&sp.store, &merged, ev.offset)?;
+        }
+        Ok(ev.id)
+    }
+
+    pub fn list_promotions(&self, status: &str) -> Result<Vec<Value>, BrokerError> {
+        let mut stmt = self.fabric.conn.prepare(
+            "SELECT id, manifest, preview, created_at FROM promotions WHERE status = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([status], |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "manifest": r.get::<_, String>(1)?,
+                "preview": serde_json::from_str::<Value>(&r.get::<_, String>(2)?).unwrap_or(Value::Null),
+                "created_at": r.get::<_, String>(3)?,
+            }))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Approve a parked promotion (C2 surface, C1-stamped). The merge is
+    /// recomputed fresh against current trunk — if trunk moved since the
+    /// preview, new divergences still resolve trunk-wins (the safe
+    /// direction), never wider than what was previewed.
+    pub fn approve_promotion(
+        &mut self,
+        id: i64,
+        channel: &str,
+        auth_strength: &str,
+    ) -> Result<String, BrokerError> {
+        let row: Option<(String, String)> = self
+            .fabric
+            .conn
+            .query_row(
+                "SELECT manifest, branch_paths FROM promotions WHERE id = ?1 AND status = 'pending'",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let (manifest_id, bp_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
+        self.check_min_auth_for_manifest(&manifest_id, auth_strength)?;
+
+        let branch_paths: BTreeMap<String, PathBuf> =
+            serde_json::from_str::<BTreeMap<String, String>>(&bp_raw)
+                .expect("stored paths are valid JSON")
+                .into_iter()
+                .map(|(k, v)| (k, PathBuf::from(v)))
+                .collect();
+        let man = trace::get_object(&self.fabric.conn, &manifest_id)?;
+        let span = man["trace"]["span"].as_str().unwrap_or_default().to_string();
+        let trace_report = self.gate_trace_check(&manifest_id, &span)?;
+        let plan = self.compute_merge(&man, &branch_paths)?;
+        let event = self.apply_plan(&manifest_id, &plan, &trace_report, &format!("approved:{id}"))?;
+
+        let now = now_rfc3339();
+        self.fabric.conn.execute(
+            "UPDATE promotions SET status = 'applied', decided_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        let sk = self.fabric.fabric_sk().clone();
+        let sspan = self.fabric.substrate_span().to_string();
+        trace::append(
+            &mut self.fabric.conn,
+            &sk,
+            &sspan,
+            Some(&manifest_id),
+            "approval",
+            json!({ "promotion": id, "resolution": "approved",
+                    "channel": channel, "auth_strength": auth_strength }),
+            &now,
+        )?;
+        Ok(event)
+    }
+
+    pub fn reject_promotion(
+        &mut self,
+        id: i64,
+        channel: &str,
+        auth_strength: &str,
+    ) -> Result<(), BrokerError> {
+        let manifest: Option<String> = self
+            .fabric
+            .conn
+            .query_row(
+                "SELECT manifest FROM promotions WHERE id = ?1 AND status = 'pending'",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let manifest = manifest.ok_or(BrokerError::NoSuchPromotion(id))?;
+        let now = now_rfc3339();
+        self.fabric.conn.execute(
+            "UPDATE promotions SET status = 'rejected', decided_at = ?2 WHERE id = ?1",
+            params![id, now],
+        )?;
+        let sk = self.fabric.fabric_sk().clone();
+        let sspan = self.fabric.substrate_span().to_string();
+        trace::append(
+            &mut self.fabric.conn,
+            &sk,
+            &sspan,
+            Some(&manifest),
+            "approval",
+            json!({ "promotion": id, "resolution": "denied",
+                    "channel": channel, "auth_strength": auth_strength }),
+            &now,
+        )?;
+        Ok(())
+    }
+
+    fn check_min_auth_for_manifest(
+        &self,
+        manifest_id: &str,
+        auth_strength: &str,
+    ) -> Result<(), BrokerError> {
+        // Strongest approval.min_auth among verified caps bound to this
+        // manifest applies to gate approvals too.
+        let mut stmt = self
+            .fabric
+            .conn
+            .prepare("SELECT raw FROM objects WHERE kind = 'capability'")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut need: Option<String> = None;
+        for raw in rows {
+            let cap: Value = serde_json::from_str(&raw?).expect("stored objects are valid JSON");
+            if cap["bound_manifest"].as_str() != Some(manifest_id)
+                || canon::verify(&cap, &self.fabric.fabric_vk()).is_err()
+            {
+                continue;
+            }
+            if let Some(min) = cap["caveats"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|c| c["dim"] == "approval.min_auth")
+                .and_then(|c| c["min"].as_str())
+            {
+                let stronger = match (&need, auth_rank(min)) {
+                    (None, Some(_)) => true,
+                    (Some(cur), Some(new)) => Some(new) > auth_rank(cur),
+                    _ => false,
+                };
+                if stronger {
+                    need = Some(min.to_string());
+                }
+            }
+        }
+        if let Some(min) = need {
+            match (auth_rank(&min), auth_rank(auth_strength)) {
+                (Some(n), Some(h)) if h >= n => {}
+                _ => {
+                    return Err(BrokerError::ChannelTooWeak {
+                        have: auth_strength.into(),
+                        need: min,
+                    })
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -1,6 +1,13 @@
 # Spec issues — ambiguities the code forced
 
-Tracked per the handoff: where spec v0.3 is ambiguous or contradicts itself,
+> **v0.4 (2026-07-09): every issue below (SI-1…SI-19) is RESOLVED** —
+> ratified individually (SI-11, SI-17, SI-19, F2/SI-6) or via the
+> adjudicated A19 conformance sweep, and integrated into
+> `asf-schema-spec.md` v0.4 (changelog A15–A19). This file is preserved
+> as the amendment provenance record; per-entry statuses below are
+> historical. New issues found under v0.4 start at **SI-20**.
+
+Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
 we do not silently pick. Each issue cites spec § and the implementing file.
 Settled decisions (F1, F4, fail-open) are not re-litigated here.
@@ -191,6 +198,80 @@ declare `store` per action (plus `class` for budget metering and
 the §4 example's `writes`); mint-time M1 = union of stores of allowlisted
 tools ⊆ manifest roots. Spec should adopt per-action store/class/path
 bindings into §4, or name its own derivation.
+
+## SI-17 — `move` vs `rename` are listed but never defined (§5.3 A13) — RESOLVED (author, 2026-07-09)
+
+**Resolution:** the proposed amendment below is ratified as written —
+parent-directory definitions; `rename < move` ordering (allow-move implies
+allow-rename); exact-hash authority layer with similarity permitted only
+as legibility-layer annotation; from/to direction constraints deferred to
+the Stage 3 rule grammar. Kernel already conforms; the ordering function
+lands with StandingRules. (A17 amendment candidate.)
+
+A13's operation classes are `add | modify | delete | move | rename`, with
+no definition distinguishing move from rename. This is authority
+vocabulary, not display: promotion rules (StandingRules, A13) match on
+these classes, so the definition is security semantics.
+
+**Interpretation** (`promote.rs`): same content hash, same parent
+directory, new name = `rename`; different parent directory = `move`.
+Pairing is exact-hash and only when unambiguous (hash unique on both
+sides) — never mislabels; leaves duplicate-content shuffles and
+renamed-AND-edited files as add+delete (which park — safe, with friction).
+
+**Proposed amendment (discussed with author 2026-07-09):**
+1. Adopt the parent-directory definitions, AND order the classes:
+   `rename < move` in required permissiveness — a rule allowing `move`
+   allows `rename`, never the reverse (the reversibility_rank pattern).
+   Avoids the disjoint-label footgun (ratified "moves into MOCs" parking
+   an in-place rename in MOCs).
+2. Authority layer stays exact-hash forever: similarity-based rename
+   detection is GAMEABLE (an agent can present delete-X-plant-altered-
+   content as "rename+edit" inside a rename-allowing rule) and has no
+   zero-authorship threshold. Similarity may only ever annotate the
+   legibility layer (diff cards: "looks like rename+edit"), never produce
+   a class rules can match.
+3. Stage 3 rule grammar should add direction constraints —
+   `move: {from ⊆ globs, to ⊆ globs}` — which do the real work for
+   filing workflows; from/to are already recorded in op JSON.
+
+## SI-19 — `link` appears in §5.3's example rule but not in A13's enum — RESOLVED (author, 2026-07-09)
+
+§5.3: "auto-merge iff paths ⊆ {/inbox, /MOCs}, ops ⊆ {add, modify,
+**link**}, no deletes" — but A13 defines `add | modify | delete | move |
+rename`. Content-aware classes were judged complexity-over-benefit for
+now (the ratchet's coarse equivalent — path-scoped `modify` rules — is
+adequate for the solo-operator design center).
+
+**Resolution: remove `link` from the §5.3 example; add a
+refinement-only extensibility clause to A13** so content-aware classes
+can return without redesign (A18 amendment candidate):
+1. Class vocabulary is fail-closed: rules match explicit sets; classes
+   unknown to a rule park at the gate. Future classes can never widen
+   pre-existing grants.
+2. Extension is by refinement only: `<root>.<refinement>` of the five
+   structural roots; a refinement ADDS a predicate to the structural
+   classification, never replaces it — a gamed/buggy predicate degrades
+   to the parent class, bounding blast radius.
+3. Rules allowing a root allow its refinements (SI-17 ordering pattern);
+   never the reverse.
+4. Content-aware refinements require registered, versioned classifiers;
+   rules pin the classifier version they were ratified under (A1
+   domain-scoped pinning, applied to classifiers).
+The kernel implements structural roots only; nothing changes in code.
+
+## SI-18 — three-way merge is undefined for opaque stores (§5.3 A11) — interpreted
+
+A11 specifies three-way merge with per-path conflict semantics, which only
+exists for file-tree stores. The manifest's other Tier-1 store — the agent
+memory sqlite — has no sub-file merge. **Interpretation** (`broker.rs`
+compute_merge): opaque stores merge whole-store: branch-only change
+installs the branch image (op class `modify`, auto-promotable); trunk-only
+change stands; both-changed is a single conflict card, trunk wins, branch
+image preserved in CAS. The spec should state per-store-kind merge
+strategies — this also touches the A3 memory-taint open problem, since
+whole-store memory promotion is exactly where cross-run taint lands in
+trunk.
 
 ## SI-10 — `captured_before` freshness is unenforceable as specified (§3.1) — open
 

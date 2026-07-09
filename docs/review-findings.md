@@ -19,7 +19,15 @@ workflows). Fail-open ranks above fail-closed at equal blast radius.
 
 ---
 
-## RF-1 — time bounds compared as strings; fail-open at the boundary (#7) — open
+## RF-1 — time bounds compared as strings; fail-open at the boundary (#7) — fixed
+
+**Fixed** in the RF-1 timestamp PR. Added `asf_kernel::parse_instant`
+(RFC 3339 → `OffsetDateTime`); expiry, the `time` caveat, and the
+attenuation `time` subset now compare instants, with unparseable timestamps
+failing closed. Tests: `time_caveat_no_longer_fails_open_at_subsecond_boundary`
+and `unparseable_time_bound_fails_closed` (evaluate), plus property `p6`
+(instant compare always matches chronology; crafted same-second pairs prove
+lexical comparison does not — guarding against a regression to string compare).
 
 **Severity: medium. Direction: FAIL-OPEN.**
 `evaluate.rs` compares RFC 3339 timestamps lexically:

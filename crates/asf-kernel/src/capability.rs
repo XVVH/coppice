@@ -211,19 +211,30 @@ fn dim_subset(dim: &str, parent: &Value, child: &Value) -> Result<bool, CapError
                 .all(|cg| p.iter().any(|pg| glob_covers(pg, cg)))
         }
         "time" => {
-            // Child window must sit within the parent window. RFC 3339
-            // strings compare correctly lexicographically in UTC.
-            let ok_start = match (parent.get("not_before"), child.get("not_before")) {
-                (Some(Value::String(p)), Some(Value::String(c))) => c >= p,
+            // Child window must sit within the parent window. Instant
+            // comparison, not lexical (RF-1): a present-but-unparseable bound
+            // fails closed (not a subset).
+            let ok_start = match (
+                parent.get("not_before").and_then(Value::as_str),
+                child.get("not_before").and_then(Value::as_str),
+            ) {
+                (Some(p), Some(c)) => matches!(
+                    (crate::parse_instant(c), crate::parse_instant(p)),
+                    (Some(c), Some(p)) if c >= p
+                ),
                 (Some(_), None) => false, // child unbounded where parent bounded
                 (None, _) => true,
-                _ => false,
             };
-            let ok_end = match (parent.get("not_after"), child.get("not_after")) {
-                (Some(Value::String(p)), Some(Value::String(c))) => c <= p,
+            let ok_end = match (
+                parent.get("not_after").and_then(Value::as_str),
+                child.get("not_after").and_then(Value::as_str),
+            ) {
+                (Some(p), Some(c)) => matches!(
+                    (crate::parse_instant(c), crate::parse_instant(p)),
+                    (Some(c), Some(p)) if c <= p
+                ),
                 (Some(_), None) => false,
                 (None, _) => true,
-                _ => false,
             };
             ok_start && ok_end
         }

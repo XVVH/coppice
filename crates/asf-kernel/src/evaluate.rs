@@ -79,10 +79,21 @@ pub fn evaluate(
         outcome: Outcome::Deny { failed: vec![], structural: Some(why) },
         consumed_exemptions: vec![],
     };
+    // Instant comparison, not lexical (RF-1). A malformed/unparseable
+    // timestamp on either side fails closed.
     match cap.get("expires_at").and_then(Value::as_str) {
-        Some(exp) if ctx.now <= exp => {}
-        Some(exp) => return structural_deny(format!("capability expired at {exp}")),
         None => return structural_deny("capability has no expiry (mandatory, §5)".into()),
+        Some(exp) => match (crate::parse_instant(ctx.now), crate::parse_instant(exp)) {
+            (Some(now), Some(exp_t)) if now <= exp_t => {}
+            (Some(_), Some(_)) => {
+                return structural_deny(format!("capability expired at {exp}"))
+            }
+            _ => {
+                return structural_deny(
+                    "unparseable timestamp in expiry check (fail closed)".into(),
+                )
+            }
+        },
     }
     match cap.get("bound_manifest").and_then(Value::as_str) {
         Some(m) if m == ctx.current_manifest => {}
@@ -191,16 +202,23 @@ pub fn evaluate(
                 Check { caveat: key.clone(), ok, meter }
             }
             "time" => {
-                let ok_before = cav
-                    .get("not_before")
-                    .and_then(Value::as_str)
-                    .map(|nb| ctx.now >= nb)
-                    .unwrap_or(true);
-                let ok_after = cav
-                    .get("not_after")
-                    .and_then(Value::as_str)
-                    .map(|na| ctx.now <= na)
-                    .unwrap_or(true);
+                // Instant comparison, not lexical (RF-1). A present-but-
+                // unparseable bound fails closed (the bound is not satisfied).
+                let now_t = crate::parse_instant(ctx.now);
+                let ok_before = match cav.get("not_before").and_then(Value::as_str) {
+                    None => true,
+                    Some(nb) => matches!(
+                        (now_t, crate::parse_instant(nb)),
+                        (Some(n), Some(t)) if n >= t
+                    ),
+                };
+                let ok_after = match cav.get("not_after").and_then(Value::as_str) {
+                    None => true,
+                    Some(na) => matches!(
+                        (now_t, crate::parse_instant(na)),
+                        (Some(n), Some(t)) if n <= t
+                    ),
+                };
                 Check { caveat: key.clone(), ok: ok_before && ok_after, meter: Value::Null }
             }
             "approval.min_auth" => {
@@ -304,6 +322,35 @@ mod tests {
 
     fn eval(cap: &Value, ctx: &CallCtx, used: u64) -> Evaluation {
         evaluate(cap, ctx, &mut |_| used, &mut |_| None)
+    }
+
+    #[test]
+    fn time_caveat_no_longer_fails_open_at_subsecond_boundary() {
+        // RF-1: not_after is a whole second; now is 0.3s PAST it. Lexically
+        // "…00.3Z" < "…00Z" (because '.' < 'Z'), so the old string compare
+        // ADMITTED this call ~0.3s past the deadline. Instant compare denies.
+        let c = cap(vec![], vec![json!({"dim":"time","not_after":"2026-07-08T06:00:00Z"})]);
+        let mut cx = ctx("note.write", Some(vec!["inbox/a.md".into()]));
+        cx.now = "2026-07-08T06:00:00.3Z";
+        let e = eval(&c, &cx, 0);
+        assert!(
+            matches!(e.outcome, Outcome::Deny { ref failed, .. } if failed.contains(&"time".to_string())),
+            "call past not_after must be denied, got {:?}",
+            e.outcome
+        );
+
+        // Sanity: exactly at the boundary (<=) and before it still pass.
+        cx.now = "2026-07-08T06:00:00Z";
+        assert_eq!(eval(&c, &cx, 0).outcome, Outcome::Allow);
+        cx.now = "2026-07-08T05:59:59.9Z";
+        assert_eq!(eval(&c, &cx, 0).outcome, Outcome::Allow);
+    }
+
+    #[test]
+    fn unparseable_time_bound_fails_closed() {
+        let c = cap(vec![], vec![json!({"dim":"time","not_after":"whenever"})]);
+        let cx = ctx("note.write", Some(vec!["inbox/a.md".into()]));
+        assert!(matches!(eval(&c, &cx, 0).outcome, Outcome::Deny { .. }));
     }
 
     #[test]

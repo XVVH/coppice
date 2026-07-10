@@ -9,7 +9,10 @@ The spec wins over this file wherever they disagree. Spec ambiguities found
 while implementing go to `docs/spec-issues.md` (never silently interpret);
 SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6), new issues start at SI-22.
 
-## Current build target — Stage 1 (Kernel) + Stage 2 (Spine)
+## Built — Stages 1–3 (kernel, spine, promotion gate). Current queue: docs/roadmap.md
+
+The four components below exist and are dogfooding; work-in-flight and
+ordering live in `docs/roadmap.md` (W-n), not here.
 
 1. **Broker daemon**: MCP proxy in front of a Hermes agent; capability evaluation
    (conjunctive caveats, fail-closed on unknown dimensions); credential injection
@@ -55,6 +58,18 @@ of the spec or the non-negotiable fail posture below.
 Cross-run memory taint (A3); compensation fidelity grades; multi-actor visibility
 policy; domain taxonomy governance; F2 canonicalization (JCS vs IPLD — decide
 before anything is published). If a design decision touches one, surface it.
+
+## Two-sided verification discipline
+
+Every new or renamed Rust test MUST be registered in `tests/contracts.tsv`
+under an invariant contract. Every contract MUST retain at least one positive
+test (valid behavior succeeds) and one negative test (invalid behavior fails
+closed); `supporting` tests may supplement but never replace the pair. Negative
+tests MUST assert that the protected effect did not occur, not merely that an
+error was returned. `scripts/ci contracts` enforces the registry against the
+compiled test inventory and rejects growth of `tests/contracts-baseline.txt`.
+Changes to enforcement logic MUST also extend or exercise a stable targeted
+mutation lane, or state in the PR why mutation testing cannot apply.
 
 ## Context
 

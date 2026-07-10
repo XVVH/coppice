@@ -54,6 +54,7 @@ erasure, and broker-outage degraded execution.
 
 ```sh
 ./scripts/ci required               # canonical offline gate: Clippy, tests, demos
+./scripts/ci contracts              # two-sided evidence; rejects unclassified tests
 ./scripts/ci full                   # required gate + RustSec advisory audit
 ./scripts/ci deep                   # elevated property/model cases, release mode
 ./scripts/ci mutation               # scoped evaluator + promotion mutation testing
@@ -72,7 +73,10 @@ cargo run -p asf -- approve --home /tmp/asf-home approve 1 --uses 2
 The repository-owned `scripts/ci` harness is the definition of a verified
 change. GitHub Actions invokes the same lanes for Linux compatibility and
 scheduled coverage; it does not carry a separate copy of the test commands.
-The pre-push hook is intentionally deterministic and offline. `full` needs
+The required/test lanes validate `tests/contracts.tsv`: every new test must
+join an invariant with both positive and negative evidence; the pre-existing
+uncontracted inventory is frozen in `tests/contracts-baseline.txt`. The
+pre-push hook is intentionally deterministic and offline. `full` needs
 `cargo-audit` 0.22.2, and `mutation` needs `cargo-mutants` 27.1.0; the harness
 prints the pinned installation command when either is absent. Formatting is
 not yet part of the gate because the existing tree is not rustfmt-clean.
@@ -93,6 +97,8 @@ for the language decision (Rust) and module map. Testing philosophy and the
 deep-dive agenda live in [docs/testing-theory.md](docs/testing-theory.md).
 Open implementation findings are tracked in
 [docs/review-findings.md](docs/review-findings.md) (`RF-n`); spec ambiguities
-in [docs/spec-issues.md](docs/spec-issues.md) (`SI-n`). Dogfooding setup and
+in [docs/spec-issues.md](docs/spec-issues.md) (`SI-n`); in-flight and queued
+work in [docs/roadmap.md](docs/roadmap.md) (`W-n` — decisions made in
+conversation land there before build). Dogfooding setup and
 methodology (corpus, wiring, metrics, graduation criteria) live in
 [docs/dogfooding.md](docs/dogfooding.md).

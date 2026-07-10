@@ -20,6 +20,38 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
+## SI-22 — what clock does the gate's trace-vs-capability re-check use? (§5.3) — open, interpretation proposed
+
+§5.3: "At the gate, the recorded trace is verified against the capability
+— did the run do anything its token shouldn't allow — before anything
+becomes durable." The re-check runs at promotion time, which can be hours
+after the calls (coarse sessions, parked promotions, RF-9 recovery). For
+time-shaped dimensions (`time` windows, expiry) the two candidate clocks
+disagree:
+
+1. **Gate-time `now`:** an honest call made inside its window would
+   retro-fail at a gate that runs after the window closes — every parked
+   promotion would rot toward violation as it waits for approval. Clearly
+   wrong, but it is what a naive "re-run the evaluator" produces.
+2. **The event's recorded `at` (at-the-time semantics):** "anything its
+   token shouldn't allow" reads as *shouldn't have allowed at the moment
+   of the call*. The gate then catches decision-time evaluator bugs
+   (RF-1's class: a call admitted past its boundary) without punishing
+   honest latency between call and gate.
+
+**Proposed interpretation (to be implemented by the unified-evaluator
+work, roadmap W-2):** the gate re-evaluates each recorded call against
+its authorizing capability using the event's signed `at` as the clock;
+unparseable `at` fails closed. Note the trust nuance: `at` is broker-
+assigned at record time and covered by the event signature, so within the
+fabric's signing boundary it is as trustworthy as the rest of the body —
+but it shares RF-13's residual (a key-holding writer can stamp any time;
+ordering/anchoring work is the durable answer). Flagging rather than
+silently picking: the spec should state the clock, since it is
+enforcement semantics, not implementation detail.
+
+---
+
 ## SI-21 — brokered manifest authority creates a content-address cycle (§3, M1/M2/M7) — RESOLVED (author, 2026-07-10)
 
 **Resolution: binding-as-event, ratified as amendment A21 (spec v0.6) —

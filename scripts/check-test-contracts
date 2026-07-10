@@ -1,0 +1,134 @@
+#!/bin/sh
+# Validate the two-sided invariant contract registry against Rust's compiled
+# test inventory. Dependency-free on purpose: this runs in the ordinary local
+# gate and is part of the future language-neutral conformance surface.
+
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+
+REGISTRY=tests/contracts.tsv
+BASELINE=tests/contracts-baseline.txt
+# The baseline may only shrink. Raising this ceiling is a review-visible change
+# to the enforcement mechanism, not a quiet way to grandfather new tests.
+LEGACY_CEILING=99
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/asf-contracts.XXXXXX")
+trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+
+fail() {
+    printf 'test-contract error: %s\n' "$1" >&2
+    exit 1
+}
+
+[ -f "$REGISTRY" ] || fail "missing $REGISTRY"
+[ -f "$BASELINE" ] || fail "missing $BASELINE"
+
+# Validate registry shape and the two-sided requirement before compiling.
+awk -F '|' '
+    function error(message) {
+        printf "%s:%d: %s\n", FILENAME, NR, message > "/dev/stderr"
+        errors = 1
+    }
+    /^[[:space:]]*(#|$)/ { next }
+    NF != 3 { error("expected contract-id|polarity|test-name"); next }
+    $1 !~ /^[A-Z][A-Z0-9.-]*$/ { error("invalid contract id " $1) }
+    $2 != "positive" && $2 != "negative" && $2 != "supporting" {
+        error("polarity must be positive, negative, or supporting")
+    }
+    $3 == "" { error("test name is empty") }
+    {
+        contract[$1] = 1
+        count[$1, $2]++
+        key = $1 SUBSEP $3
+        if (seen[key]++) {
+            error("test " $3 " is listed more than once for contract " $1)
+        }
+    }
+    END {
+        for (id in contract) {
+            if (count[id, "positive"] < 1) {
+                error("contract " id " has no positive evidence")
+            }
+            if (count[id, "negative"] < 1) {
+                error("contract " id " has no negative evidence")
+            }
+        }
+        exit errors
+    }
+' "$REGISTRY" || fail "registry is not a valid two-sided contract set"
+
+# `--list` asks the compiled Rust test harness for the authoritative inventory;
+# it does not infer tests from source text or naming conventions.
+cargo test --workspace --all-targets --locked -- --list >"$TMP/raw-inventory"
+sed -n 's/: test$//p' "$TMP/raw-inventory" | LC_ALL=C sort >"$TMP/inventory"
+[ -s "$TMP/inventory" ] || fail "cargo produced an empty test inventory"
+
+uniq -d "$TMP/inventory" >"$TMP/duplicate-inventory"
+if [ -s "$TMP/duplicate-inventory" ]; then
+    printf 'ambiguous duplicate test names:\n' >&2
+    sed 's/^/  /' "$TMP/duplicate-inventory" >&2
+    fail "compiled test names must be workspace-unique"
+fi
+
+awk -F '|' '!/^[[:space:]]*(#|$)/ { print $3 }' "$REGISTRY" |
+    LC_ALL=C sort -u >"$TMP/registered"
+awk '!/^[[:space:]]*(#|$)/ { print }' "$BASELINE" |
+    LC_ALL=C sort >"$TMP/baseline"
+
+uniq -d "$TMP/baseline" >"$TMP/duplicate-baseline"
+if [ -s "$TMP/duplicate-baseline" ]; then
+    printf 'duplicate legacy-baseline entries:\n' >&2
+    sed 's/^/  /' "$TMP/duplicate-baseline" >&2
+    fail "$BASELINE must be a set"
+fi
+
+legacy=$(wc -l <"$TMP/baseline" | tr -d ' ')
+if [ "$legacy" -gt "$LEGACY_CEILING" ]; then
+    fail "$BASELINE grew to $legacy entries (ceiling $LEGACY_CEILING); register new tests instead"
+fi
+
+comm -23 "$TMP/registered" "$TMP/inventory" >"$TMP/missing-registered"
+if [ -s "$TMP/missing-registered" ]; then
+    printf 'registered tests missing from the compiled inventory:\n' >&2
+    sed 's/^/  /' "$TMP/missing-registered" >&2
+    fail "remove stale evidence or restore the named tests"
+fi
+
+comm -23 "$TMP/baseline" "$TMP/inventory" >"$TMP/stale-baseline"
+if [ -s "$TMP/stale-baseline" ]; then
+    printf 'stale legacy-baseline entries:\n' >&2
+    sed 's/^/  /' "$TMP/stale-baseline" >&2
+    fail "deleted or renamed tests must also leave the legacy baseline"
+fi
+
+comm -12 "$TMP/baseline" "$TMP/registered" >"$TMP/overlap"
+if [ -s "$TMP/overlap" ]; then
+    printf 'tests cannot be both contracted and grandfathered:\n' >&2
+    sed 's/^/  /' "$TMP/overlap" >&2
+    fail "remove contracted tests from $BASELINE"
+fi
+
+LC_ALL=C sort -u "$TMP/baseline" "$TMP/registered" >"$TMP/classified"
+comm -23 "$TMP/inventory" "$TMP/classified" >"$TMP/unclassified"
+if [ -s "$TMP/unclassified" ]; then
+    printf 'new or renamed tests without a two-sided contract:\n' >&2
+    sed 's/^/  /' "$TMP/unclassified" >&2
+    fail "register each test in $REGISTRY; do not expand the legacy baseline"
+fi
+
+# An ignored test is named evidence that never runs. Keep the invariant simple:
+# this repository has no ignored Rust tests, contracted or otherwise.
+if find crates -name '*.rs' -exec grep -nH -E \
+    '^[[:space:]]*#\[ignore([[:space:]=\]])' {} + >"$TMP/ignored"; then
+    printf 'ignored Rust tests are not valid contract evidence:\n' >&2
+    sed 's/^/  /' "$TMP/ignored" >&2
+    fail "remove #[ignore] or move the scenario to an explicit manual rubric"
+fi
+
+contracts=$(awk -F '|' '!/^[[:space:]]*(#|$)/ { print $1 }' "$REGISTRY" |
+    LC_ALL=C sort -u | wc -l | tr -d ' ')
+contracted=$(wc -l <"$TMP/registered" | tr -d ' ')
+legacy=$(wc -l <"$TMP/baseline" | tr -d ' ')
+printf 'two-sided contracts OK: %s contract(s), %s contracted test(s), %s frozen legacy test(s)\n' \
+    "$contracts" "$contracted" "$legacy"

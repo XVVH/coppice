@@ -55,6 +55,17 @@ mode declaration + grant-event binding, tested in the gate suite.) An untracked
 untested invariant is how "the spec is the source of truth" quietly stops
 being true.
 
+**6. Every new test joins a two-sided contract.** `tests/contracts.tsv` is the
+machine-readable evidence index: each invariant contract has positive evidence
+(a valid case succeeds) and negative evidence (an invalid case fails without
+producing the protected effect). `scripts/ci contracts` compares that registry
+with Rust's compiled `--list` inventory. Tests that predate the gate are named
+individually in `tests/contracts-baseline.txt`; the baseline is frozen, so a new
+or renamed test cannot pass the required gate until it joins a contract. This
+turns the invariant matrix from review custom into an executable admission
+rule while leaving semantic judgment — whether a negative attacks the right
+failure — with review and mutation testing.
+
 ## Current invariant matrix
 
 | Invariant | Automated evidence | Status |
@@ -133,7 +144,19 @@ compiler-rejected). The exact scheduled evaluator+merge lane catches 58
 mutants, with three compiler-rejected and zero missed/timeouts. Capability glob
 mutations remain outside the blocking mutation lane: exhaustive/property tests
 cover their semantics, while several deliberately broken matchers do not
-terminate and make mutation-run exit status noisy.
+terminate and make mutation-run exit status noisy. Since W-2, the gate's
+dimension logic IS `evaluate.rs` (the gate replays the decision-time
+evaluator over signed records), so the scheduled evaluator lane's mutants
+now guard gate-time semantics too — a single hand-rolled recheck drifting
+out of sync is no longer a representable bug.
+
+A21/M7 has its own stable targeted mutation surface:
+`m7_grant_offsets`, `m7_effect_capability`, and `m7_verify_grant`. The mutation
+lane names those functions rather than source lines, so refactoring cannot
+silently move the authority-binding predicates outside the scheduled check.
+It catches all 21 viable mutations. The single excluded `<` to `<=` mutation
+is equivalent because substrate offsets are globally unique: a grant and its
+effect cannot occupy the same offset.
 
 **G6. Soak / growth.** Scheduled CI runs release mode with deeper generated
 case counts. A true thousands-of-events/files run remains: ledger size, WAL
@@ -151,10 +174,10 @@ death at each protocol phase.
 
 | Lane | Purpose |
 | --- | --- |
-| Local required / pre-push | strict Clippy; every workspace target; deterministic/exhaustive and bounded shrinkable properties; both executable acceptance demos |
+| Local required / pre-push | strict Clippy; two-sided contract validation; every workspace target; deterministic/exhaustive and bounded shrinkable properties; both executable acceptance demos |
 | Local full | required lane plus the networked RustSec advisory audit |
 | Weekly/manual deep | release-mode suite with 4,096 authority cases and 512 real-store model histories |
-| Weekly/manual mutation | scoped authority-evaluator and promotion-policy mutation run |
+| Weekly/manual mutation | scoped authority-evaluator, promotion-policy, and A21/M7 authority-binding mutation runs |
 | Future fault/soak | full process crash matrix, adversarial MCP corpus, thousands-of-events/storage growth |
 | Dogfooding | denial false-positive judgment, legibility, approval latency, bypass behavior, and real-corpus tripwires |
 
@@ -169,6 +192,13 @@ The P7 meta-test compares the caveat dimensions emitted by its full-vocabulary
 generator with `capability::KNOWN_DIMS`. Adding an evaluator dimension without
 adding generated semantic-subset coverage therefore fails the ordinary suite
 instead of silently weakening the claim.
+
+The contract gate is intentionally repository-owned and dependency-free. It
+requires workspace-unique test names, rejects ignored Rust tests, verifies that
+every registered or grandfathered name exists in the compiled inventory, and
+fails on any unclassified addition. The legacy baseline is migration debt, not
+an extension point: move entries out as their invariants are contracted; never
+add entries for new work.
 
 ## Tests as the future conformance suite
 

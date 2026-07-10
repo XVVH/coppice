@@ -20,7 +20,7 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
-## SI-22 — what clock does the gate's trace-vs-capability re-check use? (§5.3) — open, interpretation proposed
+## SI-22 — what clock does the gate's trace-vs-capability re-check use? (§5.3) — interpreted (W-2; flipping is cheap)
 
 §5.3: "At the gate, the recorded trace is verified against the capability
 — did the run do anything its token shouldn't allow — before anything
@@ -39,10 +39,14 @@ disagree:
    (RF-1's class: a call admitted past its boundary) without punishing
    honest latency between call and gate.
 
-**Proposed interpretation (to be implemented by the unified-evaluator
-work, roadmap W-2):** the gate re-evaluates each recorded call against
-its authorizing capability using the event's signed `at` as the clock;
-unparseable `at` fails closed. Note the trust nuance: `at` is broker-
+**Interpretation (implemented by W-2, `broker.rs::gate_trace_check`):**
+the gate replays each recorded call through the decision-time evaluator
+using the event's signed `at` as the clock; unparseable `at` fails
+closed (the evaluator's RF-1 posture). Tests encode it two-sidedly:
+`gate_catches_time_violation_the_decision_evaluator_missed` (out-of-
+window call recorded as if authorized → violation) and
+`si22_gate_clock_is_the_events_at_not_gate_time` (in-window work
+promotes after its window closes). Registered as contract GATE-REPLAY. Note the trust nuance: `at` is broker-
 assigned at record time and covered by the event signature, so within the
 fabric's signing boundary it is as trustworthy as the rest of the body —
 but it shares RF-13's residual (a key-holding writer can stamp any time;

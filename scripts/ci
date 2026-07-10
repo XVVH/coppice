@@ -33,7 +33,14 @@ run_static() {
     cargo clippy --workspace --all-targets --locked -- -D warnings
 }
 
+run_contracts() {
+    heading "two-sided invariant contract registry"
+    sh scripts/check-test-contracts
+}
+
 run_test() {
+    run_contracts
+
     heading "workspace tests (all current and future targets)"
     cargo test --workspace --all-targets --locked
 
@@ -70,6 +77,15 @@ run_mutation() {
         -j 4 \
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
+
+    heading "A21/M7 authority-binding mutation tests"
+    cargo mutants \
+        -f crates/asf-kernel/src/broker.rs \
+        -F 'm7_(grant_offsets|effect_capability|verify_grant)' \
+        -E 'replace < with <= in m7_verify_grant' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
 }
 
 usage() {
@@ -78,7 +94,8 @@ usage: scripts/ci <lane>
 
 lanes:
   static    strict Clippy over the workspace and all targets
-  test      all workspace targets plus both executable acceptance demos
+  contracts validate two-sided evidence and reject unclassified new tests
+  test      contracts + all workspace targets + both acceptance demos
   required  static + test; deterministic/offline and suitable for pre-push
   audit     RustSec advisory audit (requires cargo-audit and network/cache)
   full      required + audit
@@ -91,6 +108,9 @@ EOF
 case "${1:-required}" in
     static)
         run_static
+        ;;
+    contracts)
+        run_contracts
         ;;
     test)
         run_test

@@ -28,16 +28,10 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-**W-2 — Unified evaluator at the gate.** Owner: agent (next PR). The gate
-re-checks 4 of 7 caveat dimensions (`action.allow`, `reversibility.max`,
-`paths.write`, `budget.count`); `time` is omitted — the dimension where
-RF-1, the only fail-open bug to date, lived. Refactor so decision time and
-gate time share one dimension-checking core, with meters/exemptions
-replayed from signed events and `time` evaluated against the event's
-recorded `at` (SI-22, filed, interpreted pending ratification). Stretch:
-pull the unified path into the mutation lane (shrinks G5's scope gap).
-*Provenance: 2026-07-10 design-review session (both external reviews
-converged on this; gate coverage verified in code).*
+**W-2 — Unified evaluator at the gate.** Done — see the done log. The
+mutation-lane stretch goal was subsumed: gate dimension logic now IS
+`evaluate.rs`, which the scheduled mutation lane already covers, and the
+parallel A21/M7 lane covers the grant-binding helpers.
 
 ## Queued (ordered)
 
@@ -134,6 +128,12 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-2 — unified evaluator at the gate** — the gate replays every signed
+  tool_call through the decision-time evaluator (all seven dimensions, not
+  four; context from the registered action; meters/exemptions from signed
+  events; clock = the event's `at` per SI-22, interpreted). Ships with the
+  two-sided contract registry, the four m7 grant-activation adversarial
+  cases, and the targeted A21/M7 mutation lane (PR #20, 2026-07-10).
 - **A21/SI-21** — authority binds by declaration + grant event; spec v0.6;
   adversarial gate coverage; RF-13 filed (PR #18, 2026-07-10).
 - **Invariant-driven verification hardening** from the security audit

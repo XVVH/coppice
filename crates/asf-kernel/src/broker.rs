@@ -12,7 +12,7 @@
 //! tools must be covered by the bound manifest's state roots. M2 is
 //! enforced at call time by the evaluator.
 
-use crate::capability::{self, auth_rank, glob_matches, reversibility_rank};
+use crate::capability::{self, auth_rank};
 use crate::evaluate::{self, CallCtx, Outcome};
 use crate::kernel::{Fabric, KernelError};
 use crate::promote::{self, Conflict, Op};
@@ -64,7 +64,11 @@ pub enum Decision {
     /// Execute it: forward `forwarded_args` downstream, then report the
     /// result via [`Broker::record_result`] with the returned ticket.
     Allowed { ticket: u64, forwarded_args: Value },
-    Denied { reasons: Vec<String>, structural: Option<String>, event: String },
+    Denied {
+        reasons: Vec<String>,
+        structural: Option<String>,
+        event: String,
+    },
     /// Parked. One batch escalation per failing caveat (A9).
     Escalated { escalations: Vec<i64> },
 }
@@ -124,16 +128,31 @@ impl Broker {
                 decided_at   TEXT
             );",
         )?;
-        Ok(Self { fabric, pending: Vec::new(), next_ticket: 1 })
+        Ok(Self {
+            fabric,
+            pending: Vec::new(),
+            next_ticket: 1,
+        })
     }
 
     // ---- registration & minting ----------------------------------------
 
-    pub fn register_tool(&mut self, tool_name: &str, actions: Value) -> Result<String, BrokerError> {
+    pub fn register_tool(
+        &mut self,
+        tool_name: &str,
+        actions: Value,
+    ) -> Result<String, BrokerError> {
         let now = now_rfc3339();
         let sk = self.fabric.fabric_sk().clone();
         let span = self.fabric.substrate_span().to_string();
-        Ok(tools::register(&mut self.fabric.conn, &sk, &span, tool_name, actions, &now)?)
+        Ok(tools::register(
+            &mut self.fabric.conn,
+            &sk,
+            &span,
+            tool_name,
+            actions,
+            &now,
+        )?)
     }
 
     /// Mint a capability bound to `manifest_id` (F1: broker-minted, sealed
@@ -149,7 +168,15 @@ impl Broker {
         self.check_m1(manifest_id, &caveats)?;
 
         let now = now_rfc3339();
-        let body = capability::build(holder, manifest_id, None, &now, expires_at, caveats, escalatable)?;
+        let body = capability::build(
+            holder,
+            manifest_id,
+            None,
+            &now,
+            expires_at,
+            caveats,
+            escalatable,
+        )?;
         let sealed = canon::seal("cap", body, self.fabric.fabric_sk())?;
         let id = trace::put_object(&self.fabric.conn, "capability", &sealed, &now)?;
         self.grant_event(&id, manifest_id, None)?;
@@ -173,13 +200,13 @@ impl Broker {
             .collect();
         for tool in allow["tools"].as_array().into_iter().flatten() {
             let tool = tool.as_str().unwrap_or_default();
-            for store in tools::stores_for_tool(
-                &self.fabric.conn,
-                &self.fabric.fabric_vk(),
-                tool,
-            )? {
+            for store in tools::stores_for_tool(&self.fabric.conn, &self.fabric.fabric_vk(), tool)?
+            {
                 if !root_stores.contains(&store.as_str()) {
-                    return Err(BrokerError::M1 { store, manifest: manifest_id.into() });
+                    return Err(BrokerError::M1 {
+                        store,
+                        manifest: manifest_id.into(),
+                    });
                 }
             }
         }
@@ -203,7 +230,13 @@ impl Broker {
         self.check_m1(bound_manifest, &caveats)?;
         let now = now_rfc3339();
         let body = capability::build(
-            holder, bound_manifest, Some(parent_id), &now, expires_at, caveats, escalatable,
+            holder,
+            bound_manifest,
+            Some(parent_id),
+            &now,
+            expires_at,
+            caveats,
+            escalatable,
         )?;
         capability::verify_attenuation(&parent, &Value::Object(body.clone()))?;
         let sealed = canon::seal("cap", body, self.fabric.fabric_sk())?;
@@ -212,7 +245,12 @@ impl Broker {
         Ok(id)
     }
 
-    fn grant_event(&mut self, cap: &str, manifest: &str, parent: Option<&str>) -> Result<(), BrokerError> {
+    fn grant_event(
+        &mut self,
+        cap: &str,
+        manifest: &str,
+        parent: Option<&str>,
+    ) -> Result<(), BrokerError> {
         let sk = self.fabric.fabric_sk().clone();
         let span = self.fabric.substrate_span().to_string();
         trace::append(
@@ -242,21 +280,24 @@ impl Broker {
         // Broker-minted or bust (F1): the capability must verify under the
         // broker's own key. A forged or tampered token is structurally dead.
         if canon::verify(&cap, &self.fabric.fabric_vk()).is_err() {
-            return self.deny(cap_id, tool, action, vec![], Some("capability signature invalid (F1)".into()), json!([]));
+            return self.deny(
+                cap_id,
+                tool,
+                action,
+                vec![],
+                Some("capability signature invalid (F1)".into()),
+                json!([]),
+            );
         }
 
         // Undeclared actions cannot be called (§4).
-        let reg = match tools::lookup_action(
-            &self.fabric.conn,
-            &self.fabric.fabric_vk(),
-            tool,
-            action,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                return self.deny(cap_id, tool, action, vec![], Some(e.to_string()), json!([]))
-            }
-        };
+        let reg =
+            match tools::lookup_action(&self.fabric.conn, &self.fabric.fabric_vk(), tool, action) {
+                Ok(r) => r,
+                Err(e) => {
+                    return self.deny(cap_id, tool, action, vec![], Some(e.to_string()), json!([]))
+                }
+            };
 
         let manifest = self
             .fabric
@@ -350,7 +391,12 @@ impl Broker {
                     if let (Some(arg), Some(secret)) =
                         (cred["arg"].as_str(), cred["secret"].as_str())
                     {
-                        if let Some(v) = self.fabric.keystore().secret_get(secret).map_err(KernelError::from)? {
+                        if let Some(v) = self
+                            .fabric
+                            .keystore()
+                            .secret_get(secret)
+                            .map_err(KernelError::from)?
+                        {
                             forwarded[arg] = Value::String(v);
                         }
                     }
@@ -371,7 +417,10 @@ impl Broker {
                         "paths": ctx.write_paths,
                     }),
                 });
-                Ok(Decision::Allowed { ticket, forwarded_args: forwarded })
+                Ok(Decision::Allowed {
+                    ticket,
+                    forwarded_args: forwarded,
+                })
             }
             Outcome::Escalate { failed } => {
                 let mut ids = Vec::new();
@@ -414,7 +463,11 @@ impl Broker {
             }),
             &now_rfc3339(),
         )?;
-        Ok(Decision::Denied { reasons: failed, structural, event: ev.id })
+        Ok(Decision::Denied {
+            reasons: failed,
+            structural,
+            event: ev.id,
+        })
     }
 
     /// A9 batching: one pending escalation row per (cap, caveat key); a
@@ -597,7 +650,11 @@ impl Broker {
     /// After executing an Allowed call downstream, record the outcome. The
     /// stored args are the PRE-injection bytes; secrets never enter the
     /// payload store.
-    pub fn record_result(&mut self, ticket: u64, result: &[u8]) -> Result<trace::Appended, BrokerError> {
+    pub fn record_result(
+        &mut self,
+        ticket: u64,
+        result: &[u8],
+    ) -> Result<trace::Appended, BrokerError> {
         let idx = self
             .pending
             .iter()
@@ -641,10 +698,17 @@ struct MergePlan {
 /// A21/M7 activation view: the earliest verified grant offset for each
 /// capability bound to this manifest. Kept as a small pure helper so the
 /// authority-binding predicates have a stable mutation-testing target.
-fn m7_grant_offsets(events: &[trace::EventRow], substrate_span: &str, manifest_id: &str) -> BTreeMap<String, i64> {
+fn m7_grant_offsets(
+    events: &[trace::EventRow],
+    substrate_span: &str,
+    manifest_id: &str,
+) -> BTreeMap<String, i64> {
     let mut grants = BTreeMap::new();
     for ev in events {
-        if ev.span == substrate_span && ev.kind == "grant" && ev.manifest.as_deref() == Some(manifest_id) {
+        if ev.span == substrate_span
+            && ev.kind == "grant"
+            && ev.manifest.as_deref() == Some(manifest_id)
+        {
             if let Some(cap) = ev.raw["body"]["capability"].as_str() {
                 grants.entry(cap.to_string()).or_insert(ev.offset);
             }
@@ -657,7 +721,11 @@ fn m7_grant_offsets(events: &[trace::EventRow], substrate_span: &str, manifest_i
 /// unattributed effect; brokered mode may not. Grant ordering is checked only
 /// after the claimed capability has passed signature and M2 verification, so a
 /// cross-manifest substitution retains the more precise lineage failure.
-fn m7_effect_capability<'a>(brokered: bool, body: &'a Value, effect_id: &str) -> Result<Option<&'a str>, String> {
+fn m7_effect_capability<'a>(
+    brokered: bool,
+    body: &'a Value,
+    effect_id: &str,
+) -> Result<Option<&'a str>, String> {
     let Some(cap_id) = body["summary"]["capability"].as_str() else {
         return if brokered {
             Err(format!(
@@ -715,7 +783,9 @@ impl Broker {
         canon::verify(&man, &self.fabric.fabric_vk())?;
         let span = man["trace"]["span"]
             .as_str()
-            .ok_or_else(|| KernelError::MalformedManifest(manifest_id.into(), "no trace.span".into()))?
+            .ok_or_else(|| {
+                KernelError::MalformedManifest(manifest_id.into(), "no trace.span".into())
+            })?
             .to_string();
 
         let mut trace_report = self.gate_trace_check(manifest_id, &span)?;
@@ -774,13 +844,23 @@ impl Broker {
         }
     }
 
-    /// §5.3 trace-vs-capability: re-verify the span's chain, then recheck
-    /// every recorded tool_call against the capability that authorized it
-    /// — action allowlist, reversibility ceiling, path scope, and budget
-    /// totals net of channel-stamped approvals. The broker checking its
-    /// own homework matters because the gate runs later, under a different
-    /// code path, over signed records: a bug (or tamper) between decision
-    /// time and merge time surfaces here, before anything becomes durable.
+    /// §5.3 trace-vs-capability: re-verify the span's chain, then replay
+    /// every recorded tool_call through the SAME evaluator that authorized
+    /// it at decision time — one dimension vocabulary at both moments, so
+    /// the gate can never lag the caveat grammar (the pre-W-2 gate hand-
+    /// rechecked four of seven dimensions and omitted `time`, the dimension
+    /// where RF-1, the one fail-open bug to date, lived). Context is
+    /// rebuilt from the registered action (trusted-mechanical, §4 — a
+    /// forged summary class or reversibility cannot dodge the check) plus
+    /// the broker-extracted write paths in the signed summary; meters and
+    /// approval exemptions replay from signed events, never runtime
+    /// tables; and the clock is each event's signed `at` (SI-22): "did the
+    /// run do anything its token shouldn't allow" means at the moment of
+    /// the call — gate latency must not retro-fail honest parked work.
+    /// The broker checking its own homework matters because the gate runs
+    /// later, under a different code path, over signed records: a bug (or
+    /// tamper) between decision time and merge time surfaces here, before
+    /// anything becomes durable.
     fn gate_trace_check(&self, manifest_id: &str, span: &str) -> Result<Value, BrokerError> {
         trace::verify_span(&self.fabric.conn, &self.fabric.fabric_vk(), span)?;
         let events = trace::events_in_span(&self.fabric.conn, span)?;
@@ -790,8 +870,9 @@ impl Broker {
         // event at a lower substrate offset. Observed claims nothing;
         // attributed calls are still checked in full.
         let man = trace::get_object(&self.fabric.conn, manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk())
-            .map_err(|e| BrokerError::GateTraceViolation(format!("manifest {manifest_id} unverifiable: {e}")))?;
+        canon::verify(&man, &self.fabric.fabric_vk()).map_err(|e| {
+            BrokerError::GateTraceViolation(format!("manifest {manifest_id} unverifiable: {e}"))
+        })?;
         let brokered = man["authority"]["mode"] == "brokered";
 
         // Approved budget headroom: approval events grant `uses` against an
@@ -823,12 +904,16 @@ impl Broker {
                 continue;
             };
             if uses > 0 {
-                *approved.entry((cap.to_string(), key.to_string())).or_insert(0) += uses;
+                *approved
+                    .entry((cap.to_string(), key.to_string()))
+                    .or_insert(0) += uses;
             }
         }
 
         let mut caps: BTreeMap<String, Value> = BTreeMap::new();
-        let mut class_counts: BTreeMap<(String, String), i64> = BTreeMap::new();
+        // Replay ledgers, keyed (cap, caveat-key): budget consumption and
+        // remaining signed-approval headroom, rebuilt in event order.
+        let mut meters: BTreeMap<(String, String), u64> = BTreeMap::new();
         let mut tool_calls = 0;
         let mut unattributed = 0;
         let violation = |msg: String| BrokerError::GateTraceViolation(msg);
@@ -839,7 +924,8 @@ impl Broker {
             }
             tool_calls += 1;
             let body = &ev.raw["body"];
-            let Some(cap_id) = m7_effect_capability(brokered, body, &ev.id).map_err(&violation)? else {
+            let Some(cap_id) = m7_effect_capability(brokered, body, &ev.id).map_err(&violation)?
+            else {
                 unattributed += 1; // observed mode: kernel-recorded call, nothing to check against
                 continue;
             };
@@ -860,63 +946,94 @@ impl Broker {
                 }
             };
             m7_verify_grant(brokered, cap_id, &ev.id, ev.offset, &grants).map_err(&violation)?;
-            let caveat =
-                |dim: &str| -> Option<Value> { cap["caveats"].as_array()?.iter().find(|c| c["dim"] == dim).cloned() };
+
             let (tool, action) = (
                 body["tool"].as_str().unwrap_or(""),
                 body["action"].as_str().unwrap_or(""),
             );
-            if let Some(allow) = caveat("action.allow") {
-                let ok = allow["tools"].as_array().is_some_and(|t| t.iter().any(|x| x == tool))
-                    && allow["actions"]
+            // Undeclared actions cannot be called (§4) — at the gate as at
+            // decision time. The registered action is the trusted-mechanical
+            // source for class/reversibility/side_effect (a forged summary
+            // cannot dodge the check); the signed summary supplies only the
+            // broker-extracted write paths.
+            let reg =
+                tools::lookup_action(&self.fabric.conn, &self.fabric.fabric_vk(), tool, action)
+                    .map_err(|e| violation(format!("event {}: {e}", ev.id)))?;
+            let class = reg["class"].as_str().unwrap_or("write");
+            let write_paths = if matches!(class, "write" | "delete" | "move") {
+                // Missing paths on a path-writing class fail closed in evaluate.
+                Some(
+                    body["summary"]["paths"]
                         .as_array()
-                        .is_some_and(|a| a.iter().any(|x| x == action));
-                if !ok {
-                    return Err(violation(format!(
-                        "event {} calls {tool}.{action} outside action.allow",
-                        ev.id
-                    )));
-                }
-            }
-            if let Some(rev) = caveat("reversibility.max") {
-                let max = rev["max"].as_str().and_then(reversibility_rank);
-                let have = body["reversibility"].as_str().and_then(reversibility_rank);
-                if !matches!((max, have), (Some(m), Some(h)) if h <= m) {
-                    return Err(violation(format!("event {} exceeds reversibility.max", ev.id)));
-                }
-            }
-            if let (Some(pw), Some(paths)) = (caveat("paths.write"), body["summary"]["paths"].as_array()) {
-                let globs: Vec<&str> = pw["globs"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(Value::as_str).collect())
-                    .unwrap_or_default();
-                for p in paths.iter().filter_map(Value::as_str) {
-                    if !globs.iter().any(|g| glob_matches(g, p)) {
-                        return Err(violation(format!("event {} wrote {p} outside paths.write", ev.id)));
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                )
+            } else {
+                None
+            };
+            let ctx = CallCtx {
+                tool,
+                action,
+                reversibility: reg["reversibility"].as_str().unwrap_or("irreversible"),
+                side_effect: reg["side_effect"].as_str().unwrap_or("external"),
+                action_class: class,
+                write_paths,
+                now: &ev.at,
+                current_manifest: manifest_id,
+            };
+            let replay = {
+                let mut meter = |key: &str| -> u64 {
+                    meters
+                        .get(&(cap_id.to_string(), key.to_string()))
+                        .copied()
+                        .unwrap_or(0)
+                };
+                let mut exempt = |key: &str| -> Option<String> {
+                    (approved
+                        .get(&(cap_id.to_string(), key.to_string()))
+                        .copied()
+                        .unwrap_or(0)
+                        > 0)
+                    .then(|| "signed-approval".to_string())
+                };
+                evaluate::evaluate(&cap, &ctx, &mut meter, &mut exempt)
+            };
+            match replay.outcome {
+                Outcome::Allow => {
+                    // Mirror the broker's Allow arm on the replay ledgers —
+                    // consumption only on Allow (the RF-2 discipline).
+                    for c in &replay.checks {
+                        if c.caveat.starts_with("budget.count:")
+                            && c.meter.get("applies") != Some(&Value::Bool(false))
+                        {
+                            *meters
+                                .entry((cap_id.to_string(), c.caveat.clone()))
+                                .or_insert(0) += 1;
+                        }
+                    }
+                    for (key, _) in &replay.consumed_exemptions {
+                        if let Some(uses) = approved.get_mut(&(cap_id.to_string(), key.clone())) {
+                            *uses -= 1;
+                        }
                     }
                 }
-            }
-            if let Some(class) = body["summary"]["action_class"].as_str() {
-                *class_counts.entry((cap_id.to_string(), class.to_string())).or_insert(0) += 1;
-            }
-        }
-
-        for ((cap_id, class), count) in &class_counts {
-            let cap = &caps[cap_id];
-            let budget = cap["caveats"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|c| c["dim"] == "budget.count" && c["action_class"].as_str() == Some(class.as_str()));
-            if let Some(b) = budget {
-                let max = b["max"].as_i64().unwrap_or(0);
-                let extra = approved
-                    .get(&(cap_id.clone(), format!("budget.count:{class}")))
-                    .copied()
-                    .unwrap_or(0);
-                if *count > max + extra {
+                Outcome::Deny { failed, structural } => {
                     return Err(violation(format!(
-                        "{count} {class} calls under {cap_id} exceed budget {max} + {extra} approved"
+                        "event {} fails re-evaluation under {cap_id}: {}",
+                        ev.id,
+                        structural.unwrap_or_else(|| format!("failed [{}]", failed.join(", ")))
+                    )));
+                }
+                Outcome::Escalate { failed } => {
+                    return Err(violation(format!(
+                        "event {} executed without signed approval headroom: [{}]",
+                        ev.id,
+                        failed.join(", ")
                     )));
                 }
             }
@@ -965,7 +1082,9 @@ impl Broker {
             let spec = self.fabric.store(&store)?.clone();
             let branch_root = branch_roots
                 .get(&store)
-                .ok_or_else(|| KernelError::UnknownStore(format!("{store} has no pinned branch root")))?
+                .ok_or_else(|| {
+                    KernelError::UnknownStore(format!("{store} has no pinned branch root"))
+                })?
                 .clone();
             let trunk_root = snapshot::capture(&self.fabric.cas, &spec)?;
 
@@ -1031,7 +1150,12 @@ impl Broker {
     /// equal the final tool_call's `state_root_after` attestation. This closes
     /// crash/signal and direct-branch-write paths that previously let untraced
     /// state reach promotion.
-    fn verify_branch_tip(&self, man: &Value, span: &str, plan: &MergePlan) -> Result<Value, BrokerError> {
+    fn verify_branch_tip(
+        &self,
+        man: &Value,
+        span: &str,
+        plan: &MergePlan,
+    ) -> Result<Value, BrokerError> {
         let events = trace::events_in_span(&self.fabric.conn, span)?;
         let last_call = events.iter().rev().find(|e| e.kind == "tool_call");
         let mut roots = BTreeMap::new();
@@ -1054,7 +1178,10 @@ impl Broker {
                     .find(|r| r["store"].as_str() == Some(store.store.as_str()))
                     .and_then(|r| r["root"].as_str())
                     .ok_or_else(|| {
-                        BrokerError::GateTraceViolation(format!("manifest has no base root for {}", store.store))
+                        BrokerError::GateTraceViolation(format!(
+                            "manifest has no base root for {}",
+                            store.store
+                        ))
                     })?
                     .to_string(),
             };
@@ -1123,7 +1250,8 @@ impl Broker {
         )?;
         for sp in &plan.stores {
             let merged = sp.install.clone().unwrap_or_else(|| sp.trunk.clone());
-            self.fabric.set_expected_root(&sp.store, &merged, ev.offset)?;
+            self.fabric
+                .set_expected_root(&sp.store, &merged, ev.offset)?;
         }
         Ok(ev.id)
     }
@@ -1148,7 +1276,12 @@ impl Broker {
     /// recomputed fresh against current trunk — if trunk moved since the
     /// preview, new divergences still resolve trunk-wins (the safe
     /// direction), never wider than what was previewed.
-    pub fn approve_promotion(&mut self, id: i64, channel: &str, auth_strength: &str) -> Result<String, BrokerError> {
+    pub fn approve_promotion(
+        &mut self,
+        id: i64,
+        channel: &str,
+        auth_strength: &str,
+    ) -> Result<String, BrokerError> {
         let row: Option<(String, String)> = self
             .fabric
             .conn
@@ -1166,10 +1299,11 @@ impl Broker {
         let _gate = self.fabric.gate_lock()?;
         self.fabric.check_drift()?;
 
-        let preview: Value = serde_json::from_str(&preview_raw).map_err(|e| BrokerError::MalformedPromotion {
-            id,
-            detail: format!("preview is not JSON: {e}"),
-        })?;
+        let preview: Value =
+            serde_json::from_str(&preview_raw).map_err(|e| BrokerError::MalformedPromotion {
+                id,
+                detail: format!("preview is not JSON: {e}"),
+            })?;
         let branch_roots: BTreeMap<String, String> = preview["branch_roots"]
             .as_object()
             .ok_or_else(|| BrokerError::MalformedPromotion {
@@ -1188,11 +1322,19 @@ impl Broker {
             .collect::<Result<_, _>>()?;
         let man = trace::get_object(&self.fabric.conn, &manifest_id)?;
         canon::verify(&man, &self.fabric.fabric_vk())?;
-        let span = man["trace"]["span"].as_str().unwrap_or_default().to_string();
+        let span = man["trace"]["span"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let mut trace_report = self.gate_trace_check(&manifest_id, &span)?;
         let plan = self.compute_merge_from_roots(&man, &branch_roots)?;
         trace_report["branch_tip"] = self.verify_branch_tip(&man, &span, &plan)?;
-        let event = self.apply_plan(&manifest_id, &plan, &trace_report, &format!("approved:{id}"))?;
+        let event = self.apply_plan(
+            &manifest_id,
+            &plan,
+            &trace_report,
+            &format!("approved:{id}"),
+        )?;
 
         let now = now_rfc3339();
         self.fabric.conn.execute(
@@ -1214,7 +1356,12 @@ impl Broker {
         Ok(event)
     }
 
-    pub fn reject_promotion(&mut self, id: i64, channel: &str, auth_strength: &str) -> Result<(), BrokerError> {
+    pub fn reject_promotion(
+        &mut self,
+        id: i64,
+        channel: &str,
+        auth_strength: &str,
+    ) -> Result<(), BrokerError> {
         let manifest: Option<String> = self
             .fabric
             .conn
@@ -1245,7 +1392,11 @@ impl Broker {
         Ok(())
     }
 
-    fn check_min_auth_for_manifest(&self, manifest_id: &str, auth_strength: &str) -> Result<(), BrokerError> {
+    fn check_min_auth_for_manifest(
+        &self,
+        manifest_id: &str,
+        auth_strength: &str,
+    ) -> Result<(), BrokerError> {
         // Strongest approval.min_auth among verified caps bound to this
         // manifest applies to gate approvals too.
         let mut stmt = self

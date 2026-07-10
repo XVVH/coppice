@@ -144,7 +144,11 @@ compiler-rejected). The exact scheduled evaluator+merge lane catches 58
 mutants, with three compiler-rejected and zero missed/timeouts. Capability glob
 mutations remain outside the blocking mutation lane: exhaustive/property tests
 cover their semantics, while several deliberately broken matchers do not
-terminate and make mutation-run exit status noisy.
+terminate and make mutation-run exit status noisy. Since W-2, the gate's
+dimension logic IS `evaluate.rs` (the gate replays the decision-time
+evaluator over signed records), so the scheduled evaluator lane's mutants
+now guard gate-time semantics too — a single hand-rolled recheck drifting
+out of sync is no longer a representable bug.
 
 A21/M7 has its own stable targeted mutation surface:
 `m7_grant_offsets`, `m7_effect_capability`, and `m7_verify_grant`. The mutation

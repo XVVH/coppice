@@ -39,6 +39,12 @@ TRACE-CHAIN|positive|trace::tests::chain_links_and_offsets_are_global
 TRACE-CHAIN|negative|trace::tests::deleting_a_middle_event_breaks_the_chain
 TRACE-CHAIN|negative|trace::tests::tamper_after_bypassing_triggers_is_detected
 
+# W-2 unified gate replay: the decision evaluator re-runs over signed
+# records, clocked at each event's `at` (SI-22 at-the-time semantics).
+GATE-REPLAY|positive|si22_gate_clock_is_the_events_at_not_gate_time
+GATE-REPLAY|negative|gate_catches_time_violation_the_decision_evaluator_missed
+GATE-REPLAY|negative|gate_rejects_undeclared_action_in_trace
+
 # Promotion and human-approval boundaries
 PROMOTION-GATE|positive|clean_additive_run_auto_promotes
 PROMOTION-GATE|negative|gate_rejects_branch_state_with_no_signed_tool_call_attestation

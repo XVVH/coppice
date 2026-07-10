@@ -5,7 +5,14 @@
 //!   `concurrent_human_and_agent_edits_merge` here (over real stores)
 //! - Rename detection / mass-rename-not-mass-delete: unit tests in
 //!   promote.rs + `reorganization_parks_but_renders_as_moves`
-//! - Trace-vs-capability at the gate: `gate_blocks_run_that_exceeded_its_token`
+//! - Trace-vs-capability at the gate (W-2 unified replay): the gate re-runs
+//!   the decision-time evaluator over each signed call — forged calls die at
+//!   re-evaluation (`gate_blocks_run_that_exceeded_its_token`), undeclared
+//!   actions fail closed (`gate_rejects_undeclared_action_in_trace`), the
+//!   RF-1 dimension class is caught
+//!   (`gate_catches_time_violation_the_decision_evaluator_missed`), and the
+//!   replay clock is the event's signed `at` (SI-22) so honest work survives
+//!   gate latency (`si22_gate_clock_is_the_events_at_not_gate_time`)
 //! - Promoted changes remain revertible: `promotion_survives_revert`
 //! - Zero-authorship policy + park/approve on the C2 surface:
 //!   `destructive_ops_park_then_apply_on_approval`
@@ -117,20 +124,49 @@ fn setup_mode(mode: AuthorityMode) -> World {
         },
     ];
     let mut fabric = Fabric::open(tmp.path().join("fabric"), stores).unwrap();
-    let human = fabric.register_principal("human", "josh", "01", None).unwrap();
-    let agent = fabric.register_principal("agent", "hermes", "02", Some(&human)).unwrap();
-    let chan = fabric.register_channel(&human, "local_session", b"tty", "local_session").unwrap();
+    let human = fabric
+        .register_principal("human", "josh", "01", None)
+        .unwrap();
+    let agent = fabric
+        .register_principal("agent", "hermes", "02", Some(&human))
+        .unwrap();
+    let chan = fabric
+        .register_channel(&human, "local_session", b"tty", "local_session")
+        .unwrap();
     let intent = fabric
-        .capture_intent(&human, &chan, "local_session", "vault maintenance", json!({}), None)
+        .capture_intent(
+            &human,
+            &chan,
+            "local_session",
+            "vault maintenance",
+            json!({}),
+            None,
+        )
         .unwrap();
     let step = fabric
-        .step_boundary_with_mode(&human, &agent, &intent, json!({"bundle":"sha256:g","skills":[]}), mode)
+        .step_boundary_with_mode(
+            &human,
+            &agent,
+            &intent,
+            json!({"bundle":"sha256:g","skills":[]}),
+            mode,
+        )
         .unwrap();
     let branch = fabric.create_branch(&step.manifest).unwrap();
 
     let mut broker = Broker::new(fabric).unwrap();
-    broker.register_tool("tool:vault@1.0", vault_actions()).unwrap();
-    let cap = broker.mint(&step.manifest, &agent, caveats(), vec![], "2027-01-01T00:00:00Z").unwrap();
+    broker
+        .register_tool("tool:vault@1.0", vault_actions())
+        .unwrap();
+    let cap = broker
+        .mint(
+            &step.manifest,
+            &agent,
+            caveats(),
+            vec![],
+            "2027-01-01T00:00:00Z",
+        )
+        .unwrap();
     World {
         _tmp: tmp,
         vault,
@@ -150,7 +186,12 @@ fn setup_mode(mode: AuthorityMode) -> World {
 fn agent_write(w: &mut World, rel: &str, content: &str) {
     let d = w
         .broker
-        .propose_call(&w.cap, "tool:vault@1.0", "note.write", &json!({"path": rel, "content": content}))
+        .propose_call(
+            &w.cap,
+            "tool:vault@1.0",
+            "note.write",
+            &json!({"path": rel, "content": content}),
+        )
         .unwrap();
     match d {
         Decision::Allowed { ticket, .. } => {
@@ -164,7 +205,15 @@ fn agent_write(w: &mut World, rel: &str, content: &str) {
 }
 
 fn agent_delete(w: &mut World, rel: &str) {
-    let d = w.broker.propose_call(&w.cap, "tool:vault@1.0", "note.delete", &json!({"path": rel})).unwrap();
+    let d = w
+        .broker
+        .propose_call(
+            &w.cap,
+            "tool:vault@1.0",
+            "note.delete",
+            &json!({"path": rel}),
+        )
+        .unwrap();
     match d {
         Decision::Allowed { ticket, .. } => {
             fs::remove_file(w.branch["fs:vault"].join(rel)).unwrap();
@@ -177,16 +226,52 @@ fn agent_delete(w: &mut World, rel: &str) {
 /// Store a valid fabric-signed capability without emitting its activating
 /// grant event. A15 makes this row an inert materialized view.
 fn store_ungranted_capability(w: &mut World) -> String {
-    let sk = w.broker.fabric.keystore().signing_key(Role::Fabric).unwrap();
-    let body = capability::build(&w.agent, &w.manifest, None, "2026-07-10T00:00:00Z", "2027-01-01T00:00:00Z", caveats(), vec![]).unwrap();
+    let sk = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    let body = capability::build(
+        &w.agent,
+        &w.manifest,
+        None,
+        "2026-07-10T00:00:00Z",
+        "2027-01-01T00:00:00Z",
+        caveats(),
+        vec![],
+    )
+    .unwrap();
     let sealed = canon::seal("cap", body, &sk).unwrap();
-    trace::put_object(&w.broker.fabric.conn, "capability", &sealed, "2026-07-10T00:00:00Z").unwrap()
+    trace::put_object(
+        &w.broker.fabric.conn,
+        "capability",
+        &sealed,
+        "2026-07-10T00:00:00Z",
+    )
+    .unwrap()
 }
 
 fn append_substrate_event(w: &mut World, manifest: &str, kind: &str, body: Value) {
-    let sk = w.broker.fabric.keystore().signing_key(Role::Fabric).unwrap();
-    let span = trace::meta_get(&w.broker.fabric.conn, "substrate_span").unwrap().expect("substrate span");
-    trace::append(&mut w.broker.fabric.conn, &sk, &span, Some(manifest), kind, body, "2026-07-10T00:00:01Z").unwrap();
+    let sk = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    let span = trace::meta_get(&w.broker.fabric.conn, "substrate_span")
+        .unwrap()
+        .expect("substrate span");
+    trace::append(
+        &mut w.broker.fabric.conn,
+        &sk,
+        &span,
+        Some(manifest),
+        kind,
+        body,
+        "2026-07-10T00:00:01Z",
+    )
+    .unwrap();
 }
 
 /// Record an effect that claims a capability without going through broker
@@ -200,7 +285,9 @@ fn record_claimed_write(w: &mut World, capability: &str, rel: &str) {
         .record_tool_call(
             "tool:vault@1.0",
             "note.write",
-            serde_json::to_string(&json!({"path": rel})).unwrap().as_bytes(),
+            serde_json::to_string(&json!({"path": rel}))
+                .unwrap()
+                .as_bytes(),
             b"{}",
             json!({
                 "capability": capability,
@@ -245,16 +332,27 @@ fn concurrent_human_and_agent_edits_merge() {
             assert_eq!(conflicts[0]["path"], "inbox/a.md");
             assert_eq!(conflicts[0]["resolution"], "trunk_wins");
 
-            w.broker.approve_promotion(promotion, &w.chan, "local_session").unwrap();
+            w.broker
+                .approve_promotion(promotion, &w.chan, "local_session")
+                .unwrap();
         }
         other => panic!("expected park on conflict: {other:?}"),
     }
 
     // Merged trunk: human's conflict version won, human's b.md stands,
     // agent's non-conflicting addition landed.
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/a.md")).unwrap(), "human edit of a\n");
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/b.md")).unwrap(), "human edit\n");
-    assert_eq!(fs::read_to_string(w.vault.join("new.md")).unwrap(), "agent addition\n");
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/a.md")).unwrap(),
+        "human edit of a\n"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/b.md")).unwrap(),
+        "human edit\n"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("new.md")).unwrap(),
+        "agent addition\n"
+    );
 
     // The ledger shows the promotion and explains all live roots.
     let expl = w.broker.fabric.explain().unwrap();
@@ -273,9 +371,18 @@ fn clean_additive_run_auto_promotes() {
         PromotionOutcome::Applied { .. } => {}
         other => panic!("adds+modifies with no conflicts must auto-promote: {other:?}"),
     }
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/c.md")).unwrap(), "new note\n");
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/a.md")).unwrap(), "improved a\n");
-    assert!(w.broker.fabric.check_drift().unwrap().is_empty(), "promotion re-baselined expectations");
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/c.md")).unwrap(),
+        "new note\n"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/a.md")).unwrap(),
+        "improved a\n"
+    );
+    assert!(
+        w.broker.fabric.check_drift().unwrap().is_empty(),
+        "promotion re-baselined expectations"
+    );
 }
 
 #[test]
@@ -297,7 +404,10 @@ fn gate_rejects_branch_state_with_no_signed_tool_call_attestation() {
 fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
     let mut w = setup();
     let mut tight = caveats();
-    *tight.iter_mut().find(|c| c["dim"] == "budget.count").unwrap() = json!({
+    *tight
+        .iter_mut()
+        .find(|c| c["dim"] == "budget.count")
+        .unwrap() = json!({
         "dim": "budget.count",
         "action_class": "write",
         "max": 1,
@@ -305,19 +415,32 @@ fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
     });
     w.cap = w
         .broker
-        .mint(&w.manifest, &w.agent, tight, vec!["budget.count:write"], "2027-01-01T00:00:00Z")
+        .mint(
+            &w.manifest,
+            &w.agent,
+            tight,
+            vec!["budget.count:write"],
+            "2027-01-01T00:00:00Z",
+        )
         .unwrap();
 
     agent_write(&mut w, "inbox/first.md", "first\n");
     let decision = w
         .broker
-        .propose_call(&w.cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/second.md","content":"second\n"}))
+        .propose_call(
+            &w.cap,
+            "tool:vault@1.0",
+            "note.write",
+            &json!({"path":"inbox/second.md","content":"second\n"}),
+        )
         .unwrap();
     let escalation = match decision {
         Decision::Escalated { escalations } => escalations[0],
         other => panic!("expected budget escalation: {other:?}"),
     };
-    w.broker.approve_escalation(escalation, 1, &w.chan, "local_session").unwrap();
+    w.broker
+        .approve_escalation(escalation, 1, &w.chan, "local_session")
+        .unwrap();
     agent_write(&mut w, "inbox/second.md", "second\n");
 
     // Supporting tables are mutable materialized state. Changing one must not
@@ -332,7 +455,10 @@ fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
         .unwrap();
 
     let branch = w.branch.clone();
-    assert!(matches!(w.broker.promote_manifest(&w.manifest, &branch), Ok(PromotionOutcome::Applied { .. })));
+    assert!(matches!(
+        w.broker.promote_manifest(&w.manifest, &branch),
+        Ok(PromotionOutcome::Applied { .. })
+    ));
 }
 
 #[test]
@@ -342,11 +468,19 @@ fn reorganization_parks_but_renders_as_moves() {
     for (src, dest) in [("inbox/a.md", "notes/a.md"), ("inbox/b.md", "notes/b.md")] {
         let d = w
             .broker
-            .propose_call(&w.cap, "tool:vault@1.0", "note.move", &json!({"src": src, "dest": dest}))
+            .propose_call(
+                &w.cap,
+                "tool:vault@1.0",
+                "note.move",
+                &json!({"src": src, "dest": dest}),
+            )
             .unwrap();
         match d {
             Decision::Allowed { ticket, .. } => {
-                let (s, t) = (w.branch["fs:vault"].join(src), w.branch["fs:vault"].join(dest));
+                let (s, t) = (
+                    w.branch["fs:vault"].join(src),
+                    w.branch["fs:vault"].join(dest),
+                );
                 fs::create_dir_all(t.parent().unwrap()).unwrap();
                 fs::rename(s, t).unwrap();
                 w.broker.record_result(ticket, b"{}").unwrap();
@@ -362,7 +496,9 @@ fn reorganization_parks_but_renders_as_moves() {
             // A13: the reorganization must read as moves, not mass deletion.
             assert!(ops.iter().all(|o| o["op"] == "move"), "{ops:?}");
             assert_eq!(ops.len(), 2);
-            w.broker.approve_promotion(promotion, &w.chan, "local_session").unwrap();
+            w.broker
+                .approve_promotion(promotion, &w.chan, "local_session")
+                .unwrap();
         }
         other => panic!("moves must park under default policy: {other:?}"),
     }
@@ -374,17 +510,31 @@ fn reorganization_parks_but_renders_as_moves() {
 fn gate_blocks_run_that_exceeded_its_token() {
     let mut w = setup();
     agent_write(&mut w, "inbox/ok.md", "fine\n");
-    // A write the broker never authorized sneaks into the trace claiming
-    // this capability — e.g. a compromised recorder. Forge it via the
-    // kernel API directly, bypassing propose_call.
+    // A registered action the broker never authorized sneaks into the trace
+    // claiming a capability whose allowlist excludes it — e.g. a compromised
+    // recorder. Forge it via the kernel API directly, bypassing propose_call;
+    // the W-2 replay must catch it regardless of the recorded `checks` lie.
+    let write_only = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            vec![
+                json!({"dim":"action.allow","tools":["tool:vault@1.0"],"actions":["note.write"]}),
+                json!({"dim":"paths.write","globs":["**"]}),
+            ],
+            vec![],
+            "2027-01-01T00:00:00Z",
+        )
+        .unwrap();
     w.broker
         .fabric
         .record_tool_call(
             "tool:vault@1.0",
-            "note.nuke", // not in action.allow
+            "note.delete", // registered, but outside write_only's allowlist
+            br#"{"path":"inbox/a.md"}"#,
             b"{}",
-            b"{}",
-            json!({"capability": w.cap, "action_class": "delete", "paths": ["inbox/a.md"]}),
+            json!({"capability": write_only, "action_class": "delete", "paths": ["inbox/a.md"]}),
             json!([{"caveat": "action.allow", "ok": true}]), // liar
             Some("irreversible"),
         )
@@ -400,13 +550,46 @@ fn gate_blocks_run_that_exceeded_its_token() {
     assert!(!w.vault.join("inbox/ok.md").exists());
 }
 
+/// §4 at the gate: an action absent from the tool's registration cannot be
+/// re-evaluated against anything — the gate fails closed on it exactly as
+/// the decision path refuses to call it.
+#[test]
+fn gate_rejects_undeclared_action_in_trace() {
+    let mut w = setup();
+    agent_write(&mut w, "inbox/ok.md", "fine\n");
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.nuke", // never registered
+            b"{}",
+            b"{}",
+            json!({"capability": w.cap, "action_class": "delete", "paths": ["inbox/a.md"]}),
+            json!([]),
+            Some("irreversible"),
+        )
+        .unwrap();
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains("undeclared actions cannot be called"), "{msg}");
+        }
+        other => panic!("undeclared action in the trace must fail the gate: {other:?}"),
+    }
+    assert!(!w.vault.join("inbox/ok.md").exists());
+}
+
 #[test]
 fn sqlite_branch_change_promotes_whole_store() {
     let mut w = setup();
     // Agent writes memory on its branch copy.
     {
         let conn = Connection::open(&w.branch["db:memory"]).unwrap();
-        conn.execute("INSERT INTO memories (fact) VALUES ('learned during run')", []).unwrap();
+        conn.execute(
+            "INSERT INTO memories (fact) VALUES ('learned during run')",
+            [],
+        )
+        .unwrap();
     }
     agent_write(&mut w, "inbox/c.md", "note\n");
     let branch = w.branch.clone();
@@ -418,7 +601,9 @@ fn sqlite_branch_change_promotes_whole_store() {
         other => panic!("branch-only memory change must auto-promote: {other:?}"),
     }
     let conn = Connection::open(&w.memory_db).unwrap();
-    let n: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0)).unwrap();
+    let n: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(n, 2, "branch memory image installed on trunk");
 }
 
@@ -427,13 +612,15 @@ fn sqlite_both_changed_is_conflict_trunk_wins() {
     let mut w = setup();
     {
         let conn = Connection::open(&w.branch["db:memory"]).unwrap();
-        conn.execute("INSERT INTO memories (fact) VALUES ('agent version')", []).unwrap();
+        conn.execute("INSERT INTO memories (fact) VALUES ('agent version')", [])
+            .unwrap();
     }
     // A brokered step attests the updated memory root along with the fs root.
     agent_write(&mut w, "memory-attestation.md", "memory updated\n");
     {
         let conn = Connection::open(&w.memory_db).unwrap();
-        conn.execute("INSERT INTO memories (fact) VALUES ('human version')", []).unwrap();
+        conn.execute("INSERT INTO memories (fact) VALUES ('human version')", [])
+            .unwrap();
     }
     let branch = w.branch.clone();
     match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
@@ -441,13 +628,17 @@ fn sqlite_both_changed_is_conflict_trunk_wins() {
             let pending = w.broker.list_promotions("pending").unwrap();
             let conflicts = pending[0]["preview"]["conflicts"].as_array().unwrap();
             assert!(conflicts[0]["path"].as_str().unwrap().contains("db:memory"));
-            w.broker.approve_promotion(promotion, &w.chan, "local_session").unwrap();
+            w.broker
+                .approve_promotion(promotion, &w.chan, "local_session")
+                .unwrap();
         }
         other => panic!("{other:?}"),
     }
     let conn = Connection::open(&w.memory_db).unwrap();
     let facts: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT fact FROM memories ORDER BY id").unwrap();
+        let mut stmt = conn
+            .prepare("SELECT fact FROM memories ORDER BY id")
+            .unwrap();
         let rows = stmt.query_map([], |r| r.get(0)).unwrap();
         rows.collect::<Result<_, _>>().unwrap()
     };
@@ -463,7 +654,8 @@ fn promotion_survives_revert() {
     let mut w = setup();
     agent_write(&mut w, "inbox/c.md", "promoted content\n");
     let branch = w.branch.clone();
-    let PromotionOutcome::Applied { .. } = w.broker.promote_manifest(&w.manifest, &branch).unwrap() else {
+    let PromotionOutcome::Applied { .. } = w.broker.promote_manifest(&w.manifest, &branch).unwrap()
+    else {
         panic!("expected auto-promote")
     };
     assert!(w.vault.join("inbox/c.md").exists());
@@ -473,7 +665,10 @@ fn promotion_survives_revert() {
     let manifest = w.manifest.clone();
     w.broker.fabric.revert_to(&manifest).unwrap();
     assert!(!w.vault.join("inbox/c.md").exists());
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/a.md")).unwrap(), "base a\n");
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/a.md")).unwrap(),
+        "base a\n"
+    );
 }
 
 #[test]
@@ -496,11 +691,17 @@ fn destructive_ops_park_then_apply_on_approval() {
 
     // Weak channel cannot approve (approval.min_auth).
     assert!(matches!(
-        w.broker.approve_promotion(promotion, "chan:tg", "platform_oauth"),
+        w.broker
+            .approve_promotion(promotion, "chan:tg", "platform_oauth"),
         Err(BrokerError::ChannelTooWeak { .. })
     ));
-    w.broker.approve_promotion(promotion, &w.chan, "local_session").unwrap();
-    assert!(!w.vault.join("inbox/b.md").exists(), "approved delete applied");
+    w.broker
+        .approve_promotion(promotion, &w.chan, "local_session")
+        .unwrap();
+    assert!(
+        !w.vault.join("inbox/b.md").exists(),
+        "approved delete applied"
+    );
     assert!(
         !w.vault.join("surprise.md").exists(),
         "approval must apply the pinned preview, not mutable branch paths"
@@ -508,7 +709,8 @@ fn destructive_ops_park_then_apply_on_approval() {
 
     // A second approval of the same promotion is rejected.
     assert!(matches!(
-        w.broker.approve_promotion(promotion, &w.chan, "local_session"),
+        w.broker
+            .approve_promotion(promotion, &w.chan, "local_session"),
         Err(BrokerError::NoSuchPromotion(_))
     ));
     let _ = w.agent;
@@ -578,7 +780,12 @@ fn m7_non_grant_event_cannot_activate_capability() {
     let mut w = setup_brokered();
     let cap = store_ungranted_capability(&mut w);
     let manifest = w.manifest.clone();
-    append_substrate_event(&mut w, &manifest, "ratification", json!({"capability": cap}));
+    append_substrate_event(
+        &mut w,
+        &manifest,
+        "ratification",
+        json!({"capability": cap}),
+    );
     record_claimed_write(&mut w, &cap, "inbox/wrong-kind.md");
 
     assert_m7_rejected_without_promotion(&mut w, "no verified grant event", "inbox/wrong-kind.md");
@@ -590,10 +797,19 @@ fn m7_non_grant_event_cannot_activate_capability() {
 fn m7_grant_for_other_manifest_cannot_activate_capability() {
     let mut w = setup_brokered();
     let cap = store_ungranted_capability(&mut w);
-    append_substrate_event(&mut w, "man:another-lineage", "grant", json!({"capability": cap}));
+    append_substrate_event(
+        &mut w,
+        "man:another-lineage",
+        "grant",
+        json!({"capability": cap}),
+    );
     record_claimed_write(&mut w, &cap, "inbox/wrong-manifest.md");
 
-    assert_m7_rejected_without_promotion(&mut w, "no verified grant event", "inbox/wrong-manifest.md");
+    assert_m7_rejected_without_promotion(
+        &mut w,
+        "no verified grant event",
+        "inbox/wrong-manifest.md",
+    );
 }
 
 /// M7/A21 happy path: the manifest declares brokered, mint's grant event
@@ -611,7 +827,10 @@ fn m7_brokered_end_to_end_gates_clean() {
         PromotionOutcome::Applied { .. } => {}
         other => panic!("attributed brokered run must gate clean: {other:?}"),
     }
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/c.md")).unwrap(), "new note\n");
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/c.md")).unwrap(),
+        "new note\n"
+    );
 
     // The forward edge exists and precedes the effect: a verified grant
     // event for this manifest at a lower substrate offset than the call.
@@ -635,7 +854,10 @@ fn m7_brokered_end_to_end_gates_clean() {
 fn m7_observed_manifest_tolerates_unattributed_calls() {
     let mut w = setup();
     let man = trace::get_object(&w.broker.fabric.conn, &w.manifest).unwrap();
-    assert!(man.get("authority").is_none(), "observed manifests omit authority");
+    assert!(
+        man.get("authority").is_none(),
+        "observed manifests omit authority"
+    );
 
     w.broker
         .fabric
@@ -748,7 +970,14 @@ fn m7_brokered_run_with_two_grants_gates_clean() {
     ];
     let child = w
         .broker
-        .attenuate(&w.cap, &w.agent, &w.manifest, child_caveats, vec![], "2026-12-01T00:00:00Z")
+        .attenuate(
+            &w.cap,
+            &w.agent,
+            &w.manifest,
+            child_caveats,
+            vec![],
+            "2026-12-01T00:00:00Z",
+        )
         .unwrap();
 
     agent_write(&mut w, "inbox/parent.md", "via parent cap\n");
@@ -764,7 +993,11 @@ fn m7_brokered_run_with_two_grants_gates_clean() {
         .unwrap();
     match d {
         Decision::Allowed { ticket, .. } => {
-            fs::write(w.branch["fs:vault"].join("inbox/child.md"), "via child cap\n").unwrap();
+            fs::write(
+                w.branch["fs:vault"].join("inbox/child.md"),
+                "via child cap\n",
+            )
+            .unwrap();
             w.broker.record_result(ticket, b"{}").unwrap();
         }
         other => panic!("expected allow under child cap: {other:?}"),
@@ -775,8 +1008,14 @@ fn m7_brokered_run_with_two_grants_gates_clean() {
         PromotionOutcome::Applied { .. } => {}
         other => panic!("two-grant brokered run must gate clean: {other:?}"),
     }
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/parent.md")).unwrap(), "via parent cap\n");
-    assert_eq!(fs::read_to_string(w.vault.join("inbox/child.md")).unwrap(), "via child cap\n");
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/parent.md")).unwrap(),
+        "via parent cap\n"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/child.md")).unwrap(),
+        "via child cap\n"
+    );
 
     // Both grants exist for this manifest, and each precedes the call that
     // claimed its capability.
@@ -784,12 +1023,89 @@ fn m7_brokered_run_with_two_grants_gates_clean() {
     let grant_offsets: BTreeMap<String, i64> = events
         .iter()
         .filter(|e| e.kind == "grant" && e.manifest.as_deref() == Some(w.manifest.as_str()))
-        .filter_map(|e| e.raw["body"]["capability"].as_str().map(|c| (c.to_string(), e.offset)))
+        .filter_map(|e| {
+            e.raw["body"]["capability"]
+                .as_str()
+                .map(|c| (c.to_string(), e.offset))
+        })
         .collect();
     assert_eq!(grant_offsets.len(), 2);
     for ev in events.iter().filter(|e| e.kind == "tool_call") {
         if let Some(cap) = ev.raw["body"]["summary"]["capability"].as_str() {
-            assert!(grant_offsets[cap] < ev.offset, "grant precedes each claimed effect");
+            assert!(
+                grant_offsets[cap] < ev.offset,
+                "grant precedes each claimed effect"
+            );
         }
     }
+}
+
+/// The RF-1 regression class, closed at the gate (W-2): the pre-replay gate
+/// hand-rechecked four of seven dimensions and omitted `time` — a decision-
+/// time evaluator bug admitting a call outside its window would have merged
+/// unchallenged. The unified replay evaluates every dimension the capability
+/// carries, clocked at each event's signed `at`.
+#[test]
+fn gate_catches_time_violation_the_decision_evaluator_missed() {
+    let mut w = setup();
+    let mut expired_window = caveats();
+    expired_window.push(json!({"dim":"time","not_after":"2020-01-01T00:00:00Z"}));
+    let cap = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            expired_window,
+            vec![],
+            "2027-01-01T00:00:00Z",
+        )
+        .unwrap();
+    // Recorded as if authorized — the window says it never should have been.
+    record_claimed_write(&mut w, &cap, "inbox/late.md");
+
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains("time"), "{msg}");
+        }
+        other => panic!("out-of-window call must fail re-evaluation: {other:?}"),
+    }
+    assert!(!w.vault.join("inbox/late.md").exists());
+}
+
+/// SI-22: the replay clock is each event's signed `at`, never gate-time now.
+/// An honest call made inside its time window must still promote after the
+/// window closes — gate latency (parked promotions, RF-9 recovery, coarse
+/// sessions) must not retro-fail work that was authorized when it happened.
+#[test]
+fn si22_gate_clock_is_the_events_at_not_gate_time() {
+    let mut w = setup();
+    let not_after = (time::OffsetDateTime::now_utc() + time::Duration::milliseconds(1500))
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    let mut closing_window = caveats();
+    closing_window.push(json!({"dim":"time","not_after": not_after}));
+    w.cap = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            closing_window,
+            vec![],
+            "2027-01-01T00:00:00Z",
+        )
+        .unwrap();
+    agent_write(&mut w, "inbox/in-window.md", "authorized in time\n");
+
+    // Let the window close before the gate runs.
+    std::thread::sleep(std::time::Duration::from_millis(1700));
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("in-window work must survive a gate after the window: {other:?}"),
+    }
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/in-window.md")).unwrap(),
+        "authorized in time\n"
+    );
 }

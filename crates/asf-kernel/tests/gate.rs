@@ -16,6 +16,9 @@
 //!   brokered path gates clean with grant-before-effect ordering
 //!   (`m7_brokered_end_to_end_gates_clean`), and observed mode stays
 //!   lenient (`m7_observed_manifest_tolerates_unattributed_calls`).
+//!   Stored capabilities remain inert without an exact, preceding grant:
+//!   missing, late, wrong-kind, and wrong-manifest grant claims are rejected
+//!   by the four `m7_*_cannot_activate_capability` adversarial cases below.
 //! - A21 adversarial substitution/lineage cases: cross-manifest capability
 //!   substitution dies at the gate's M2 arm
 //!   (`gate_rejects_call_attributed_to_another_manifests_capability`),
@@ -29,8 +32,9 @@
 
 use asf_kernel::broker::{Broker, BrokerError, Decision, PromotionOutcome};
 use asf_kernel::kernel::{AuthorityMode, Fabric};
+use asf_kernel::keys::Role;
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
-use asf_kernel::trace;
+use asf_kernel::{canon, capability, trace};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -99,15 +103,23 @@ fn setup_mode(mode: AuthorityMode) -> World {
         .unwrap();
 
     let stores = vec![
-        StoreSpec { store: "fs:vault".into(), tier: 1, kind: StoreKind::Fs, path: vault.clone() },
-        StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db.clone() },
+        StoreSpec {
+            store: "fs:vault".into(),
+            tier: 1,
+            kind: StoreKind::Fs,
+            path: vault.clone(),
+        },
+        StoreSpec {
+            store: "db:memory".into(),
+            tier: 1,
+            kind: StoreKind::Sqlite,
+            path: memory_db.clone(),
+        },
     ];
     let mut fabric = Fabric::open(tmp.path().join("fabric"), stores).unwrap();
     let human = fabric.register_principal("human", "josh", "01", None).unwrap();
     let agent = fabric.register_principal("agent", "hermes", "02", Some(&human)).unwrap();
-    let chan = fabric
-        .register_channel(&human, "local_session", b"tty", "local_session")
-        .unwrap();
+    let chan = fabric.register_channel(&human, "local_session", b"tty", "local_session").unwrap();
     let intent = fabric
         .capture_intent(&human, &chan, "local_session", "vault maintenance", json!({}), None)
         .unwrap();
@@ -118,9 +130,7 @@ fn setup_mode(mode: AuthorityMode) -> World {
 
     let mut broker = Broker::new(fabric).unwrap();
     broker.register_tool("tool:vault@1.0", vault_actions()).unwrap();
-    let cap = broker
-        .mint(&step.manifest, &agent, caveats(), vec![], "2027-01-01T00:00:00Z")
-        .unwrap();
+    let cap = broker.mint(&step.manifest, &agent, caveats(), vec![], "2027-01-01T00:00:00Z").unwrap();
     World {
         _tmp: tmp,
         vault,
@@ -140,8 +150,7 @@ fn setup_mode(mode: AuthorityMode) -> World {
 fn agent_write(w: &mut World, rel: &str, content: &str) {
     let d = w
         .broker
-        .propose_call(&w.cap, "tool:vault@1.0", "note.write",
-                      &json!({"path": rel, "content": content}))
+        .propose_call(&w.cap, "tool:vault@1.0", "note.write", &json!({"path": rel, "content": content}))
         .unwrap();
     match d {
         Decision::Allowed { ticket, .. } => {
@@ -155,15 +164,7 @@ fn agent_write(w: &mut World, rel: &str, content: &str) {
 }
 
 fn agent_delete(w: &mut World, rel: &str) {
-    let d = w
-        .broker
-        .propose_call(
-            &w.cap,
-            "tool:vault@1.0",
-            "note.delete",
-            &json!({"path": rel}),
-        )
-        .unwrap();
+    let d = w.broker.propose_call(&w.cap, "tool:vault@1.0", "note.delete", &json!({"path": rel})).unwrap();
     match d {
         Decision::Allowed { ticket, .. } => {
             fs::remove_file(w.branch["fs:vault"].join(rel)).unwrap();
@@ -171,6 +172,56 @@ fn agent_delete(w: &mut World, rel: &str) {
         }
         other => panic!("expected allow: {other:?}"),
     }
+}
+
+/// Store a valid fabric-signed capability without emitting its activating
+/// grant event. A15 makes this row an inert materialized view.
+fn store_ungranted_capability(w: &mut World) -> String {
+    let sk = w.broker.fabric.keystore().signing_key(Role::Fabric).unwrap();
+    let body = capability::build(&w.agent, &w.manifest, None, "2026-07-10T00:00:00Z", "2027-01-01T00:00:00Z", caveats(), vec![]).unwrap();
+    let sealed = canon::seal("cap", body, &sk).unwrap();
+    trace::put_object(&w.broker.fabric.conn, "capability", &sealed, "2026-07-10T00:00:00Z").unwrap()
+}
+
+fn append_substrate_event(w: &mut World, manifest: &str, kind: &str, body: Value) {
+    let sk = w.broker.fabric.keystore().signing_key(Role::Fabric).unwrap();
+    let span = trace::meta_get(&w.broker.fabric.conn, "substrate_span").unwrap().expect("substrate span");
+    trace::append(&mut w.broker.fabric.conn, &sk, &span, Some(manifest), kind, body, "2026-07-10T00:00:01Z").unwrap();
+}
+
+/// Record an effect that claims a capability without going through broker
+/// evaluation. The gate must independently reconstruct and verify authority.
+fn record_claimed_write(w: &mut World, capability: &str, rel: &str) {
+    let path = w.branch["fs:vault"].join(rel);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, "claimed write\n").unwrap();
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.write",
+            serde_json::to_string(&json!({"path": rel})).unwrap().as_bytes(),
+            b"{}",
+            json!({
+                "capability": capability,
+                "action_class": "write",
+                "paths": [rel]
+            }),
+            json!([]),
+            Some("reversible"),
+        )
+        .unwrap();
+}
+
+fn assert_m7_rejected_without_promotion(w: &mut World, expected: &str, rel: &str) {
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains(expected), "{msg}");
+        }
+        other => panic!("invalid grant lineage must fail closed: {other:?}"),
+    }
+    assert!(!w.vault.join(rel).exists(), "rejected effect reached trunk");
 }
 
 #[test]
@@ -246,10 +297,7 @@ fn gate_rejects_branch_state_with_no_signed_tool_call_attestation() {
 fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
     let mut w = setup();
     let mut tight = caveats();
-    *tight
-        .iter_mut()
-        .find(|c| c["dim"] == "budget.count")
-        .unwrap() = json!({
+    *tight.iter_mut().find(|c| c["dim"] == "budget.count").unwrap() = json!({
         "dim": "budget.count",
         "action_class": "write",
         "max": 1,
@@ -257,32 +305,19 @@ fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
     });
     w.cap = w
         .broker
-        .mint(
-            &w.manifest,
-            &w.agent,
-            tight,
-            vec!["budget.count:write"],
-            "2027-01-01T00:00:00Z",
-        )
+        .mint(&w.manifest, &w.agent, tight, vec!["budget.count:write"], "2027-01-01T00:00:00Z")
         .unwrap();
 
     agent_write(&mut w, "inbox/first.md", "first\n");
     let decision = w
         .broker
-        .propose_call(
-            &w.cap,
-            "tool:vault@1.0",
-            "note.write",
-            &json!({"path":"inbox/second.md","content":"second\n"}),
-        )
+        .propose_call(&w.cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/second.md","content":"second\n"}))
         .unwrap();
     let escalation = match decision {
         Decision::Escalated { escalations } => escalations[0],
         other => panic!("expected budget escalation: {other:?}"),
     };
-    w.broker
-        .approve_escalation(escalation, 1, &w.chan, "local_session")
-        .unwrap();
+    w.broker.approve_escalation(escalation, 1, &w.chan, "local_session").unwrap();
     agent_write(&mut w, "inbox/second.md", "second\n");
 
     // Supporting tables are mutable materialized state. Changing one must not
@@ -297,10 +332,7 @@ fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
         .unwrap();
 
     let branch = w.branch.clone();
-    assert!(matches!(
-        w.broker.promote_manifest(&w.manifest, &branch),
-        Ok(PromotionOutcome::Applied { .. })
-    ));
+    assert!(matches!(w.broker.promote_manifest(&w.manifest, &branch), Ok(PromotionOutcome::Applied { .. })));
 }
 
 #[test]
@@ -310,8 +342,7 @@ fn reorganization_parks_but_renders_as_moves() {
     for (src, dest) in [("inbox/a.md", "notes/a.md"), ("inbox/b.md", "notes/b.md")] {
         let d = w
             .broker
-            .propose_call(&w.cap, "tool:vault@1.0", "note.move",
-                          &json!({"src": src, "dest": dest}))
+            .propose_call(&w.cap, "tool:vault@1.0", "note.move", &json!({"src": src, "dest": dest}))
             .unwrap();
         match d {
             Decision::Allowed { ticket, .. } => {
@@ -420,8 +451,11 @@ fn sqlite_both_changed_is_conflict_trunk_wins() {
         let rows = stmt.query_map([], |r| r.get(0)).unwrap();
         rows.collect::<Result<_, _>>().unwrap()
     };
-    assert_eq!(facts, vec!["base".to_string(), "human version".to_string()],
-               "opaque-store conflict: trunk wins (SI-18)");
+    assert_eq!(
+        facts,
+        vec!["base".to_string(), "human version".to_string()],
+        "opaque-store conflict: trunk wins (SI-18)"
+    );
 }
 
 #[test]
@@ -429,8 +463,7 @@ fn promotion_survives_revert() {
     let mut w = setup();
     agent_write(&mut w, "inbox/c.md", "promoted content\n");
     let branch = w.branch.clone();
-    let PromotionOutcome::Applied { .. } = w.broker.promote_manifest(&w.manifest, &branch).unwrap()
-    else {
+    let PromotionOutcome::Applied { .. } = w.broker.promote_manifest(&w.manifest, &branch).unwrap() else {
         panic!("expected auto-promote")
     };
     assert!(w.vault.join("inbox/c.md").exists());
@@ -512,6 +545,55 @@ fn m7_brokered_manifest_rejects_unattributed_calls() {
     }
     // Nothing merged: trunk untouched.
     assert!(!w.vault.join("inbox/ok.md").exists());
+}
+
+/// A21/A15: a valid signed capability object is only a materialized view.
+/// Without its signed grant event it conveys no authority.
+#[test]
+fn m7_capability_without_grant_is_inert() {
+    let mut w = setup_brokered();
+    let cap = store_ungranted_capability(&mut w);
+    record_claimed_write(&mut w, &cap, "inbox/ungranted.md");
+
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant event", "inbox/ungranted.md");
+}
+
+/// A21 ordering is prospective: a grant appended after an effect cannot
+/// retroactively authorize that effect.
+#[test]
+fn m7_grant_after_effect_does_not_retroactively_authorize() {
+    let mut w = setup_brokered();
+    let cap = store_ungranted_capability(&mut w);
+    record_claimed_write(&mut w, &cap, "inbox/late-grant.md");
+    let manifest = w.manifest.clone();
+    append_substrate_event(&mut w, &manifest, "grant", json!({"capability": cap}));
+
+    assert_m7_rejected_without_promotion(&mut w, "precedes the grant", "inbox/late-grant.md");
+}
+
+/// An event mentioning a capability does not activate it unless the signed
+/// event kind is exactly `grant`.
+#[test]
+fn m7_non_grant_event_cannot_activate_capability() {
+    let mut w = setup_brokered();
+    let cap = store_ungranted_capability(&mut w);
+    let manifest = w.manifest.clone();
+    append_substrate_event(&mut w, &manifest, "ratification", json!({"capability": cap}));
+    record_claimed_write(&mut w, &cap, "inbox/wrong-kind.md");
+
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant event", "inbox/wrong-kind.md");
+}
+
+/// A grant is scoped by its signed manifest edge. A grant carrying another
+/// manifest id cannot activate a capability for this run.
+#[test]
+fn m7_grant_for_other_manifest_cannot_activate_capability() {
+    let mut w = setup_brokered();
+    let cap = store_ungranted_capability(&mut w);
+    append_substrate_event(&mut w, "man:another-lineage", "grant", json!({"capability": cap}));
+    record_claimed_write(&mut w, &cap, "inbox/wrong-manifest.md");
+
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant event", "inbox/wrong-manifest.md");
 }
 
 /// M7/A21 happy path: the manifest declares brokered, mint's grant event

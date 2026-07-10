@@ -95,7 +95,7 @@ jobs:
       - name: Install cargo-mutants
         run: cargo install cargo-mutants --locked --version 27.1.0
 
-      - name: Mutation test authority evaluation and merge policy
+      - name: Mutation test authority, merge policy, and A21 binding
         run: ./scripts/ci mutation
 
 # Deliberately NOT enforcing `cargo fmt --check` yet: the tree is not

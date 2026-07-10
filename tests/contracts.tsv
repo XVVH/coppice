@@ -1,0 +1,48 @@
+# Two-sided contract evidence. Format: contract-id|polarity|exact Rust test name
+# Every contract MUST carry at least one positive and one negative test.
+# `supporting` evidence may supplement a pair but never replaces either side.
+# New or renamed Rust tests must be registered here; existing unclassified
+# tests are frozen in contracts-baseline.txt and cannot grow.
+
+# Manifest/store coverage and capability binding
+M1|positive|allowed_call_full_cycle_with_checks_in_ledger
+M1|negative|m1_mint_rejects_uncovered_store
+M2|positive|allowed_call_full_cycle_with_checks_in_ledger
+M2|negative|m2_capability_dies_with_its_manifest
+
+# A21/M7 authority declaration plus grant-event activation
+M7|positive|m7_brokered_end_to_end_gates_clean
+M7|positive|m7_observed_manifest_tolerates_unattributed_calls
+M7|positive|m7_brokered_run_with_two_grants_gates_clean
+M7|negative|m7_brokered_manifest_rejects_unattributed_calls
+M7|negative|m7_capability_without_grant_is_inert
+M7|negative|m7_grant_after_effect_does_not_retroactively_authorize
+M7|negative|m7_non_grant_event_cannot_activate_capability
+M7|negative|m7_grant_for_other_manifest_cannot_activate_capability
+M7|negative|gate_rejects_call_attributed_to_another_manifests_capability
+M7|negative|gate_fails_closed_on_unresolvable_capability_attribution
+M7|negative|trace::tests::deleting_a_middle_event_breaks_the_chain
+
+# Attribution completeness
+M8|positive|m8_attribution_is_timing_independent
+M8|positive|m8_revert_attributes_divergence_before_erasing_it
+M8|negative|si20_midsession_edit_to_branch_touched_path_parks_as_conflict
+
+# Capability attenuation
+ATTENUATION|positive|capability::tests::valid_attenuation_narrows_everything
+ATTENUATION|positive|attenuation_through_broker
+ATTENUATION|negative|capability::tests::widening_attempts_all_rejected
+ATTENUATION|negative|capability::tests::unknown_dimension_cannot_be_attenuation_verified
+
+# Trace integrity
+TRACE-CHAIN|positive|trace::tests::chain_links_and_offsets_are_global
+TRACE-CHAIN|negative|trace::tests::deleting_a_middle_event_breaks_the_chain
+TRACE-CHAIN|negative|trace::tests::tamper_after_bypassing_triggers_is_detected
+
+# Promotion and human-approval boundaries
+PROMOTION-GATE|positive|clean_additive_run_auto_promotes
+PROMOTION-GATE|negative|gate_rejects_branch_state_with_no_signed_tool_call_attestation
+APPROVAL|positive|escalation_batch_approval_cycle
+APPROVAL|negative|denied_escalation_does_not_authorize_retry
+C2|positive|approval_racing_retry_preserves_one_bounded_use
+C2|negative|proxied_session_end_to_end

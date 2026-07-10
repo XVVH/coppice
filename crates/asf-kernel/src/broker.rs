@@ -638,6 +638,62 @@ struct MergePlan {
     conflicts: Vec<Conflict>,
 }
 
+/// A21/M7 activation view: the earliest verified grant offset for each
+/// capability bound to this manifest. Kept as a small pure helper so the
+/// authority-binding predicates have a stable mutation-testing target.
+fn m7_grant_offsets(events: &[trace::EventRow], substrate_span: &str, manifest_id: &str) -> BTreeMap<String, i64> {
+    let mut grants = BTreeMap::new();
+    for ev in events {
+        if ev.span == substrate_span && ev.kind == "grant" && ev.manifest.as_deref() == Some(manifest_id) {
+            if let Some(cap) = ev.raw["body"]["capability"].as_str() {
+                grants.entry(cap.to_string()).or_insert(ev.offset);
+            }
+        }
+    }
+    grants
+}
+
+/// Resolve the capability claimed by one effect. Observed mode may carry an
+/// unattributed effect; brokered mode may not. Grant ordering is checked only
+/// after the claimed capability has passed signature and M2 verification, so a
+/// cross-manifest substitution retains the more precise lineage failure.
+fn m7_effect_capability<'a>(brokered: bool, body: &'a Value, effect_id: &str) -> Result<Option<&'a str>, String> {
+    let Some(cap_id) = body["summary"]["capability"].as_str() else {
+        return if brokered {
+            Err(format!(
+                "event {effect_id} has no capability attribution under brokered authority (M7)"
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+
+    Ok(Some(cap_id))
+}
+
+/// A21 activation check for a capability that already passed signature and
+/// M2 verification. The grant for this manifest must precede the effect.
+fn m7_verify_grant(
+    brokered: bool,
+    cap_id: &str,
+    effect_id: &str,
+    effect_offset: i64,
+    grants: &BTreeMap<String, i64>,
+) -> Result<(), String> {
+    if !brokered {
+        return Ok(());
+    }
+    match grants.get(cap_id) {
+        Some(grant_offset) if *grant_offset < effect_offset => Ok(()),
+        Some(_) => Err(format!(
+            "event {effect_id} precedes the grant of {cap_id} (M7 ordering)"
+        )),
+        None => Err(format!(
+            "event {effect_id}: no verified grant event binds {cap_id} to this manifest (M7)"
+        )),
+    }
+}
+
 impl Broker {
     /// Promote a completed branch to trunk (§5.3) — the only mutation in
     /// the system. Order is load-bearing: (1) the recorded trace is
@@ -679,13 +735,21 @@ impl Broker {
                     .collect::<BTreeMap<_, _>>(),
             });
             let bp = serde_json::to_string(
-                &branch_paths.iter().map(|(k, v)| (k, v.to_string_lossy())).collect::<BTreeMap<_, _>>(),
+                &branch_paths
+                    .iter()
+                    .map(|(k, v)| (k, v.to_string_lossy()))
+                    .collect::<BTreeMap<_, _>>(),
             )
             .expect("paths serialize");
             self.fabric.conn.execute(
                 "INSERT INTO promotions (manifest, branch_paths, preview, status, created_at)
                  VALUES (?1, ?2, ?3, 'pending', ?4)",
-                params![manifest_id, bp, serde_json::to_string(&preview).expect("serialize"), now_rfc3339()],
+                params![
+                    manifest_id,
+                    bp,
+                    serde_json::to_string(&preview).expect("serialize"),
+                    now_rfc3339()
+                ],
             )?;
             let id = self.fabric.conn.last_insert_rowid();
             let sk = self.fabric.fabric_sk().clone();
@@ -726,33 +790,21 @@ impl Broker {
         // event at a lower substrate offset. Observed claims nothing;
         // attributed calls are still checked in full.
         let man = trace::get_object(&self.fabric.conn, manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk()).map_err(|e| {
-            BrokerError::GateTraceViolation(format!("manifest {manifest_id} unverifiable: {e}"))
-        })?;
+        canon::verify(&man, &self.fabric.fabric_vk())
+            .map_err(|e| BrokerError::GateTraceViolation(format!("manifest {manifest_id} unverifiable: {e}")))?;
         let brokered = man["authority"]["mode"] == "brokered";
 
         // Approved budget headroom: approval events grant `uses` against an
         // escalation's (cap, caveat-key). The authority binding comes from
         // the signed event itself, never the mutable escalation table.
         let substrate_span = self.fabric.substrate_span();
-        trace::verify_span(
-            &self.fabric.conn,
-            &self.fabric.fabric_vk(),
-            substrate_span,
-        )?;
+        trace::verify_span(&self.fabric.conn, &self.fabric.fabric_vk(), substrate_span)?;
         let mut approved: BTreeMap<(String, String), i64> = BTreeMap::new();
+        let all_events = trace::all_events(&self.fabric.conn)?;
         // Grant activation offsets per capability for THIS manifest, from
         // the verified substrate span (M7 forward edge).
-        let mut grants: BTreeMap<String, i64> = BTreeMap::new();
-        for ev in trace::all_events(&self.fabric.conn)? {
-            if ev.span == substrate_span
-                && ev.kind == "grant"
-                && ev.manifest.as_deref() == Some(manifest_id)
-            {
-                if let Some(cap) = ev.raw["body"]["capability"].as_str() {
-                    grants.entry(cap.to_string()).or_insert(ev.offset);
-                }
-            }
+        let grants = m7_grant_offsets(&all_events, substrate_span, manifest_id);
+        for ev in &all_events {
             if ev.span != substrate_span
                 || ev.kind != "approval"
                 || ev.raw["body"]["resolution"] != "approved"
@@ -771,9 +823,7 @@ impl Broker {
                 continue;
             };
             if uses > 0 {
-                *approved
-                    .entry((cap.to_string(), key.to_string()))
-                    .or_insert(0) += uses;
+                *approved.entry((cap.to_string(), key.to_string())).or_insert(0) += uses;
             }
         }
 
@@ -789,13 +839,7 @@ impl Broker {
             }
             tool_calls += 1;
             let body = &ev.raw["body"];
-            let Some(cap_id) = body["summary"]["capability"].as_str() else {
-                if brokered {
-                    return Err(violation(format!(
-                        "event {} has no capability attribution under brokered authority (M7)",
-                        ev.id
-                    )));
-                }
+            let Some(cap_id) = m7_effect_capability(brokered, body, &ev.id).map_err(&violation)? else {
                 unattributed += 1; // observed mode: kernel-recorded call, nothing to check against
                 continue;
             };
@@ -815,39 +859,23 @@ impl Broker {
                     c
                 }
             };
-            if brokered {
-                match grants.get(cap_id) {
-                    Some(g) if *g < ev.offset => {}
-                    Some(_) => {
-                        return Err(violation(format!(
-                            "event {} precedes the grant of {cap_id} (M7 ordering)",
-                            ev.id
-                        )));
-                    }
-                    // Unreachable through honest storage — mint appends the
-                    // grant before returning the cap id, and A15 fails closed
-                    // on object rows without events. Defense in depth against
-                    // writers that bypass the broker.
-                    None => {
-                        return Err(violation(format!(
-                            "event {}: no verified grant event binds {cap_id} to this manifest (M7)",
-                            ev.id
-                        )));
-                    }
-                }
-            }
-            let caveat = |dim: &str| -> Option<Value> {
-                cap["caveats"].as_array()?.iter().find(|c| c["dim"] == dim).cloned()
-            };
+            m7_verify_grant(brokered, cap_id, &ev.id, ev.offset, &grants).map_err(&violation)?;
+            let caveat =
+                |dim: &str| -> Option<Value> { cap["caveats"].as_array()?.iter().find(|c| c["dim"] == dim).cloned() };
             let (tool, action) = (
                 body["tool"].as_str().unwrap_or(""),
                 body["action"].as_str().unwrap_or(""),
             );
             if let Some(allow) = caveat("action.allow") {
                 let ok = allow["tools"].as_array().is_some_and(|t| t.iter().any(|x| x == tool))
-                    && allow["actions"].as_array().is_some_and(|a| a.iter().any(|x| x == action));
+                    && allow["actions"]
+                        .as_array()
+                        .is_some_and(|a| a.iter().any(|x| x == action));
                 if !ok {
-                    return Err(violation(format!("event {} calls {tool}.{action} outside action.allow", ev.id)));
+                    return Err(violation(format!(
+                        "event {} calls {tool}.{action} outside action.allow",
+                        ev.id
+                    )));
                 }
             }
             if let Some(rev) = caveat("reversibility.max") {
@@ -875,9 +903,11 @@ impl Broker {
 
         for ((cap_id, class), count) in &class_counts {
             let cap = &caps[cap_id];
-            let budget = cap["caveats"].as_array().into_iter().flatten().find(|c| {
-                c["dim"] == "budget.count" && c["action_class"].as_str() == Some(class.as_str())
-            });
+            let budget = cap["caveats"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|c| c["dim"] == "budget.count" && c["action_class"].as_str() == Some(class.as_str()));
             if let Some(b) = budget {
                 let max = b["max"].as_i64().unwrap_or(0);
                 let extra = approved
@@ -965,7 +995,9 @@ impl Broker {
                     if branch_root == base_root || branch_root == trunk_root {
                         None
                     } else if trunk_root == base_root {
-                        all_ops.push(Op::Modify { path: format!("{store} (whole store)") });
+                        all_ops.push(Op::Modify {
+                            path: format!("{store} (whole store)"),
+                        });
                         Some(branch_root.clone())
                     } else {
                         all_conflicts.push(Conflict {
@@ -979,9 +1011,19 @@ impl Broker {
                     }
                 }
             };
-            stores.push(StorePlan { store, base: base_root, branch: branch_root, trunk: trunk_root, install });
+            stores.push(StorePlan {
+                store,
+                base: base_root,
+                branch: branch_root,
+                trunk: trunk_root,
+                install,
+            });
         }
-        Ok(MergePlan { stores, ops: all_ops, conflicts: all_conflicts })
+        Ok(MergePlan {
+            stores,
+            ops: all_ops,
+            conflicts: all_conflicts,
+        })
     }
 
     /// Bind the merge candidate to the signed trace. With no tool calls, the
@@ -989,12 +1031,7 @@ impl Broker {
     /// equal the final tool_call's `state_root_after` attestation. This closes
     /// crash/signal and direct-branch-write paths that previously let untraced
     /// state reach promotion.
-    fn verify_branch_tip(
-        &self,
-        man: &Value,
-        span: &str,
-        plan: &MergePlan,
-    ) -> Result<Value, BrokerError> {
+    fn verify_branch_tip(&self, man: &Value, span: &str, plan: &MergePlan) -> Result<Value, BrokerError> {
         let events = trace::events_in_span(&self.fabric.conn, span)?;
         let last_call = events.iter().rev().find(|e| e.kind == "tool_call");
         let mut roots = BTreeMap::new();
@@ -1017,10 +1054,7 @@ impl Broker {
                     .find(|r| r["store"].as_str() == Some(store.store.as_str()))
                     .and_then(|r| r["root"].as_str())
                     .ok_or_else(|| {
-                        BrokerError::GateTraceViolation(format!(
-                            "manifest has no base root for {}",
-                            store.store
-                        ))
+                        BrokerError::GateTraceViolation(format!("manifest has no base root for {}", store.store))
                     })?
                     .to_string(),
             };
@@ -1095,9 +1129,10 @@ impl Broker {
     }
 
     pub fn list_promotions(&self, status: &str) -> Result<Vec<Value>, BrokerError> {
-        let mut stmt = self.fabric.conn.prepare(
-            "SELECT id, manifest, preview, created_at FROM promotions WHERE status = ?1 ORDER BY id",
-        )?;
+        let mut stmt = self
+            .fabric
+            .conn
+            .prepare("SELECT id, manifest, preview, created_at FROM promotions WHERE status = ?1 ORDER BY id")?;
         let rows = stmt.query_map([status], |r| {
             Ok(json!({
                 "id": r.get::<_, i64>(0)?,
@@ -1113,12 +1148,7 @@ impl Broker {
     /// recomputed fresh against current trunk — if trunk moved since the
     /// preview, new divergences still resolve trunk-wins (the safe
     /// direction), never wider than what was previewed.
-    pub fn approve_promotion(
-        &mut self,
-        id: i64,
-        channel: &str,
-        auth_strength: &str,
-    ) -> Result<String, BrokerError> {
+    pub fn approve_promotion(&mut self, id: i64, channel: &str, auth_strength: &str) -> Result<String, BrokerError> {
         let row: Option<(String, String)> = self
             .fabric
             .conn
@@ -1136,11 +1166,9 @@ impl Broker {
         let _gate = self.fabric.gate_lock()?;
         self.fabric.check_drift()?;
 
-        let preview: Value = serde_json::from_str(&preview_raw).map_err(|e| {
-            BrokerError::MalformedPromotion {
-                id,
-                detail: format!("preview is not JSON: {e}"),
-            }
+        let preview: Value = serde_json::from_str(&preview_raw).map_err(|e| BrokerError::MalformedPromotion {
+            id,
+            detail: format!("preview is not JSON: {e}"),
         })?;
         let branch_roots: BTreeMap<String, String> = preview["branch_roots"]
             .as_object()
@@ -1186,12 +1214,7 @@ impl Broker {
         Ok(event)
     }
 
-    pub fn reject_promotion(
-        &mut self,
-        id: i64,
-        channel: &str,
-        auth_strength: &str,
-    ) -> Result<(), BrokerError> {
+    pub fn reject_promotion(&mut self, id: i64, channel: &str, auth_strength: &str) -> Result<(), BrokerError> {
         let manifest: Option<String> = self
             .fabric
             .conn
@@ -1222,11 +1245,7 @@ impl Broker {
         Ok(())
     }
 
-    fn check_min_auth_for_manifest(
-        &self,
-        manifest_id: &str,
-        auth_strength: &str,
-    ) -> Result<(), BrokerError> {
+    fn check_min_auth_for_manifest(&self, manifest_id: &str, auth_strength: &str) -> Result<(), BrokerError> {
         // Strongest approval.min_auth among verified caps bound to this
         // manifest applies to gate approvals too.
         let mut stmt = self

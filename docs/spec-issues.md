@@ -46,6 +46,29 @@ author ratification before implementation.
 
 ---
 
+## SI-22 — workboard domain labels precede domain-taxonomy governance (§4, brief §10.2) — open
+
+The second dogfood profile must declare a domain for every registered action,
+but the brief deliberately leaves fabric-owned domain-taxonomy governance open.
+Using the existing `files.vault` label for structured work would flatten two
+dissimilar workloads; inventing globally authoritative roots in the
+implementation would silently settle the governance problem.
+
+**Current implementation** (`proxy.rs`): the trusted, first-party workboard
+profile provisionally labels SQLite task actions `work.tracking` and Markdown
+evidence actions `work.evidence`. These strings make current registration and
+domain-scoped traces honest, but they are not ratified taxonomy roots and MUST
+NOT be treated as portable trust domains or founding precedent for third-party
+registrations. No StandingRules or TrustRecords consume them in the current
+milestone, so renaming them before that machinery lands is cheap.
+
+**Open question for the spec/design:** what fabric-owned root taxonomy and
+extension process should registrations use, and should evidence inherit the
+work item's domain or remain a separate domain? Resolve before these labels feed
+portable rules, trust compilation, or published conformance artifacts.
+
+---
+
 ## SI-20 — mid-session out-of-band edits can be absorbed unattributed (A12 vs §5.3) — RESOLVED (author, 2026-07-09)
 
 **Resolution: the candidate ratified as amendment A20 (spec v0.5), with two

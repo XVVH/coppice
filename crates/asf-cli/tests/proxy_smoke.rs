@@ -45,14 +45,50 @@ impl Proxy {
         vault: &std::path::Path,
         downstream: &[String],
     ) -> Self {
+        Self::start_with_profile(
+            home,
+            &["--vault".into(), vault.to_string_lossy().into_owned()],
+            downstream,
+        )
+    }
+
+    fn start_workboard(
+        home: &std::path::Path,
+        db: &std::path::Path,
+        evidence: &std::path::Path,
+    ) -> Self {
+        let asf = env!("CARGO_BIN_EXE_asf");
+        Self::start_with_profile(
+            home,
+            &[
+                "--profile".into(),
+                "workboard".into(),
+                "--db".into(),
+                db.to_string_lossy().into_owned(),
+                "--evidence".into(),
+                evidence.to_string_lossy().into_owned(),
+            ],
+            &[
+                asf.into(),
+                "workboard-server".into(),
+                "--db".into(),
+                db.to_string_lossy().into_owned(),
+                "--evidence".into(),
+                evidence.to_string_lossy().into_owned(),
+            ],
+        )
+    }
+
+    fn start_with_profile(
+        home: &std::path::Path,
+        profile_args: &[String],
+        downstream: &[String],
+    ) -> Self {
         let asf = env!("CARGO_BIN_EXE_asf");
         let mut child = Command::new(asf)
-            .args([
-                "proxy",
-                "--home", home.to_str().unwrap(),
-                "--vault", vault.to_str().unwrap(),
-                "--downstream",
-            ])
+            .args(["proxy", "--home", home.to_str().unwrap()])
+            .args(profile_args)
+            .arg("--downstream")
             .args(downstream)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -260,6 +296,15 @@ impl Proxy {
         let _ = self.child.wait();
         panic!("proxy did not exit during {context} within {PROCESS_TIMEOUT:?}; {diagnostics}");
     }
+}
+
+fn tool_json(result: &Value) -> Value {
+    serde_json::from_str(
+        result["content"][0]["text"]
+            .as_str()
+            .expect("tool result text"),
+    )
+    .expect("tool result contains JSON")
 }
 
 impl Proxy {
@@ -1054,4 +1099,228 @@ fn proxied_session_end_to_end() {
         .query_row("SELECT COUNT(*) FROM events WHERE kind = 'tool_call'", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 21, "20 budgeted writes + 1 exempted write");
+}
+
+/// Second dogfood profile: real structured state in opaque SQLite plus a
+/// Markdown evidence tree. Both roots stay branch-only during the session,
+/// then promote together under the same traced gate.
+#[test]
+fn workboard_profile_promotes_structured_and_evidence_state_together() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let db = tmp.path().join("workboard.db");
+    let evidence = tmp.path().join("evidence");
+
+    let mut proxy = Proxy::start_workboard(&home, &db, &evidence);
+    let init = proxy.request(
+        "initialize",
+        json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0"}}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "asf-workboard-server");
+
+    let tools = proxy.request("tools/list", json!({}));
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "work.list",
+            "work.get",
+            "work.create",
+            "work.update",
+            "work.add_dependency",
+            "work.link_evidence",
+            "work.close",
+            "evidence.list",
+            "evidence.read",
+            "evidence.create",
+            "evidence.edit",
+        ]
+    );
+
+    let created = tool_json(&proxy.call_tool(
+        "work.create",
+        json!({"title":"Exercise structured local state","details":"Dogfood it","priority":3}),
+    ));
+    assert_eq!(created["id"], 1);
+    assert_eq!(created["revision"], 1);
+    let made_evidence = proxy.call_tool(
+        "evidence.create",
+        json!({"path":"runs/df-w1.md","content":"# DF-W1\n\nObserved cleanly.\n"}),
+    );
+    assert_eq!(made_evidence["isError"], false, "{made_evidence}");
+    let linked = tool_json(&proxy.call_tool(
+        "work.link_evidence",
+        json!({"id":1,"path":"runs/df-w1.md","expected_revision":1}),
+    ));
+    assert_eq!(linked["revision"], 2);
+
+    // Optimistic concurrency is enforced by the downstream on its branch.
+    let stale = proxy.call_tool(
+        "work.update",
+        json!({"id":1,"expected_revision":1,"status":"in_progress"}),
+    );
+    assert_eq!(stale["isError"], true);
+    assert!(stale["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("stale revision"));
+    let updated = tool_json(&proxy.call_tool(
+        "work.update",
+        json!({"id":1,"expected_revision":2,"status":"in_progress"}),
+    ));
+    assert_eq!(updated["revision"], 3);
+
+    let trunk = rusqlite::Connection::open(&db).unwrap();
+    let count: i64 = trunk
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "SQLite trunk changed before promotion");
+    assert!(!evidence.join("runs/df-w1.md").exists(), "evidence trunk changed before promotion");
+    drop(trunk);
+
+    proxy.finish();
+
+    let trunk = rusqlite::Connection::open(&db).unwrap();
+    let (status, revision): (String, i64) = trunk
+        .query_row("SELECT status, revision FROM tasks WHERE id=1", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!((status.as_str(), revision), ("in_progress", 3));
+    let link: String = trunk
+        .query_row("SELECT path FROM evidence_links WHERE task_id=1", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(link, "runs/df-w1.md");
+    assert_eq!(
+        std::fs::read_to_string(evidence.join(&link)).unwrap(),
+        "# DF-W1\n\nObserved cleanly.\n"
+    );
+    assert_eq!(promotion_count(&home), 1);
+
+    let ledger = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args(["ledger", "--home", home.to_str().unwrap()])
+        .output()
+        .expect("run ledger");
+    assert!(ledger.status.success());
+    assert!(String::from_utf8_lossy(&ledger.stdout)
+        .contains("every live root is explained by the ledger"));
+
+    // A fabric home is authority for one exact coordinated topology. Pointing
+    // it at another DB/evidence pair must fail before bootstrap can overwrite
+    // the persisted store map or recover an old branch into the wrong roots.
+    let other_db = tmp.path().join("other.db");
+    let other_evidence = tmp.path().join("other-evidence");
+    let mismatch = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args([
+            "proxy",
+            "--home",
+            home.to_str().unwrap(),
+            "--profile",
+            "workboard",
+            "--db",
+            other_db.to_str().unwrap(),
+            "--evidence",
+            other_evidence.to_str().unwrap(),
+            "--downstream",
+            "/usr/bin/true",
+        ])
+        .output()
+        .expect("run mismatched workboard topology");
+    assert!(!mismatch.status.success());
+    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("pinned to a different store topology"));
+}
+
+/// DF-W7: a manifest from the workboard profile restores its SQLite image
+/// and evidence tree as one unit, including revisions and file contents.
+#[test]
+fn workboard_revert_restores_both_roots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let db = tmp.path().join("workboard.db");
+    let evidence = tmp.path().join("evidence");
+    let asf = env!("CARGO_BIN_EXE_asf");
+
+    let operator = |action: &[&str]| {
+        let output = Command::new(asf)
+            .args(["workboard"])
+            .args(action)
+            .args(["--db", db.to_str().unwrap(), "--evidence", evidence.to_str().unwrap()])
+            .output()
+            .expect("run workboard operator command");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    };
+    operator(&["create", "--title", "Baseline task"]);
+    operator(&[
+        "evidence-create",
+        "--path",
+        "baseline.md",
+        "--content",
+        "# Baseline\n",
+    ]);
+    operator(&[
+        "link-evidence",
+        "--id",
+        "1",
+        "--path",
+        "baseline.md",
+        "--expected-revision",
+        "1",
+    ]);
+
+    let mut proxy = Proxy::start_workboard(&home, &db, &evidence);
+    let init = proxy.request(
+        "initialize",
+        json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"0"}}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "asf-workboard-server");
+    let base_manifest = {
+        let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+        let key: String = conn
+            .query_row(
+                "SELECT key FROM meta WHERE key LIKE 'session_live:%' LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        key.trim_start_matches("session_live:").to_string()
+    };
+
+    let updated = tool_json(&proxy.call_tool(
+        "work.update",
+        json!({"id":1,"expected_revision":2,"status":"done","details":"changed in branch"}),
+    ));
+    assert_eq!(updated["revision"], 3);
+    let edited = proxy.call_tool(
+        "evidence.edit",
+        json!({"path":"baseline.md","old_string":"# Baseline","new_string":"# Changed"}),
+    );
+    assert_eq!(edited["isError"], false, "{edited}");
+    proxy.finish();
+
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let status: String = conn
+        .query_row("SELECT status FROM tasks WHERE id=1", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(status, "done");
+    assert_eq!(std::fs::read_to_string(evidence.join("baseline.md")).unwrap(), "# Changed\n");
+    drop(conn);
+
+    let revert = Command::new(asf)
+        .args(["revert", "--home", home.to_str().unwrap(), &base_manifest])
+        .output()
+        .expect("run coherent revert");
+    assert!(revert.status.success(), "{}", String::from_utf8_lossy(&revert.stderr));
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let (status, revision): (String, i64) = conn
+        .query_row("SELECT status, revision FROM tasks WHERE id=1", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!((status.as_str(), revision), ("todo", 2));
+    assert_eq!(std::fs::read_to_string(evidence.join("baseline.md")).unwrap(), "# Baseline\n");
 }

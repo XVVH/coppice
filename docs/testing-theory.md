@@ -22,12 +22,15 @@ that can't say which invariant it defends is suspect.
   the kernel e2e (manifest → mutate → drift → revert → ledger), the broker
   suite (mint → call → escalate → approve → attenuate).
 - *Process-level* — `tests/proxy_smoke.rs` spawns the actual `asf proxy`
-  and `asf vault-server` binaries and drives them over the real MCP wire,
+  with both `asf vault-server` and `asf workboard-server` downstreams and drives
+  them over the real MCP wire,
   approvals over the real Unix socket, then inspects the ledger on disk.
   This is the only altitude that can catch wiring bugs (id routing,
   stdio framing, socket lifecycle) and the only one that proves C2
   topologically (an invented in-band approval method falls through and
-  errors).
+  errors). The workboard cases also prove branch-only operation, optimistic
+  revision failure, coherent SQLite-plus-filesystem promotion, and coherent
+  two-root revert.
 
 **3. The adversarial posture is load-bearing, not decorative.** The suite
 attacks its own guarantees: dropping the append-only triggers and editing

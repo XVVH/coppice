@@ -5,6 +5,8 @@
 //! - `asf proxy --home H --vault V --downstream CMD [ARGS…]` — the MCP
 //!   proxy daemon (brief §5.3) with its C2 approval socket
 //! - `asf vault-server --vault V` — toy downstream MCP server
+//! - `asf workboard-server --db D --evidence E` — structured local-state MCP server
+//! - `asf workboard ACTION --db D --evidence E [...]` — human/operator workboard CLI
 //! - `asf approve --home H list|approve <id> [--uses N]|deny <id>` — the
 //!   human side of the C2 surface (separate terminal, never the agent)
 //! - `asf recover --home H --vault V [man:… …]` — gate sessions a dead
@@ -14,6 +16,7 @@ mod broker_demo;
 mod mcp;
 mod proxy;
 mod vault_server;
+mod workboard_server;
 
 use anyhow::{bail, Context, Result};
 use asf_kernel::kernel::Fabric;
@@ -58,9 +61,15 @@ fn main() -> Result<()> {
             let vault = flag(&args, "--vault").context("vault-server needs --vault <dir>")?;
             vault_server::run(PathBuf::from(vault))
         }
+        Some("workboard-server") => {
+            let db = flag(&args, "--db").context("workboard-server needs --db <file>")?;
+            let evidence = flag(&args, "--evidence").context("workboard-server needs --evidence <dir>")?;
+            workboard_server::run(PathBuf::from(db), PathBuf::from(evidence))
+        }
+        Some("workboard") => workboard_cli(&args),
         Some("proxy") => {
             let home = flag(&args, "--home").context("proxy needs --home <dir>")?;
-            let vault = flag(&args, "--vault").context("proxy needs --vault <dir>")?;
+            let profile = parse_profile(&args, "proxy")?;
             let dpos = args
                 .iter()
                 .position(|a| a == "--downstream")
@@ -69,7 +78,7 @@ fn main() -> Result<()> {
             if downstream.is_empty() {
                 bail!("--downstream needs a command");
             }
-            proxy::run(PathBuf::from(home), PathBuf::from(vault), downstream)
+            proxy::run(PathBuf::from(home), profile, downstream)
         }
         Some("approve") => {
             let home = flag(&args, "--home").context("approve needs --home <dir>")?;
@@ -85,13 +94,13 @@ fn main() -> Result<()> {
         }
         Some("recover") => {
             let home = flag(&args, "--home").context("recover needs --home <dir>")?;
-            let vault = flag(&args, "--vault").context("recover needs --vault <dir>")?;
+            let profile = parse_profile(&args, "recover")?;
             let manifests: Vec<String> = args
                 .iter()
                 .filter(|a| a.starts_with("man:"))
                 .cloned()
                 .collect();
-            proxy::recover_cli(Path::new(&home), Path::new(&vault), &manifests)
+            proxy::recover_cli(Path::new(&home), &profile, &manifests)
         }
         Some("revert") => {
             let home = flag(&args, "--home").context("revert needs --home <dir>")?;
@@ -133,11 +142,83 @@ fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>"
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf workboard-server --db <file> --evidence <dir>\n  asf workboard <action> --db <file> --evidence <dir> [action flags]\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf proxy --home <dir> --profile workboard --db <file> --evidence <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf recover --home <dir> --profile workboard --db <file> --evidence <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>"
             );
             std::process::exit(2);
         }
     }
+}
+
+fn parse_profile(args: &[String], command: &str) -> Result<proxy::Profile> {
+    match flag(args, "--profile").as_deref().unwrap_or("vault") {
+        "vault" => {
+            let vault = flag(args, "--vault")
+                .with_context(|| format!("{command} vault profile needs --vault <dir>"))?;
+            Ok(proxy::Profile::vault(PathBuf::from(vault)))
+        }
+        "workboard" => {
+            let db = flag(args, "--db")
+                .with_context(|| format!("{command} workboard profile needs --db <file>"))?;
+            let evidence = flag(args, "--evidence")
+                .with_context(|| format!("{command} workboard profile needs --evidence <dir>"))?;
+            Ok(proxy::Profile::workboard(PathBuf::from(db), PathBuf::from(evidence)))
+        }
+        other => bail!("unknown profile {other}; expected vault or workboard"),
+    }
+}
+
+fn parse_i64_flag(args: &[String], name: &str) -> Result<i64> {
+    flag(args, name)
+        .with_context(|| format!("missing {name} <integer>"))?
+        .parse()
+        .with_context(|| format!("{name} must be an integer"))
+}
+
+fn workboard_cli(args: &[String]) -> Result<()> {
+    let action = args.get(2).context(
+        "workboard needs an action: list|get|create|update|add-dependency|link-evidence|close|evidence-list|evidence-read|evidence-create|evidence-edit",
+    )?;
+    let db = PathBuf::from(flag(args, "--db").context("workboard needs --db <file>")?);
+    let evidence = PathBuf::from(flag(args, "--evidence").context("workboard needs --evidence <dir>")?);
+    let mut body = serde_json::Map::new();
+    let (tool, required): (&str, &[&str]) = match action.as_str() {
+        "list" => ("work.list", &[]),
+        "get" => ("work.get", &["id"]),
+        "create" => ("work.create", &["title"]),
+        "update" => ("work.update", &["id", "expected-revision"]),
+        "add-dependency" => ("work.add_dependency", &["id", "depends-on", "expected-revision"]),
+        "link-evidence" => ("work.link_evidence", &["id", "path", "expected-revision"]),
+        "close" => ("work.close", &["id", "expected-revision"]),
+        "evidence-list" => ("evidence.list", &[]),
+        "evidence-read" => ("evidence.read", &["path"]),
+        "evidence-create" => ("evidence.create", &["path", "content"]),
+        "evidence-edit" => ("evidence.edit", &["path", "old-string", "new-string"]),
+        other => bail!("unknown workboard action {other}"),
+    };
+    for required in required {
+        let flag_name = format!("--{required}");
+        if !args.iter().any(|arg| arg == &flag_name) {
+            bail!("{action} needs {flag_name} <value>");
+        }
+    }
+    for (flag_name, field) in [
+        ("--title", "title"), ("--details", "details"), ("--status", "status"),
+        ("--path", "path"), ("--content", "content"), ("--old-string", "old_string"),
+        ("--new-string", "new_string"),
+    ] {
+        if let Some(value) = flag(args, flag_name) {
+            body.insert(field.into(), json!(value));
+        }
+    }
+    for (flag_name, field) in [
+        ("--id", "id"), ("--priority", "priority"), ("--depends-on", "depends_on"),
+        ("--expected-revision", "expected_revision"),
+    ] {
+        if args.iter().any(|arg| arg == flag_name) {
+            body.insert(field.into(), json!(parse_i64_flag(args, flag_name)?));
+        }
+    }
+    workboard_server::operator(&db, &evidence, tool, serde_json::Value::Object(body))
 }
 
 /// The tripwire numbers (ADR 0002) plus general substrate health.

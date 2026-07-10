@@ -25,6 +25,10 @@ SI-1…SI-20 are resolved (SI-20 → A20/M8 in v0.5), new issues start at SI-21.
 
 First integration: workflow 3 (vault maintenance) — no external tool
 registrations needed; failure mode during dogfooding is "revert and shrug."
+Second dogfood integration: Coppice Workboard — opaque SQLite work state plus
+Markdown evidence as one coordinated two-root session. See
+`docs/workboard-dogfooding.md`; preserve SI-18 whole-store SQLite merge
+semantics unless a finer authority model is explicitly ratified.
 
 **Implementation-status boundary:** the dogfooding baseline currently provides
 logical payload tombstoning, not forensic erasure across SQLite residue,

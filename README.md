@@ -67,6 +67,14 @@ cargo run -p asf -- proxy --home /tmp/asf-home --vault /tmp/vault \
     --downstream target/debug/asf vault-server --vault /tmp/vault
 cargo run -p asf -- approve --home /tmp/asf-home list      # the C2 surface
 cargo run -p asf -- approve --home /tmp/asf-home approve 1 --uses 2
+
+# Structured-local-state dogfood profile (SQLite + Markdown evidence):
+cargo run -p asf -- proxy --home /tmp/asf-workboard-home \
+    --profile workboard --db /tmp/workboard.db --evidence /tmp/workboard-evidence \
+    --downstream target/debug/asf workboard-server \
+      --db /tmp/workboard.db --evidence /tmp/workboard-evidence
+cargo run -p asf -- workboard list \
+    --db /tmp/workboard.db --evidence /tmp/workboard-evidence
 ```
 
 The repository-owned `scripts/ci` harness is the definition of a verified
@@ -95,4 +103,6 @@ Open implementation findings are tracked in
 [docs/review-findings.md](docs/review-findings.md) (`RF-n`); spec ambiguities
 in [docs/spec-issues.md](docs/spec-issues.md) (`SI-n`). Dogfooding setup and
 methodology (corpus, wiring, metrics, graduation criteria) live in
-[docs/dogfooding.md](docs/dogfooding.md).
+[docs/dogfooding.md](docs/dogfooding.md). The structured-state setup and
+DF-W1…W8 scenarios live in
+[docs/workboard-dogfooding.md](docs/workboard-dogfooding.md).

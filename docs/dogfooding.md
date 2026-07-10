@@ -6,10 +6,11 @@ dogfooding measures whether it denies what it *mustn't*). Boundary rule:
 if a number can fail in CI it lives in testing-theory; if it can only fail in
 real use it lives here.
 
-Status: v0 — coarse app-lifetime sessions (ADR 0004), toy `vault-server`
-downstream, single human, block-nothing-loudly posture (brief §5.2 Spine).
+Status: v0 — coarse app-lifetime sessions (ADR 0004), trusted local
+`vault-server` and structured-state `workboard-server` profiles, single human,
+block-nothing-loudly posture (brief §5.2 Spine).
 
-## The one decision that's yours: the corpus
+## The one decision that's yours: the vault corpus
 
 Recommended: **a git-backed copy of your real vault**, not the live one, for
 the first weeks.
@@ -61,6 +62,13 @@ session branch. The client never sees trunk; the agent never holds a key.
    `asf approve --home … list | approve <id> --uses N | promotions |
    promote <id>`.
 
+The second profile is **Coppice Workboard**: an opaque SQLite task database
+plus Markdown evidence, coordinated as two roots. It is both a new
+structured-local-state workload and the primary record for dogfooding runs,
+findings, and follow-ups. Its setup, tools, and DF-W1…W8 scenarios live in
+`workboard-dogfooding.md`. Give it a separate fabric home from the vault
+profile.
+
 ## Session hygiene — two surfaces, never mixed
 
 The dev machine collapses a topology the design assumes: agent and operator
@@ -84,7 +92,8 @@ The rule, until agent sandboxing makes it structural:
   `.mcp.json`, a CLAUDE.md contract (denials are results to report, not
   obstacles to solve; approvals belong to the operator), and client deny
   rules blocking native file tools on the vault AND the fabric home, plus
-  shell entirely (workflow 3 needs none). Client-side permission prompts for
+  shell entirely (neither local profile needs it). For the workboard profile,
+  deny native access to its DB, evidence root, and fabric home too. Client-side permission prompts for
   the brokered tools are deliberately OFF: governing calls is the broker's
   job, and double-governance would mask the UX being measured. One dogfood
   session at a time — concurrent proxies would contend for the fabric home
@@ -108,10 +117,12 @@ before it joins a dogfooding run.
 
 ## What to exercise
 
-`dogfooding-rubric.md` enumerates the manual test batch — DF-P1…P8
+`dogfooding-rubric.md` enumerates the vault manual test batch — DF-P1…P8
 (positives: must succeed cleanly; a denial there is a false positive) and
 DF-N1…N9 (negatives: must be blocked/parked/attributed; those denials are
-expected, not FPs). Log outcomes by id in the vault's dogfooding log.
+expected, not FPs). `workboard-dogfooding.md` adds DF-W1…W8 for structured
+state. Log new outcomes as workboard items with linked Markdown evidence;
+the existing vault log remains historical evidence.
 
 ## What to measure
 

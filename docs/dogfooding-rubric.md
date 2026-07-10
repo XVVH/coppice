@@ -10,8 +10,11 @@ code changes.
 
 Scoring: every denial in a DF-N test is **expected** — not a false positive.
 A denial during a DF-P test **is** a false positive: log it in the
-denial-FP tally with the ledger event id. Log results in the vault's
-`coppice-dogfooding-log.md` by id (e.g. "DF-N4 pass, approval latency 40s").
+denial-FP tally with the ledger event id. Log new results as Coppice Workboard
+items with linked Markdown evidence (e.g. "DF-N4 pass, approval latency 40s").
+The prior vault `coppice-dogfooding-log.md` remains historical evidence.
+The structured-state profile's complementary DF-W1…W8 matrix is in
+`workboard-dogfooding.md`.
 
 ## Positive — should succeed, cleanly and legibly
 

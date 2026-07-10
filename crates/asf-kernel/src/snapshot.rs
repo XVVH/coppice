@@ -492,6 +492,18 @@ pub fn commit_restore(cas: &Cas, prepared: PreparedRestore) -> Result<(), SnapEr
 /// detection attributes anything left over. Excluded dirs (`.git`) are
 /// never written to and never deleted.
 fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), SnapError> {
+    apply_fs_in_place_with_hook(cas, root, entries, &mut |_| Ok(()))
+}
+
+/// Test seam for deterministic interruption at content-mutation boundaries.
+/// Production supplies a no-op hook; unit tests can fail after mutation N and
+/// verify that replay converges without encoding sleeps or permission tricks.
+fn apply_fs_in_place_with_hook(
+    cas: &Cas,
+    root: &Path,
+    entries: &[FsEntry],
+    before_mutation: &mut dyn FnMut(&Path) -> Result<(), SnapError>,
+) -> Result<(), SnapError> {
     fs::create_dir_all(root).map_err(io_err(root))?;
     let desired: std::collections::BTreeMap<&str, &FsEntry> =
         entries.iter().map(|e| (e.rel.as_str(), e)).collect();
@@ -515,6 +527,7 @@ fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), 
             .to_string_lossy()
             .replace(std::path::MAIN_SEPARATOR, "/");
         if !desired.contains_key(rel.as_str()) {
+            before_mutation(entry.path())?;
             fs::remove_file(entry.path()).map_err(io_err(entry.path()))?;
         }
     }
@@ -530,6 +543,7 @@ fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), 
         if let Some(p) = target.parent() {
             fs::create_dir_all(p).map_err(io_err(p))?;
         }
+        before_mutation(&target)?;
         let tmp = target.with_file_name(format!(
             ".asf-tmp-{}",
             target.file_name().unwrap_or_default().to_string_lossy()
@@ -744,6 +758,56 @@ mod tests {
         // Bogus root: prepare fails, live content untouched.
         assert!(prepare_restore(&cas, &spec, "sha256:deadbeefdeadbeef").is_err());
         assert_eq!(fs::read_to_string(vault.join("a.md")).unwrap(), "live");
+    }
+
+    #[test]
+    fn interrupted_in_place_apply_is_idempotently_recoverable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let live = tmp.path().join("live");
+        let desired = tmp.path().join("desired");
+        fs::create_dir_all(&live).unwrap();
+        fs::create_dir_all(&desired).unwrap();
+        write(&live.join("a.md"), "old a");
+        write(&live.join("b.md"), "old b");
+        write(&live.join("obsolete.md"), "remove me");
+        write(&desired.join("a.md"), "new a");
+        write(&desired.join("b.md"), "new b");
+        let desired_root = capture_fs(&cas, &desired).unwrap();
+        let prepared = prepare_restore(&cas, &fs_spec(&live), &desired_root).unwrap();
+        let RestorePlan::FsInPlace { entries } = prepared.plan else {
+            panic!("fs restore must use in-place plan");
+        };
+
+        let mut mutations = 0;
+        let result = apply_fs_in_place_with_hook(
+            &cas,
+            &live,
+            &entries,
+            &mut |_| {
+                mutations += 1;
+                if mutations == 2 {
+                    return Err(SnapError::Io {
+                        path: live.clone(),
+                        source: std::io::Error::other("injected interruption"),
+                    });
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err(), "the deterministic failpoint must fire");
+        assert_ne!(
+            capture_fs(&cas, &live).unwrap(),
+            desired_root,
+            "the interruption should leave a mixed, not falsely complete, tree"
+        );
+
+        apply_fs_in_place(&cas, &live, &entries).unwrap();
+        assert_eq!(
+            capture_fs(&cas, &live).unwrap(),
+            desired_root,
+            "replaying the same restore must converge exactly"
+        );
     }
 
     #[test]

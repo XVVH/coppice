@@ -7,12 +7,21 @@ use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
+
+const PROCESS_TIMEOUT: Duration = Duration::from_secs(15);
+
+enum ChildOutput {
+    Line(String),
+    Closed(String),
+}
 
 struct Proxy {
     child: Child,
     stdin: Option<std::process::ChildStdin>,
-    stdout: BufReader<std::process::ChildStdout>,
+    stdout: mpsc::Receiver<ChildOutput>,
+    stderr: Arc<Mutex<String>>,
     next_id: i64,
 }
 
@@ -28,12 +37,62 @@ impl Proxy {
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("spawn proxy");
         let stdin = Some(child.stdin.take().unwrap());
-        let stdout = BufReader::new(child.stdout.take().unwrap());
-        Self { child, stdin, stdout, next_id: 1 }
+        let child_stdout = child.stdout.take().unwrap();
+        let (stdout_tx, stdout) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(child_stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = stdout_tx.send(ChildOutput::Closed("stdout reached EOF".into()));
+                        break;
+                    }
+                    Ok(_) => {
+                        if stdout_tx.send(ChildOutput::Line(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = stdout_tx.send(ChildOutput::Closed(format!(
+                            "stdout read failed: {error}"
+                        )));
+                        break;
+                    }
+                }
+            }
+        });
+
+        let child_stderr = child.stderr.take().unwrap();
+        let stderr = Arc::new(Mutex::new(String::new()));
+        let stderr_reader = stderr.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(child_stderr).lines() {
+                let mut captured = stderr_reader.lock().expect("stderr capture lock");
+                match line {
+                    Ok(line) => {
+                        captured.push_str(&line);
+                        captured.push('\n');
+                    }
+                    Err(error) => {
+                        captured.push_str(&format!("<stderr read failed: {error}>\n"));
+                        break;
+                    }
+                }
+            }
+        });
+
+        Self {
+            child,
+            stdin,
+            stdout,
+            stderr,
+            next_id: 1,
+        }
     }
 
     fn request(&mut self, method: &str, params: Value) -> Value {
@@ -44,14 +103,36 @@ impl Proxy {
         writeln!(stdin, "{msg}").unwrap();
         stdin.flush().unwrap();
         loop {
-            let mut line = String::new();
-            if self.stdout.read_line(&mut line).unwrap() == 0 {
-                panic!("proxy closed while awaiting response to {method}");
-            }
+            let line = match self.stdout.recv_timeout(PROCESS_TIMEOUT) {
+                Ok(ChildOutput::Line(line)) => line,
+                Ok(ChildOutput::Closed(reason)) => {
+                    panic!(
+                        "proxy closed while awaiting response to {method}: {reason}; {}",
+                        self.diagnostics()
+                    )
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    panic!(
+                        "proxy timed out after {PROCESS_TIMEOUT:?} awaiting response to {method}; {}",
+                        self.diagnostics()
+                    )
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!(
+                        "proxy stdout reader disappeared awaiting response to {method}; {}",
+                        self.diagnostics()
+                    )
+                }
+            };
             if line.trim().is_empty() {
                 continue;
             }
-            let v: Value = serde_json::from_str(line.trim()).unwrap();
+            let v: Value = serde_json::from_str(line.trim()).unwrap_or_else(|error| {
+                panic!(
+                    "proxy emitted invalid JSON while awaiting {method}: {error}; line={line:?}; {}",
+                    self.diagnostics()
+                )
+            });
             if v.get("id") == Some(&json!(id)) {
                 return v;
             }
@@ -66,7 +147,39 @@ impl Proxy {
     /// then the daemon exits.
     fn finish(mut self) {
         drop(self.stdin.take());
+        self.wait_for_exit("EOF promotion", true);
+    }
+
+    fn diagnostics(&mut self) -> String {
+        let status = self
+            .child
+            .try_wait()
+            .map(|status| format!("child_status={status:?}"))
+            .unwrap_or_else(|error| format!("child_status_error={error}"));
+        let stderr = self.stderr.lock().expect("stderr capture lock").clone();
+        format!("{status}; stderr={stderr:?}")
+    }
+
+    fn wait_for_exit(&mut self, context: &str, require_success: bool) {
+        let deadline = Instant::now() + PROCESS_TIMEOUT;
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(status)) if status.success() || !require_success => return,
+                Ok(Some(status)) => panic!(
+                    "proxy exited unsuccessfully during {context}: {status}; {}",
+                    self.diagnostics()
+                ),
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Err(error) => panic!(
+                    "could not wait for proxy during {context}: {error}; {}",
+                    self.diagnostics()
+                ),
+            }
+        }
+        let diagnostics = self.diagnostics();
+        let _ = self.child.kill();
         let _ = self.child.wait();
+        panic!("proxy did not exit during {context} within {PROCESS_TIMEOUT:?}; {diagnostics}");
     }
 }
 
@@ -74,7 +187,7 @@ impl Proxy {
     /// Kill without ceremony (SIGKILL): the promotion gate cannot run.
     fn sigkill(mut self) {
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.wait_for_exit("SIGKILL", false);
     }
 
     /// What a real MCP client does on shutdown (RF-9): a signal, not EOF.
@@ -83,7 +196,7 @@ impl Proxy {
             .args(["-TERM", &self.child.id().to_string()])
             .status()
             .expect("send SIGTERM");
-        let _ = self.child.wait();
+        self.wait_for_exit("SIGTERM promotion", true);
     }
 }
 
@@ -104,6 +217,8 @@ fn approve_via_socket(home: &std::path::Path, cmd: Value) -> Value {
         std::thread::sleep(Duration::from_millis(100));
     }
     let mut stream = UnixStream::connect(&sock).expect("approval socket");
+    stream.set_read_timeout(Some(PROCESS_TIMEOUT)).unwrap();
+    stream.set_write_timeout(Some(PROCESS_TIMEOUT)).unwrap();
     writeln!(stream, "{cmd}").unwrap();
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).unwrap();
@@ -132,6 +247,113 @@ fn pending_promotions(home: &std::path::Path) -> i64 {
     let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
     conn.query_row("SELECT COUNT(*) FROM promotions WHERE status = 'pending'", [], |r| r.get(0))
         .unwrap()
+}
+
+/// DF-P6: ordinary short sessions must form a clean chain without inventing
+/// drift for untouched vault or memory state.
+#[test]
+fn multiple_clean_sessions_do_not_create_false_drift() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    let mut first = Proxy::start(&home, &vault);
+    init_session(&mut first);
+    let result = first.call_tool(
+        "note.write",
+        json!({"path":"first.md","content":"session one"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    first.finish();
+
+    let mut second = Proxy::start(&home, &vault);
+    init_session(&mut second);
+    let result = second.call_tool("note.read", json!({"path":"first.md"}));
+    assert_eq!(result["content"][0]["text"], "session one");
+    second.finish();
+
+    assert_eq!(promotion_count(&home), 2, "each clean session gates once");
+    assert_eq!(drift_count(&home), 0, "untouched state must not produce false drift");
+}
+
+/// DF-N3: every filesystem-writing surface rejects absolute/parent escapes;
+/// the denial happens before any path outside the branch can be touched.
+#[test]
+fn filesystem_actions_cannot_escape_the_vault() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("safe.md"), "safe").unwrap();
+    let outside = tmp.path().join("outside.md");
+
+    let mut proxy = Proxy::start(&home, &vault);
+    init_session(&mut proxy);
+    for (tool, args) in [
+        (
+            "note.write",
+            json!({"path":"../outside.md","content":"escaped"}),
+        ),
+        (
+            "note.edit",
+            json!({"path":"../outside.md","old_string":"x","new_string":"y"}),
+        ),
+        (
+            "note.move",
+            json!({"src":"safe.md","dest":"../outside.md"}),
+        ),
+        (
+            "note.read",
+            json!({"path":outside.to_string_lossy()}),
+        ),
+        ("note.list", json!({"path":"../"})),
+    ] {
+        let result = proxy.call_tool(tool, args);
+        assert_eq!(result["isError"], true, "{tool} accepted an escape: {result}");
+        assert!(!outside.exists(), "{tool} wrote outside the vault");
+    }
+    proxy.finish();
+    assert_eq!(std::fs::read_to_string(vault.join("safe.md")).unwrap(), "safe");
+}
+
+/// DF-N5: a denial is a terminal resolution of that batch, not a hidden
+/// exemption. Retrying creates another parked request and executes nothing.
+#[test]
+fn denied_escalation_does_not_authorize_retry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    let mut proxy = Proxy::start(&home, &vault);
+    init_session(&mut proxy);
+    for i in 0..20 {
+        let result = proxy.call_tool(
+            "note.write",
+            json!({"path":format!("n{i}.md"),"content":"x"}),
+        );
+        assert_eq!(result["isError"], false, "write {i}: {result}");
+    }
+    let blocked = json!({"path":"blocked.md","content":"must not land"});
+    let result = proxy.call_tool("note.write", blocked.clone());
+    assert_eq!(result["isError"], true, "over-budget write should park");
+
+    let list = approve_via_socket(&home, json!({"cmd":"list"}));
+    let id = list["escalations"][0]["id"].as_i64().unwrap();
+    let denied = approve_via_socket(&home, json!({"cmd":"deny","id":id}));
+    assert_eq!(denied["ok"], true, "{denied}");
+
+    let retry = proxy.call_tool("note.write", blocked);
+    assert_eq!(retry["isError"], true, "denial must not grant an exemption");
+    assert!(
+        retry["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("parked")),
+        "retry should create a fresh visible escalation: {retry}"
+    );
+    proxy.finish();
+    assert!(!vault.join("blocked.md").exists());
 }
 
 /// RF-9, the crash-safe layer: a SIGKILLed proxy strands its session; the

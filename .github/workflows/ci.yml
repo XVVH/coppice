@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Weekly deeper properties/release-mode run and advisory refresh.
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -11,8 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  static:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       # Only first-party actions/checkout is used; the toolchain is installed
       # via the runner's preinstalled rustup rather than a marketplace action,
@@ -25,8 +33,78 @@ jobs:
       - name: Clippy (warnings are errors)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is a correctness target, not cosmetic: dogfooding uses it and
+        # ASF relies on Unix sockets, flock, hard links, modes, signals, and
+        # filesystem semantics that differ from Linux.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+
       - name: Test
         run: cargo test --workspace --locked
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: RustSec dependency audit
+        run: cargo audit
+
+  deep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ASF_PROPTEST_CASES: "4096"
+      ASF_MODEL_CASES: "512"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Release-mode tests with deeper generated histories
+        run: cargo test --workspace --release --locked
+
+  mutation:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked --version 27.1.0
+
+      - name: Mutation test authority evaluation and merge policy
+        run: >-
+          cargo mutants
+          -f crates/asf-kernel/src/evaluate.rs
+          -f crates/asf-kernel/src/promote.rs
+          -j 4
+          --minimum-test-timeout 20
+          --timeout-multiplier 3
 
 # Deliberately NOT enforcing `cargo fmt --check` yet: the tree is not
 # rustfmt-clean, and reformatting belongs in its own PR, not bundled here.

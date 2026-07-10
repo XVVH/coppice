@@ -1,6 +1,10 @@
 # Build output
 /target
 
+# Local mutation-test reports (CI workspaces are ephemeral; local reports are
+# reproducible with `scripts/ci mutation`).
+/mutants.out/
+
 # OS / editor cruft
 .DS_Store
 *.swp

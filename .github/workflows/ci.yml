@@ -12,10 +12,11 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref.
+# Cancel superseded push/PR runs, but never let an ordinary main push cancel a
+# scheduled or manually requested deep/mutation run.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 jobs:
   static:
@@ -31,7 +32,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component clippy
 
       - name: Clippy (warnings are errors)
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: ./scripts/ci static
 
   test:
     name: Test (${{ matrix.os }})
@@ -50,8 +51,8 @@ jobs:
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal
 
-      - name: Test
-        run: cargo test --workspace --locked
+      - name: Tests and executable acceptance demos
+        run: ./scripts/ci test
 
   audit:
     runs-on: ubuntu-latest
@@ -66,15 +67,12 @@ jobs:
         run: cargo install cargo-audit --locked --version 0.22.2
 
       - name: RustSec dependency audit
-        run: cargo audit
+        run: ./scripts/ci audit
 
   deep:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      ASF_PROPTEST_CASES: "4096"
-      ASF_MODEL_CASES: "512"
     steps:
       - uses: actions/checkout@v4
 
@@ -82,7 +80,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal
 
       - name: Release-mode tests with deeper generated histories
-        run: cargo test --workspace --release --locked
+        run: ./scripts/ci deep
 
   mutation:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -98,13 +96,7 @@ jobs:
         run: cargo install cargo-mutants --locked --version 27.1.0
 
       - name: Mutation test authority evaluation and merge policy
-        run: >-
-          cargo mutants
-          -f crates/asf-kernel/src/evaluate.rs
-          -f crates/asf-kernel/src/promote.rs
-          -j 4
-          --minimum-test-timeout 20
-          --timeout-multiplier 3
+        run: ./scripts/ci mutation
 
 # Deliberately NOT enforcing `cargo fmt --check` yet: the tree is not
 # rustfmt-clean, and reformatting belongs in its own PR, not bundled here.

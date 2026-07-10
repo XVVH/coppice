@@ -334,7 +334,9 @@ mod tests {
         let dek = kek.unwrap_dek(&wd.wrap_nonce, &wd.wrapped).unwrap();
         assert_eq!(dek_decrypt(&dek, &nonce, &ct).unwrap(), b"secret payload");
 
-        // Without the wrapped DEK, content is gone: that's all shredding is.
+        // A different DEK cannot decrypt the ciphertext. The storage layer's
+        // separate forensic-erasure problem is deliberately outside this
+        // primitive test.
         let other = kek.new_dek().unwrap();
         assert!(dek_decrypt(&other.dek, &nonce, &ct).is_err());
     }

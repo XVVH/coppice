@@ -1,0 +1,9 @@
+#!/bin/sh
+# Point this clone at the repository-owned hooks. Git does not propagate this
+# setting on clone, so each developer opts in once.
+
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+git -C "$ROOT" config core.hooksPath .githooks
+printf 'installed repository hooks from .githooks\n'

@@ -14,7 +14,7 @@
 //!   child, then ANY call the child allows, the parent allows — a
 //!   counterexample is a privilege escalation through §5.2.
 
-use asf_kernel::capability::{glob_covers, glob_matches, verify_attenuation};
+use asf_kernel::capability::{glob_covers, glob_matches, verify_attenuation, KNOWN_DIMS};
 use asf_kernel::evaluate::{evaluate, CallCtx, Outcome};
 use asf_kernel::promote::{three_way, Tree};
 use proptest::prelude::*;
@@ -372,6 +372,28 @@ fn full_cap(
         ],
         "on_violation": {"default": "deny", "escalatable": []},
     })
+}
+
+#[test]
+fn p7_generator_tracks_the_evaluator_vocabulary() {
+    let cap = full_cap("cap:coverage", None, 1, 0, 0, 0, 0, 0, 13, 0);
+    let mut generated: Vec<&str> = cap["caveats"]
+        .as_array()
+        .expect("generated capability has caveats")
+        .iter()
+        .map(|caveat| caveat["dim"].as_str().expect("generated caveat has a dimension"))
+        .collect();
+    generated.sort_unstable();
+    generated.dedup();
+
+    let mut evaluated = KNOWN_DIMS.to_vec();
+    evaluated.sort_unstable();
+    evaluated.dedup();
+
+    assert_eq!(
+        generated, evaluated,
+        "P7 must generate every mechanically evaluated caveat dimension; update full_cap when KNOWN_DIMS changes"
+    );
 }
 
 proptest! {

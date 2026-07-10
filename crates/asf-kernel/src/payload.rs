@@ -2,9 +2,12 @@
 //!
 //! No fabric object embeds sensitive content: content lives here, addressed
 //! by the sha256 of its plaintext, encrypted per-payload with its own DEK.
-//! Erasure is crypto-shredding: destroy the wrapped DEK, insert a tombstone.
-//! Hash and lineage persist; a destroyed payload resolves to
-//! `{hash, shredded_at, reason}`.
+//! The current dogfooding implementation logically shreds by deleting the
+//! live wrapped-DEK row, clearing live ciphertext, and inserting a tombstone.
+//! Hash and lineage persist; normal resolution returns
+//! `{hash, shredded_at, reason}`. This does not yet prove the spec's stronger
+//! forensic-erasure guarantee across SQLite WAL/freelists, snapshots, or
+//! backups (see the security/correctness audit).
 
 use crate::keys::{dek_decrypt, dek_encrypt, Kek};
 use crate::canon::sha256_hex;
@@ -113,8 +116,9 @@ fn lookup_ref(conn: &Connection, hash: &str) -> Result<Option<PayloadRef>, Paylo
         .optional()?)
 }
 
-/// Resolve a payload to plaintext. A shredded payload returns the tombstone
-/// as an error — structure persists, substance does not.
+/// Resolve a payload to plaintext. A logically shredded payload returns the
+/// tombstone as an error. This API property does not assert forensic erasure
+/// from storage residue or backups.
 pub fn get(conn: &Connection, kek: &Kek, hash: &str) -> Result<Vec<u8>, PayloadError> {
     if let Some((shredded_at, reason)) = tombstone(conn, hash)? {
         return Err(PayloadError::Shredded {
@@ -165,9 +169,10 @@ pub fn tombstone(
         .optional()?)
 }
 
-/// Crypto-shred: destroy the wrapped DEK (and, belt-and-braces, the
-/// ciphertext), leave a tombstone. The caller emits the `shred` trace event —
-/// the ledger records *that* it forgot, never what.
+/// Logical shred for the current storage layer: delete the live wrapped DEK,
+/// clear live ciphertext, and leave a tombstone. The caller emits the `shred`
+/// trace event. Forensic erasure requires the later durability design covering
+/// WAL, freelists, snapshots, and backups.
 pub fn shred(
     conn: &Connection,
     hash: &str,
@@ -216,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn shred_destroys_substance_keeps_structure() {
+    fn shred_makes_normal_resolution_unreadable_and_keeps_structure() {
         let (conn, kek) = setup();
         let a = put(&conn, &kek, b"doomed", "text/plain", "t0").unwrap();
         let b = put(&conn, &kek, b"survivor", "text/plain", "t0").unwrap();

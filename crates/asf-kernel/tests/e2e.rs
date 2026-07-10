@@ -7,7 +7,9 @@
 //!   step boundary re-manifests.
 //! - Coherent revert (§5.3): `e2e_kernel_round_trip` + `revert_is_all_or_nothing`
 //! - §6 chain + signatures: verified in every test via verify_all_spans.
-//! - §1 crypto-shredding: `e2e_kernel_round_trip` (structure survives).
+//! - §1 logical shredding behavior: `e2e_kernel_round_trip` proves normal
+//!   resolution is tombstoned while structure survives; it does not prove
+//!   forensic erasure from storage residue or backups.
 //! - A12 drift attribution (single-human default): `e2e_kernel_round_trip`.
 //! - M1/M2/M3, C1–C5, §5.2 attenuation: require capabilities/broker/channel
 //!   approval surfaces — milestone 2 (SI-7). C1 provenance fields are already
@@ -223,7 +225,7 @@ fn e2e_kernel_round_trip() {
         assert!(kinds.contains(&expected), "ledger missing {expected}");
     }
 
-    // -- crypto-shredding: substance destroyed, structure survives --------
+    // -- logical shred: normal reads fail, structure survives --------------
     let intent_obj = trace::get_object(&w.fabric.conn, &intent).unwrap();
     let text_ref: PayloadRef =
         serde_json::from_value(intent_obj["text"].clone()).unwrap();

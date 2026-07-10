@@ -8,6 +8,12 @@
 //! agent), or escalate (parked; the agent is told an approval is pending
 //! but cannot carry it).
 //!
+//! The dogfooding baseline fails closed when this broker/proxy path is
+//! unavailable. The brief's required loud, ledger-visible fail-open degraded
+//! mode and per-capability `on_broker_outage` inversion are deferred until
+//! live-egress integration; absence of that path is a tracked release gate,
+//! not an implemented guarantee.
+//!
 //! C2 is topological here: the approval surface is a Unix socket owned by
 //! this daemon (`<home>/approvals.sock`, driven by `asf approve`, a
 //! separate terminal — visually and procedurally distinct from the agent's

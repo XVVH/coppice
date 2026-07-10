@@ -1,10 +1,10 @@
 # Testing theory — Stage 3 dogfooding baseline
 
 This records what the suite is, what it deliberately is not yet, and which
-kind of automation owns each claim. Updated 2026-07-10 at 117 named tests,
-plus 576 shrinkable generated cases in the default run and deeper scheduled
-CI. The promotion gate is complete; dogfooding is now the product-signal lane,
-not a substitute for correctness testing.
+kind of automation owns each claim. Updated 2026-07-10 with the full named
+suite plus 576 shrinkable generated cases in the default run and deeper
+scheduled automation. The promotion gate is complete; dogfooding is now the
+product-signal lane, not a substitute for correctness testing.
 
 ## What the suite is now
 
@@ -41,7 +41,8 @@ impossible" claim in the spec gets a test that tries to do X.
 
 **4. Demos are executable acceptance tests.** `asf demo` and
 `asf broker-demo` narrate the milestone stories and `bail!` on any
-deviation — they are the human-legible face of the same assertions.
+deviation — they are the human-legible face of the same assertions. The
+canonical `scripts/ci test` lane runs both after the Rust test targets.
 
 **5. Negative space is tracked explicitly.** Invariants with no conformant
 test because their machinery or ratified representation does not exist yet:
@@ -149,10 +150,24 @@ death at each protocol phase.
 
 | Lane | Purpose |
 | --- | --- |
-| Pull request | strict Clippy; full tests on Linux and macOS; deterministic/exhaustive and bounded shrinkable properties; RustSec audit |
+| Local required / pre-push | strict Clippy; every workspace target; deterministic/exhaustive and bounded shrinkable properties; both executable acceptance demos |
+| Local full | required lane plus the networked RustSec advisory audit |
 | Weekly/manual deep | release-mode suite with 4,096 authority cases and 512 real-store model histories |
+| Weekly/manual mutation | scoped authority-evaluator and promotion-policy mutation run |
 | Future fault/soak | full process crash matrix, adversarial MCP corpus, thousands-of-events/storage growth |
 | Dogfooding | denial false-positive judgment, legibility, approval latency, bypass behavior, and real-corpus tripwires |
+
+`scripts/ci` is the canonical definition of every implemented lane. The
+repository-owned pre-push hook runs `scripts/ci required`; enable it per clone
+with `scripts/install-hooks`. GitHub Actions is a Linux/macOS and scheduling
+mirror that calls the same commands, not the source of their meaning. Push/PR
+runs may cancel superseded runs, while scheduled/manual deep runs use separate
+concurrency groups and are never cancelled by an ordinary `main` push.
+
+The P7 meta-test compares the caveat dimensions emitted by its full-vocabulary
+generator with `capability::KNOWN_DIMS`. Adding an evaluator dimension without
+adding generated semantic-subset coverage therefore fails the ordinary suite
+instead of silently weakening the claim.
 
 ## Tests as the future conformance suite
 

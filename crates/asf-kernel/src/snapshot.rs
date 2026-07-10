@@ -37,8 +37,14 @@ pub enum SnapError {
     Symlink(PathBuf),
     #[error("blob {0} missing from CAS")]
     MissingBlob(String),
+    #[error("invalid sha256 CAS address {0}")]
+    InvalidHash(String),
+    #[error("CAS integrity failure: requested {expected}, read {observed}")]
+    HashMismatch { expected: String, observed: String },
     #[error("malformed tree object {0}")]
     MalformedTree(String),
+    #[error("unsafe path {path:?} in tree object {root}")]
+    UnsafePath { root: String, path: String },
     #[error("store root {0} does not exist")]
     MissingRoot(PathBuf),
 }
@@ -86,37 +92,64 @@ impl Cas {
     pub fn open(dir: impl AsRef<Path>) -> Result<Self, SnapError> {
         let dir = dir.as_ref().to_path_buf();
         fs::create_dir_all(&dir).map_err(io_err(&dir))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(io_err(&dir))?;
+        }
         Ok(Self { dir })
     }
 
-    fn blob_path(&self, hash: &str) -> PathBuf {
-        let hex = hash.strip_prefix("sha256:").unwrap_or(hash);
-        self.dir.join(&hex[..2]).join(hex)
+    fn blob_path(&self, hash: &str) -> Result<PathBuf, SnapError> {
+        let Some(raw) = hash.strip_prefix("sha256:") else {
+            return Err(SnapError::InvalidHash(hash.into()));
+        };
+        let decoded = hex::decode(raw).map_err(|_| SnapError::InvalidHash(hash.into()))?;
+        if decoded.len() != 32 {
+            return Err(SnapError::InvalidHash(hash.into()));
+        }
+        let canonical = hex::encode(decoded);
+        Ok(self.dir.join(&canonical[..2]).join(canonical))
     }
 
     pub fn put(&self, content: &[u8]) -> Result<String, SnapError> {
         let hash = sha256_hex(content);
-        let path = self.blob_path(&hash);
+        let path = self.blob_path(&hash)?;
         if !path.exists() {
             let parent = path.parent().expect("blob path has parent");
             fs::create_dir_all(parent).map_err(io_err(parent))?;
-            let tmp = path.with_extension("tmp");
+            let mut nonce = [0u8; 8];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut nonce);
+            let tmp = path.with_extension(format!("tmp-{}", hex::encode(nonce)));
             fs::write(&tmp, content).map_err(io_err(&tmp))?;
             fs::rename(&tmp, &path).map_err(io_err(&path))?;
+        } else {
+            // An existing address is not proof that its bytes are intact.
+            // Refuse to reuse a corrupted or substituted CAS object.
+            self.get(&hash)?;
         }
         Ok(hash)
     }
 
     pub fn has(&self, hash: &str) -> bool {
-        self.blob_path(hash).exists()
+        self.blob_path(hash).is_ok_and(|p| p.exists())
     }
 
     pub fn get(&self, hash: &str) -> Result<Vec<u8>, SnapError> {
-        let path = self.blob_path(hash);
+        let path = self.blob_path(hash)?;
         if !path.exists() {
             return Err(SnapError::MissingBlob(hash.into()));
         }
-        fs::read(&path).map_err(io_err(&path))
+        let bytes = fs::read(&path).map_err(io_err(&path))?;
+        let observed = sha256_hex(&bytes);
+        if observed != hash.to_ascii_lowercase() {
+            return Err(SnapError::HashMismatch {
+                expected: hash.into(),
+                observed,
+            });
+        }
+        Ok(bytes)
     }
 }
 
@@ -217,7 +250,55 @@ fn capture_sqlite(cas: &Cas, db_path: &Path) -> Result<String, SnapError> {
 /// Load and parse a stored fs_tree object.
 pub fn load_tree_object(cas: &Cas, root: &str) -> Result<Value, SnapError> {
     let bytes = cas.get(root)?;
-    serde_json::from_slice(&bytes).map_err(|_| SnapError::MalformedTree(root.into()))
+    let tree: Value =
+        serde_json::from_slice(&bytes).map_err(|_| SnapError::MalformedTree(root.into()))?;
+    validate_tree_object(&tree, root)?;
+    Ok(tree)
+}
+
+fn validate_tree_path(root: &str, rel: &str) -> Result<(), SnapError> {
+    use std::path::Component;
+    let path = Path::new(rel);
+    if rel.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(SnapError::UnsafePath {
+            root: root.into(),
+            path: rel.into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_tree_object(tree: &Value, root: &str) -> Result<(), SnapError> {
+    if tree["kind"] != "fs_tree" {
+        return Err(SnapError::MalformedTree(root.into()));
+    }
+    let entries = tree["entries"]
+        .as_array()
+        .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in entries {
+        let rel = entry["path"]
+            .as_str()
+            .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+        validate_tree_path(root, rel)?;
+        if !seen.insert(rel) {
+            return Err(SnapError::MalformedTree(format!(
+                "{root}: duplicate path {rel}"
+            )));
+        }
+        if entry["hash"].as_str().is_none()
+            || !matches!(entry["mode"].as_str(), Some("644" | "755"))
+            || entry["size"].as_u64().is_none()
+        {
+            return Err(SnapError::MalformedTree(root.into()));
+        }
+    }
+    Ok(())
 }
 
 /// Materialize an fs tree root into `dest` (created; must not be live —
@@ -270,6 +351,7 @@ pub fn compose_tree(
 ) -> Result<String, SnapError> {
     let mut entries: Vec<Value> = Vec::new();
     'outer: for (path, hash) in merged {
+        validate_tree_path("composed tree", path)?;
         // Exact (path, hash) match first (covers moves/renames via the
         // side that has the new path), then any entry with this hash.
         for pass in 0..2 {
@@ -662,6 +744,50 @@ mod tests {
         // Bogus root: prepare fails, live content untouched.
         assert!(prepare_restore(&cas, &spec, "sha256:deadbeefdeadbeef").is_err());
         assert_eq!(fs::read_to_string(vault.join("a.md")).unwrap(), "live");
+    }
+
+    #[test]
+    fn cas_get_rehashes_content_before_returning_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let root = cas.put(b"authentic").unwrap();
+        let path = cas.blob_path(&root).unwrap();
+        fs::write(&path, b"substituted").unwrap();
+
+        assert!(matches!(
+            cas.get(&root),
+            Err(SnapError::HashMismatch { expected, .. }) if expected == root
+        ));
+        assert!(matches!(
+            cas.put(b"authentic"),
+            Err(SnapError::HashMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn materialization_rejects_paths_outside_destination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let blob = cas.put(b"escape").unwrap();
+        let tree = json!({
+            "kind": "fs_tree",
+            "entries": [{
+                "path": "../outside.md",
+                "mode": "644",
+                "size": 6,
+                "hash": blob,
+            }],
+        });
+        let root = cas
+            .put(&serde_json_canonicalizer::to_vec(&tree).unwrap())
+            .unwrap();
+        let dest = tmp.path().join("dest");
+
+        assert!(matches!(
+            materialize_fs(&cas, &root, &dest),
+            Err(SnapError::UnsafePath { .. })
+        ));
+        assert!(!tmp.path().join("outside.md").exists());
     }
 
     #[test]

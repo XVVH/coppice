@@ -86,6 +86,7 @@ dependencies = [
  "thiserror",
  "time",
  "walkdir",
+ "zeroize",
 ]
 
 [[package]]

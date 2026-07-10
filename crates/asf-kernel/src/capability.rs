@@ -264,8 +264,16 @@ pub fn verify_attenuation(parent: &Value, child: &Value) -> Result<(), CapError>
         parent.get("expires_at").and_then(Value::as_str).ok_or(CapError::NoExpiry)?,
         child.get("expires_at").and_then(Value::as_str).ok_or(CapError::NoExpiry)?,
     );
-    if cexp > pexp {
-        return Err(att(format!("child expiry {cexp} later than parent {pexp}")));
+    match (crate::parse_instant(cexp), crate::parse_instant(pexp)) {
+        (Some(child), Some(parent)) if child <= parent => {}
+        (Some(_), Some(_)) => {
+            return Err(att(format!("child expiry {cexp} later than parent {pexp}")))
+        }
+        _ => {
+            return Err(att(
+                "unparseable parent or child expiry (fail closed)".into(),
+            ))
+        }
     }
     if child.get("bound_manifest").is_none() {
         return Err(att("child missing bound_manifest (M2)".into()));
@@ -396,6 +404,27 @@ mod tests {
         child["id"] = json!("cap:child");
         child["parent"] = json!("cap:parent");
         verify_attenuation(&parent, &child).unwrap();
+    }
+
+    #[test]
+    fn child_expiry_is_compared_as_an_instant() {
+        let parent = cap(
+            "cap:parent",
+            None,
+            "2026-07-08T12:00:00Z",
+            vec![],
+        );
+        let child = cap(
+            "cap:child",
+            Some("cap:parent"),
+            "2026-07-08T12:00:00.5Z",
+            vec![],
+        );
+        assert!(verify_attenuation(&parent, &child).is_err());
+
+        let mut malformed = child;
+        malformed["expires_at"] = json!("later");
+        assert!(verify_attenuation(&parent, &malformed).is_err());
     }
 
     #[test]

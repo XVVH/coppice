@@ -42,12 +42,15 @@ fn vault_actions() -> Value {
         { "name": "note.move",  "side_effect": "local", "surface": "fixed",
           "reversibility": "reversible", "domain": "files.vault",
           "class": "move", "store": "fs:vault", "path_args": ["src", "dest"] },
+        { "name": "note.delete", "side_effect": "local", "surface": "fixed",
+          "reversibility": "irreversible", "domain": "files.vault",
+          "class": "delete", "store": "fs:vault", "path_args": ["path"] },
     ])
 }
 
 fn caveats() -> Vec<Value> {
     vec![
-        json!({"dim":"action.allow","tools":["tool:vault@1.0"],"actions":["note.write","note.move"]}),
+        json!({"dim":"action.allow","tools":["tool:vault@1.0"],"actions":["note.write","note.move","note.delete"]}),
         json!({"dim":"paths.write","globs":["**"]}),
         json!({"dim":"budget.count","action_class":"write","max":10,"window":"run"}),
         json!({"dim":"approval.min_auth","min":"local_session"}),
@@ -124,6 +127,25 @@ fn agent_write(w: &mut World, rel: &str, content: &str) {
     }
 }
 
+fn agent_delete(w: &mut World, rel: &str) {
+    let d = w
+        .broker
+        .propose_call(
+            &w.cap,
+            "tool:vault@1.0",
+            "note.delete",
+            &json!({"path": rel}),
+        )
+        .unwrap();
+    match d {
+        Decision::Allowed { ticket, .. } => {
+            fs::remove_file(w.branch["fs:vault"].join(rel)).unwrap();
+            w.broker.record_result(ticket, b"{}").unwrap();
+        }
+        other => panic!("expected allow: {other:?}"),
+    }
+}
+
 #[test]
 fn concurrent_human_and_agent_edits_merge() {
     let mut w = setup();
@@ -179,6 +201,82 @@ fn clean_additive_run_auto_promotes() {
 }
 
 #[test]
+fn gate_rejects_branch_state_with_no_signed_tool_call_attestation() {
+    let mut w = setup();
+    fs::write(w.branch["fs:vault"].join("untraced.md"), "not recorded\n").unwrap();
+    let branch = w.branch.clone();
+
+    match w.broker.promote_manifest(&w.manifest, &branch) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains("untraced branch divergence"), "{msg}");
+        }
+        other => panic!("untraced branch state must not face policy or merge: {other:?}"),
+    }
+    assert!(!w.vault.join("untraced.md").exists());
+}
+
+#[test]
+fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
+    let mut w = setup();
+    let mut tight = caveats();
+    *tight
+        .iter_mut()
+        .find(|c| c["dim"] == "budget.count")
+        .unwrap() = json!({
+        "dim": "budget.count",
+        "action_class": "write",
+        "max": 1,
+        "window": "run"
+    });
+    w.cap = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            tight,
+            vec!["budget.count:write"],
+            "2027-01-01T00:00:00Z",
+        )
+        .unwrap();
+
+    agent_write(&mut w, "inbox/first.md", "first\n");
+    let decision = w
+        .broker
+        .propose_call(
+            &w.cap,
+            "tool:vault@1.0",
+            "note.write",
+            &json!({"path":"inbox/second.md","content":"second\n"}),
+        )
+        .unwrap();
+    let escalation = match decision {
+        Decision::Escalated { escalations } => escalations[0],
+        other => panic!("expected budget escalation: {other:?}"),
+    };
+    w.broker
+        .approve_escalation(escalation, 1, &w.chan, "local_session")
+        .unwrap();
+    agent_write(&mut w, "inbox/second.md", "second\n");
+
+    // Supporting tables are mutable materialized state. Changing one must not
+    // change the authority represented by the signed approval event.
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE escalations SET cap = 'cap:bogus', key = 'budget.count:other' WHERE id = ?1",
+            [escalation],
+        )
+        .unwrap();
+
+    let branch = w.branch.clone();
+    assert!(matches!(
+        w.broker.promote_manifest(&w.manifest, &branch),
+        Ok(PromotionOutcome::Applied { .. })
+    ));
+}
+
+#[test]
 fn reorganization_parks_but_renders_as_moves() {
     let mut w = setup();
     // Simulate the agent reorganizing on its branch via broker-approved moves.
@@ -225,7 +323,7 @@ fn gate_blocks_run_that_exceeded_its_token() {
         .fabric
         .record_tool_call(
             "tool:vault@1.0",
-            "note.delete", // not in action.allow
+            "note.nuke", // not in action.allow
             b"{}",
             b"{}",
             json!({"capability": w.cap, "action_class": "delete", "paths": ["inbox/a.md"]}),
@@ -273,6 +371,8 @@ fn sqlite_both_changed_is_conflict_trunk_wins() {
         let conn = Connection::open(&w.branch["db:memory"]).unwrap();
         conn.execute("INSERT INTO memories (fact) VALUES ('agent version')", []).unwrap();
     }
+    // A brokered step attests the updated memory root along with the fs root.
+    agent_write(&mut w, "memory-attestation.md", "memory updated\n");
     {
         let conn = Connection::open(&w.memory_db).unwrap();
         conn.execute("INSERT INTO memories (fact) VALUES ('human version')", []).unwrap();
@@ -319,8 +419,8 @@ fn promotion_survives_revert() {
 #[test]
 fn destructive_ops_park_then_apply_on_approval() {
     let mut w = setup();
-    // Agent deletes a file on its branch (delete op class).
-    fs::remove_file(w.branch["fs:vault"].join("inbox/b.md")).unwrap();
+    // Agent deletes a file through the broker (delete op class).
+    agent_delete(&mut w, "inbox/b.md");
     let branch = w.branch.clone();
     let promotion = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
         PromotionOutcome::Parked { promotion } => promotion,
@@ -329,6 +429,11 @@ fn destructive_ops_park_then_apply_on_approval() {
     // Trunk untouched while parked.
     assert!(w.vault.join("inbox/b.md").exists());
 
+    // The reviewed candidate is immutable. A later direct branch mutation
+    // must neither widen the approved change nor invalidate the pinned CAS
+    // candidate used for the approval-time remerge.
+    fs::write(w.branch["fs:vault"].join("surprise.md"), "not previewed\n").unwrap();
+
     // Weak channel cannot approve (approval.min_auth).
     assert!(matches!(
         w.broker.approve_promotion(promotion, "chan:tg", "platform_oauth"),
@@ -336,6 +441,10 @@ fn destructive_ops_park_then_apply_on_approval() {
     ));
     w.broker.approve_promotion(promotion, &w.chan, "local_session").unwrap();
     assert!(!w.vault.join("inbox/b.md").exists(), "approved delete applied");
+    assert!(
+        !w.vault.join("surprise.md").exists(),
+        "approval must apply the pinned preview, not mutable branch paths"
+    );
 
     // A second approval of the same promotion is rejected.
     assert!(matches!(

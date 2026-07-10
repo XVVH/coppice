@@ -172,6 +172,11 @@ fn finish_session(broker: &Arc<Mutex<Broker>>, manifest: &str, branch: &std::col
 /// step-boundary manifest + fresh session capability (M6: cheap, frequent).
 pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
     std::fs::create_dir_all(home)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700))?;
+    }
     let memory_db = home.join("memory.db");
     if !memory_db.exists() {
         Connection::open(&memory_db)?
@@ -277,6 +282,10 @@ fn spawn_approval_surface(
     let _ = std::fs::remove_file(&sock_path);
     let listener = UnixListener::bind(&sock_path)
         .with_context(|| format!("binding approval socket {}", sock_path.display()))?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600))?;
+    }
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut reader = BufReader::new(match stream.try_clone() {
@@ -345,8 +354,13 @@ fn dispatch_approval_cmd(b: &mut Broker, req: &Value, channel: &str) -> Value {
 /// injection target); escalatable ones must stay visible — attempting them
 /// is exactly how JIT elicitation starts (brief §5.3). Dynamic dimensions
 /// (paths, budgets, time) never filter: they depend on the call.
-fn advertisable(cap: &Value, conn: &rusqlite::Connection, action_name: &str) -> bool {
-    let Ok(reg) = tools::lookup_action(conn, TOOL_REF, action_name) else {
+fn advertisable(cap: &Value, broker: &Broker, action_name: &str) -> bool {
+    let Ok(reg) = tools::lookup_action(
+        &broker.fabric.conn,
+        &broker.fabric.fabric_vk(),
+        TOOL_REF,
+        action_name,
+    ) else {
         return false; // undeclared actions cannot be called (§4) — or shown
     };
     let escalatable: Vec<&str> = cap["on_violation"]["escalatable"]
@@ -395,7 +409,7 @@ fn filter_tools_result(broker: &Broker, cap_id: &str, mut resp: Value) -> Value 
             .filter(|t| {
                 t["name"]
                     .as_str()
-                    .is_some_and(|n| advertisable(&cap, &broker.fabric.conn, n))
+                    .is_some_and(|n| advertisable(&cap, broker, n))
             })
             .cloned()
             .collect();

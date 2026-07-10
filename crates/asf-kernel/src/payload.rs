@@ -19,6 +19,8 @@ pub enum PayloadError {
     Crypto(#[from] crate::keys::KeyError),
     #[error("payload {0} not found")]
     NotFound(String),
+    #[error("payload integrity failure: requested {expected}, decrypted {observed}")]
+    Integrity { expected: String, observed: String },
     #[error("payload {hash} shredded at {shredded_at} ({reason})")]
     Shredded {
         hash: String,
@@ -139,7 +141,15 @@ pub fn get(conn: &Connection, kek: &Kek, hash: &str) -> Result<Vec<u8>, PayloadE
         .optional()?
         .ok_or_else(|| PayloadError::NotFound(hash.into()))?;
     let dek = kek.unwrap_dek(&row.2, &row.3)?;
-    Ok(dek_decrypt(&dek, &row.0, &row.1)?)
+    let plaintext = dek_decrypt(&dek, &row.0, &row.1)?;
+    let observed = sha256_hex(&plaintext);
+    if observed != hash {
+        return Err(PayloadError::Integrity {
+            expected: hash.into(),
+            observed,
+        });
+    }
+    Ok(plaintext)
 }
 
 pub fn tombstone(
@@ -223,5 +233,26 @@ mod tests {
         assert_eq!(get(&conn, &kek, &b.hash).unwrap(), b"survivor");
         // The hash row itself persists: lineage intact.
         assert!(lookup_ref(&conn, &a.hash).unwrap().is_some());
+    }
+
+    #[test]
+    fn row_substitution_cannot_change_what_a_hash_resolves_to() {
+        let (conn, kek) = setup();
+        let a = put(&conn, &kek, b"payload a", "text/plain", "t0").unwrap();
+        let b = put(&conn, &kek, b"payload b", "text/plain", "t0").unwrap();
+        conn.execute(
+            "UPDATE payloads
+             SET nonce = (SELECT nonce FROM payloads WHERE hash = ?2),
+                 ciphertext = (SELECT ciphertext FROM payloads WHERE hash = ?2),
+                 dek_id = (SELECT dek_id FROM payloads WHERE hash = ?2)
+             WHERE hash = ?1",
+            params![a.hash, b.hash],
+        )
+        .unwrap();
+
+        assert!(matches!(
+            get(&conn, &kek, &a.hash),
+            Err(PayloadError::Integrity { expected, .. }) if expected == a.hash
+        ));
     }
 }

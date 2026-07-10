@@ -54,6 +54,8 @@ pub enum BrokerError {
     GateTraceViolation(String),
     #[error("promotion {0} not found or not pending")]
     NoSuchPromotion(i64),
+    #[error("promotion {id} has no valid immutable candidate: {detail}")]
+    MalformedPromotion { id: i64, detail: String },
 }
 
 /// The broker's decision on a proposed call.
@@ -144,12 +146,25 @@ impl Broker {
         escalatable: Vec<&str>,
         expires_at: &str,
     ) -> Result<String, BrokerError> {
-        // M1: stores reachable via allowed tools ⊆ manifest roots.
+        self.check_m1(manifest_id, &caveats)?;
+
+        let now = now_rfc3339();
+        let body = capability::build(holder, manifest_id, None, &now, expires_at, caveats, escalatable)?;
+        let sealed = canon::seal("cap", body, self.fabric.fabric_sk())?;
+        let id = trace::put_object(&self.fabric.conn, "capability", &sealed, &now)?;
+        self.grant_event(&id, manifest_id, None)?;
+        Ok(id)
+    }
+
+    /// M1: stores reachable through the allowed tools must be present in the
+    /// bound manifest. Applies equally to root grants and attenuated children.
+    fn check_m1(&self, manifest_id: &str, caveats: &[Value]) -> Result<(), BrokerError> {
         let allow = caveats
             .iter()
             .find(|c| c["dim"] == "action.allow")
             .ok_or(BrokerError::NoActionAllow)?;
         let man = trace::get_object(&self.fabric.conn, manifest_id)?;
+        canon::verify(&man, &self.fabric.fabric_vk())?;
         let root_stores: Vec<&str> = man["state"]["roots"]
             .as_array()
             .into_iter()
@@ -158,19 +173,17 @@ impl Broker {
             .collect();
         for tool in allow["tools"].as_array().into_iter().flatten() {
             let tool = tool.as_str().unwrap_or_default();
-            for store in tools::stores_for_tool(&self.fabric.conn, tool)? {
+            for store in tools::stores_for_tool(
+                &self.fabric.conn,
+                &self.fabric.fabric_vk(),
+                tool,
+            )? {
                 if !root_stores.contains(&store.as_str()) {
                     return Err(BrokerError::M1 { store, manifest: manifest_id.into() });
                 }
             }
         }
-
-        let now = now_rfc3339();
-        let body = capability::build(holder, manifest_id, None, &now, expires_at, caveats, escalatable)?;
-        let sealed = canon::seal("cap", body, self.fabric.fabric_sk())?;
-        let id = trace::put_object(&self.fabric.conn, "capability", &sealed, &now)?;
-        self.grant_event(&id, manifest_id, None)?;
-        Ok(id)
+        Ok(())
     }
 
     /// Attenuate `parent_id` into a child capability (§5.2). The child may
@@ -186,6 +199,8 @@ impl Broker {
         expires_at: &str,
     ) -> Result<String, BrokerError> {
         let parent = trace::get_object(&self.fabric.conn, parent_id)?;
+        canon::verify(&parent, &self.fabric.fabric_vk())?;
+        self.check_m1(bound_manifest, &caveats)?;
         let now = now_rfc3339();
         let body = capability::build(
             holder, bound_manifest, Some(parent_id), &now, expires_at, caveats, escalatable,
@@ -231,7 +246,12 @@ impl Broker {
         }
 
         // Undeclared actions cannot be called (§4).
-        let reg = match tools::lookup_action(&self.fabric.conn, tool, action) {
+        let reg = match tools::lookup_action(
+            &self.fabric.conn,
+            &self.fabric.fabric_vk(),
+            tool,
+            action,
+        ) {
             Ok(r) => r,
             Err(e) => {
                 return self.deny(cap_id, tool, action, vec![], Some(e.to_string()), json!([]))
@@ -564,6 +584,7 @@ impl Broker {
             "approval",
             json!({
                 "escalation": escalation, "resolution": resolution, "uses": uses,
+                "capability": cap_id, "caveat": key,
                 "channel": channel, "auth_strength": auth_strength,   // C1
             }),
             &now,
@@ -635,13 +656,15 @@ impl Broker {
         let _gate = self.fabric.gate_lock()?;
         self.fabric.check_drift()?;
         let man = trace::get_object(&self.fabric.conn, manifest_id)?;
+        canon::verify(&man, &self.fabric.fabric_vk())?;
         let span = man["trace"]["span"]
             .as_str()
             .ok_or_else(|| KernelError::MalformedManifest(manifest_id.into(), "no trace.span".into()))?
             .to_string();
 
-        let trace_report = self.gate_trace_check(manifest_id, &span)?;
+        let mut trace_report = self.gate_trace_check(manifest_id, &span)?;
         let plan = self.compute_merge(&man, branch_paths)?;
+        trace_report["branch_tip"] = self.verify_branch_tip(&man, &span, &plan)?;
 
         if promote::default_policy_allows(&plan.ops, &plan.conflicts) {
             let event = self.apply_plan(manifest_id, &plan, &trace_report, "auto")?;
@@ -651,6 +674,9 @@ impl Broker {
                 "ops": plan.ops.iter().map(Op::to_json).collect::<Vec<_>>(),
                 "conflicts": plan.conflicts.iter().map(Conflict::to_json).collect::<Vec<_>>(),
                 "trace_check": trace_report,
+                "branch_roots": plan.stores.iter()
+                    .map(|sp| (sp.store.clone(), sp.branch.clone()))
+                    .collect::<BTreeMap<_, _>>(),
             });
             let bp = serde_json::to_string(
                 &branch_paths.iter().map(|(k, v)| (k, v.to_string_lossy())).collect::<BTreeMap<_, _>>(),
@@ -696,24 +722,37 @@ impl Broker {
         let events = trace::events_in_span(&self.fabric.conn, span)?;
 
         // Approved budget headroom: approval events grant `uses` against an
-        // escalation's (cap, caveat-key).
+        // escalation's (cap, caveat-key). The authority binding comes from
+        // the signed event itself, never the mutable escalation table.
+        let substrate_span = self.fabric.substrate_span();
+        trace::verify_span(
+            &self.fabric.conn,
+            &self.fabric.fabric_vk(),
+            substrate_span,
+        )?;
         let mut approved: BTreeMap<(String, String), i64> = BTreeMap::new();
         for ev in trace::all_events(&self.fabric.conn)? {
-            if ev.kind == "approval" && ev.raw["body"]["resolution"] == "approved" {
-                if let Some(esc) = ev.raw["body"]["escalation"].as_i64() {
-                    let row: Option<(String, String)> = self
-                        .fabric
-                        .conn
-                        .query_row(
-                            "SELECT cap, key FROM escalations WHERE id = ?1",
-                            [esc],
-                            |r| Ok((r.get(0)?, r.get(1)?)),
-                        )
-                        .optional()?;
-                    if let Some(k) = row {
-                        *approved.entry(k).or_insert(0) += ev.raw["body"]["uses"].as_i64().unwrap_or(0);
-                    }
-                }
+            if ev.span != substrate_span
+                || ev.kind != "approval"
+                || ev.raw["body"]["resolution"] != "approved"
+                || ev.raw["body"].get("escalation").is_none()
+            {
+                continue;
+            }
+            let body = &ev.raw["body"];
+            let (Some(cap), Some(key), Some(uses)) = (
+                body["capability"].as_str(),
+                body["caveat"].as_str(),
+                body["uses"].as_i64(),
+            ) else {
+                // Pre-hardening approvals carry no signed authority binding.
+                // They cannot safely widen a gate budget; ignore fail-closed.
+                continue;
+            };
+            if uses > 0 {
+                *approved
+                    .entry((cap.to_string(), key.to_string()))
+                    .or_insert(0) += uses;
             }
         }
 
@@ -817,6 +856,28 @@ impl Broker {
         man: &Value,
         branch_paths: &BTreeMap<String, PathBuf>,
     ) -> Result<MergePlan, BrokerError> {
+        let mut branch_roots = BTreeMap::new();
+        for r in man["state"]["roots"].as_array().into_iter().flatten() {
+            let store = r["store"].as_str().unwrap_or_default().to_string();
+            let spec = self.fabric.store(&store)?.clone();
+            let branch_path = branch_paths
+                .get(&store)
+                .ok_or_else(|| KernelError::UnknownStore(format!("{store} has no branch")))?;
+            let mut branch_spec = spec;
+            branch_spec.path = branch_path.clone();
+            branch_roots.insert(store, snapshot::capture(&self.fabric.cas, &branch_spec)?);
+        }
+        self.compute_merge_from_roots(man, &branch_roots)
+    }
+
+    /// Recompute a merge against current trunk while keeping the agent side
+    /// pinned to immutable CAS roots. This is the approval-time form: trunk
+    /// may move after preview, but the reviewed branch candidate may not.
+    fn compute_merge_from_roots(
+        &mut self,
+        man: &Value,
+        branch_roots: &BTreeMap<String, String>,
+    ) -> Result<MergePlan, BrokerError> {
         let mut stores = Vec::new();
         let mut all_ops = Vec::new();
         let mut all_conflicts = Vec::new();
@@ -824,12 +885,10 @@ impl Broker {
             let store = r["store"].as_str().unwrap_or_default().to_string();
             let base_root = r["root"].as_str().unwrap_or_default().to_string();
             let spec = self.fabric.store(&store)?.clone();
-            let branch_path = branch_paths
+            let branch_root = branch_roots
                 .get(&store)
-                .ok_or_else(|| KernelError::UnknownStore(format!("{store} has no branch")))?;
-            let mut bspec = spec.clone();
-            bspec.path = branch_path.clone();
-            let branch_root = snapshot::capture(&self.fabric.cas, &bspec)?;
+                .ok_or_else(|| KernelError::UnknownStore(format!("{store} has no pinned branch root")))?
+                .clone();
             let trunk_root = snapshot::capture(&self.fabric.cas, &spec)?;
 
             let install = match spec.kind {
@@ -875,6 +934,61 @@ impl Broker {
             stores.push(StorePlan { store, base: base_root, branch: branch_root, trunk: trunk_root, install });
         }
         Ok(MergePlan { stores, ops: all_ops, conflicts: all_conflicts })
+    }
+
+    /// Bind the merge candidate to the signed trace. With no tool calls, the
+    /// branch must still equal the manifest base. Otherwise every store must
+    /// equal the final tool_call's `state_root_after` attestation. This closes
+    /// crash/signal and direct-branch-write paths that previously let untraced
+    /// state reach promotion.
+    fn verify_branch_tip(
+        &self,
+        man: &Value,
+        span: &str,
+        plan: &MergePlan,
+    ) -> Result<Value, BrokerError> {
+        let events = trace::events_in_span(&self.fabric.conn, span)?;
+        let last_call = events.iter().rev().find(|e| e.kind == "tool_call");
+        let mut roots = BTreeMap::new();
+        for store in &plan.stores {
+            let expected = match last_call {
+                Some(ev) => ev.raw["body"]["state_root_after"]
+                    .get(format!("branch:{}", store.store))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        BrokerError::GateTraceViolation(format!(
+                            "final tool_call {} has no branch root for {}",
+                            ev.id, store.store
+                        ))
+                    })?
+                    .to_string(),
+                None => man["state"]["roots"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|r| r["store"].as_str() == Some(store.store.as_str()))
+                    .and_then(|r| r["root"].as_str())
+                    .ok_or_else(|| {
+                        BrokerError::GateTraceViolation(format!(
+                            "manifest has no base root for {}",
+                            store.store
+                        ))
+                    })?
+                    .to_string(),
+            };
+            if store.branch != expected {
+                return Err(BrokerError::GateTraceViolation(format!(
+                    "untraced branch divergence in {}: trace attests {}, branch is {}",
+                    store.store, expected, store.branch
+                )));
+            }
+            roots.insert(store.store.clone(), expected);
+        }
+        Ok(json!({
+            "last_tool_call": last_call.map(|e| e.id.clone()),
+            "roots": roots,
+            "ok": true,
+        }))
     }
 
     /// Stage every store, then swap — same coherence discipline as revert.
@@ -961,12 +1075,12 @@ impl Broker {
             .fabric
             .conn
             .query_row(
-                "SELECT manifest, branch_paths FROM promotions WHERE id = ?1 AND status = 'pending'",
+                "SELECT manifest, preview FROM promotions WHERE id = ?1 AND status = 'pending'",
                 [id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let (manifest_id, bp_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
+        let (manifest_id, preview_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
         self.check_min_auth_for_manifest(&manifest_id, auth_strength)?;
 
         // M8 (A20): the approval-time re-merge consumes live trunk exactly
@@ -974,16 +1088,34 @@ impl Broker {
         let _gate = self.fabric.gate_lock()?;
         self.fabric.check_drift()?;
 
-        let branch_paths: BTreeMap<String, PathBuf> =
-            serde_json::from_str::<BTreeMap<String, String>>(&bp_raw)
-                .expect("stored paths are valid JSON")
-                .into_iter()
-                .map(|(k, v)| (k, PathBuf::from(v)))
-                .collect();
+        let preview: Value = serde_json::from_str(&preview_raw).map_err(|e| {
+            BrokerError::MalformedPromotion {
+                id,
+                detail: format!("preview is not JSON: {e}"),
+            }
+        })?;
+        let branch_roots: BTreeMap<String, String> = preview["branch_roots"]
+            .as_object()
+            .ok_or_else(|| BrokerError::MalformedPromotion {
+                id,
+                detail: "legacy preview has no pinned branch_roots; re-gate the session".into(),
+            })?
+            .iter()
+            .map(|(store, root)| {
+                root.as_str()
+                    .map(|r| (store.clone(), r.to_string()))
+                    .ok_or_else(|| BrokerError::MalformedPromotion {
+                        id,
+                        detail: format!("branch root for {store} is not a string"),
+                    })
+            })
+            .collect::<Result<_, _>>()?;
         let man = trace::get_object(&self.fabric.conn, &manifest_id)?;
+        canon::verify(&man, &self.fabric.fabric_vk())?;
         let span = man["trace"]["span"].as_str().unwrap_or_default().to_string();
-        let trace_report = self.gate_trace_check(&manifest_id, &span)?;
-        let plan = self.compute_merge(&man, &branch_paths)?;
+        let mut trace_report = self.gate_trace_check(&manifest_id, &span)?;
+        let plan = self.compute_merge_from_roots(&man, &branch_roots)?;
+        trace_report["branch_tip"] = self.verify_branch_tip(&man, &span, &plan)?;
         let event = self.apply_plan(&manifest_id, &plan, &trace_report, &format!("approved:{id}"))?;
 
         let now = now_rfc3339();

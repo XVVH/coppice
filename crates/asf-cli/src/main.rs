@@ -338,18 +338,20 @@ fn demo(dir: &Path) -> Result<()> {
     }
     println!("\nevery live root is explained by the ledger — nothing unaccounted for.");
 
-    // -- crypto-shredding ----------------------------------------------------
-    banner("crypto-shred the intent text — substance gone, structure intact");
+    // -- logical shredding ---------------------------------------------------
+    banner("logically shred intent text — live resolution gone, structure intact");
     let intent_obj = trace::get_object(&fabric.conn, &intent)?;
     let text_ref: asf_kernel::payload::PayloadRef =
         serde_json::from_value(intent_obj["text"].clone()).context("intent text ref")?;
     fabric.shred_payload(&text_ref.hash, "demo_ttl")?;
     match fabric.get_payload(&text_ref) {
         Err(e) => println!("payload now resolves to: {e}"),
-        Ok(_) => bail!("shredded payload still readable!"),
+        Ok(_) => bail!("logically shredded payload still readable!"),
     }
     fabric.verify_all_spans()?;
-    println!("chains still verify: the ledger records THAT it forgot, never what.");
+    println!(
+        "normal resolution is tombstoned and chains still verify; forensic storage erasure is deferred."
+    );
 
     banner("kernel round-trip complete");
     Ok(())

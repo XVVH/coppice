@@ -8,6 +8,12 @@
 //! agent), or escalate (parked; the agent is told an approval is pending
 //! but cannot carry it).
 //!
+//! The dogfooding baseline fails closed when this broker/proxy path is
+//! unavailable. The brief's required loud, ledger-visible fail-open degraded
+//! mode and per-capability `on_broker_outage` inversion are deferred until
+//! live-egress integration; absence of that path is a tracked release gate,
+//! not an implemented guarantee.
+//!
 //! C2 is topological here: the approval surface is a Unix socket owned by
 //! this daemon (`<home>/approvals.sock`, driven by `asf approve`, a
 //! separate terminal — visually and procedurally distinct from the agent's
@@ -172,6 +178,11 @@ fn finish_session(broker: &Arc<Mutex<Broker>>, manifest: &str, branch: &std::col
 /// step-boundary manifest + fresh session capability (M6: cheap, frequent).
 pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
     std::fs::create_dir_all(home)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700))?;
+    }
     let memory_db = home.join("memory.db");
     if !memory_db.exists() {
         Connection::open(&memory_db)?
@@ -277,6 +288,10 @@ fn spawn_approval_surface(
     let _ = std::fs::remove_file(&sock_path);
     let listener = UnixListener::bind(&sock_path)
         .with_context(|| format!("binding approval socket {}", sock_path.display()))?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600))?;
+    }
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mut reader = BufReader::new(match stream.try_clone() {
@@ -345,8 +360,13 @@ fn dispatch_approval_cmd(b: &mut Broker, req: &Value, channel: &str) -> Value {
 /// injection target); escalatable ones must stay visible — attempting them
 /// is exactly how JIT elicitation starts (brief §5.3). Dynamic dimensions
 /// (paths, budgets, time) never filter: they depend on the call.
-fn advertisable(cap: &Value, conn: &rusqlite::Connection, action_name: &str) -> bool {
-    let Ok(reg) = tools::lookup_action(conn, TOOL_REF, action_name) else {
+fn advertisable(cap: &Value, broker: &Broker, action_name: &str) -> bool {
+    let Ok(reg) = tools::lookup_action(
+        &broker.fabric.conn,
+        &broker.fabric.fabric_vk(),
+        TOOL_REF,
+        action_name,
+    ) else {
         return false; // undeclared actions cannot be called (§4) — or shown
     };
     let escalatable: Vec<&str> = cap["on_violation"]["escalatable"]
@@ -395,7 +415,7 @@ fn filter_tools_result(broker: &Broker, cap_id: &str, mut resp: Value) -> Value 
             .filter(|t| {
                 t["name"]
                     .as_str()
-                    .is_some_and(|n| advertisable(&cap, &broker.fabric.conn, n))
+                    .is_some_and(|n| advertisable(&cap, broker, n))
             })
             .cloned()
             .collect();
@@ -422,10 +442,12 @@ pub fn run(home: PathBuf, vault: PathBuf, downstream: Vec<String>) -> Result<()>
         ])?;
         thread::spawn(move || {
             if signals.forever().next().is_some() {
-                // Taking the broker lock serializes with any in-flight
-                // tools/call; a response the downstream produces after this
-                // point is lost, but its tool_call is already in the trace
-                // and its write is on the branch — the gate sees both.
+                // Taking the broker lock serializes with result recording,
+                // not with the downstream effect itself. If the result was
+                // recorded, the gate sees its signed root. If the downstream
+                // mutated first but has not returned, branch-tip verification
+                // rejects the untraced root and the live marker remains for
+                // explicit recovery; nothing silently reaches trunk.
                 finish_session(&broker, &manifest, &branch);
                 std::process::exit(0);
             }

@@ -73,3 +73,42 @@ pub fn method_not_found(id: &Value, method: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id,
             "error": { "code": -32601, "message": format!("method not found: {method}") } })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn blank_lines_are_ignored_and_eof_is_clean() {
+        let mut wire = Cursor::new(b"\n  \n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n");
+        let message = read_msg(&mut wire).unwrap().unwrap();
+        assert!(is_request(&message));
+        assert!(read_msg(&mut wire).unwrap().is_none());
+    }
+
+    #[test]
+    fn malformed_json_fails_instead_of_becoming_a_message() {
+        let mut wire = Cursor::new(b"{not-json}\n");
+        assert!(read_msg(&mut wire).is_err());
+    }
+
+    #[test]
+    fn request_notification_and_response_shapes_do_not_overlap() {
+        let request = json!({"jsonrpc":"2.0","id":"x","method":"tools/list"});
+        let notification = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
+        let response = json!({"jsonrpc":"2.0","id":"x","result":{}});
+        assert!(is_request(&request));
+        assert!(!is_response(&request));
+        assert!(!is_request(&notification));
+        assert!(!is_response(&notification));
+        assert!(is_response(&response));
+        assert!(!is_request(&response));
+    }
+
+    #[test]
+    fn string_and_numeric_ids_route_to_distinct_keys() {
+        assert_ne!(id_key(&json!(7)), id_key(&json!("7")));
+        assert_eq!(response(&json!(7), json!({"ok":true}))["id"], 7);
+    }
+}

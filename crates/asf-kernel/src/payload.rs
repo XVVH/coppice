@@ -2,9 +2,12 @@
 //!
 //! No fabric object embeds sensitive content: content lives here, addressed
 //! by the sha256 of its plaintext, encrypted per-payload with its own DEK.
-//! Erasure is crypto-shredding: destroy the wrapped DEK, insert a tombstone.
-//! Hash and lineage persist; a destroyed payload resolves to
-//! `{hash, shredded_at, reason}`.
+//! The current dogfooding implementation logically shreds by deleting the
+//! live wrapped-DEK row, clearing live ciphertext, and inserting a tombstone.
+//! Hash and lineage persist; normal resolution returns
+//! `{hash, shredded_at, reason}`. This does not yet prove the spec's stronger
+//! forensic-erasure guarantee across SQLite WAL/freelists, snapshots, or
+//! backups (see the security/correctness audit).
 
 use crate::keys::{dek_decrypt, dek_encrypt, Kek};
 use crate::canon::sha256_hex;
@@ -19,6 +22,8 @@ pub enum PayloadError {
     Crypto(#[from] crate::keys::KeyError),
     #[error("payload {0} not found")]
     NotFound(String),
+    #[error("payload integrity failure: requested {expected}, decrypted {observed}")]
+    Integrity { expected: String, observed: String },
     #[error("payload {hash} shredded at {shredded_at} ({reason})")]
     Shredded {
         hash: String,
@@ -111,8 +116,9 @@ fn lookup_ref(conn: &Connection, hash: &str) -> Result<Option<PayloadRef>, Paylo
         .optional()?)
 }
 
-/// Resolve a payload to plaintext. A shredded payload returns the tombstone
-/// as an error — structure persists, substance does not.
+/// Resolve a payload to plaintext. A logically shredded payload returns the
+/// tombstone as an error. This API property does not assert forensic erasure
+/// from storage residue or backups.
 pub fn get(conn: &Connection, kek: &Kek, hash: &str) -> Result<Vec<u8>, PayloadError> {
     if let Some((shredded_at, reason)) = tombstone(conn, hash)? {
         return Err(PayloadError::Shredded {
@@ -139,7 +145,15 @@ pub fn get(conn: &Connection, kek: &Kek, hash: &str) -> Result<Vec<u8>, PayloadE
         .optional()?
         .ok_or_else(|| PayloadError::NotFound(hash.into()))?;
     let dek = kek.unwrap_dek(&row.2, &row.3)?;
-    Ok(dek_decrypt(&dek, &row.0, &row.1)?)
+    let plaintext = dek_decrypt(&dek, &row.0, &row.1)?;
+    let observed = sha256_hex(&plaintext);
+    if observed != hash {
+        return Err(PayloadError::Integrity {
+            expected: hash.into(),
+            observed,
+        });
+    }
+    Ok(plaintext)
 }
 
 pub fn tombstone(
@@ -155,9 +169,10 @@ pub fn tombstone(
         .optional()?)
 }
 
-/// Crypto-shred: destroy the wrapped DEK (and, belt-and-braces, the
-/// ciphertext), leave a tombstone. The caller emits the `shred` trace event —
-/// the ledger records *that* it forgot, never what.
+/// Logical shred for the current storage layer: delete the live wrapped DEK,
+/// clear live ciphertext, and leave a tombstone. The caller emits the `shred`
+/// trace event. Forensic erasure requires the later durability design covering
+/// WAL, freelists, snapshots, and backups.
 pub fn shred(
     conn: &Connection,
     hash: &str,
@@ -206,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn shred_destroys_substance_keeps_structure() {
+    fn shred_makes_normal_resolution_unreadable_and_keeps_structure() {
         let (conn, kek) = setup();
         let a = put(&conn, &kek, b"doomed", "text/plain", "t0").unwrap();
         let b = put(&conn, &kek, b"survivor", "text/plain", "t0").unwrap();
@@ -223,5 +238,26 @@ mod tests {
         assert_eq!(get(&conn, &kek, &b.hash).unwrap(), b"survivor");
         // The hash row itself persists: lineage intact.
         assert!(lookup_ref(&conn, &a.hash).unwrap().is_some());
+    }
+
+    #[test]
+    fn row_substitution_cannot_change_what_a_hash_resolves_to() {
+        let (conn, kek) = setup();
+        let a = put(&conn, &kek, b"payload a", "text/plain", "t0").unwrap();
+        let b = put(&conn, &kek, b"payload b", "text/plain", "t0").unwrap();
+        conn.execute(
+            "UPDATE payloads
+             SET nonce = (SELECT nonce FROM payloads WHERE hash = ?2),
+                 ciphertext = (SELECT ciphertext FROM payloads WHERE hash = ?2),
+                 dek_id = (SELECT dek_id FROM payloads WHERE hash = ?2)
+             WHERE hash = ?1",
+            params![a.hash, b.hash],
+        )
+        .unwrap();
+
+        assert!(matches!(
+            get(&conn, &kek, &a.hash),
+            Err(PayloadError::Integrity { expected, .. }) if expected == a.hash
+        ));
     }
 }

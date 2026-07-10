@@ -1,0 +1,8 @@
+#!/bin/sh
+# Keep the routine gate deterministic and offline. The networked advisory lane
+# and expensive deep/mutation lanes remain explicit scripts/ci commands.
+
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+exec "$ROOT/scripts/ci" required

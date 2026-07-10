@@ -105,7 +105,11 @@ never over-grants. The residual — an Allowed-but-never-recorded call
 over-counts budget by one — is the **fail-safe** direction and is reconciled
 by the gate's ledger-based recount. Accepted as designed; no further change.
 
-## RF-4 — Ed25519 verified non-strict (`verify`, not `verify_strict`) (#3) — open
+## RF-4 — Ed25519 verified non-strict (`verify`, not `verify_strict`) (#3) — fixed
+
+**Fixed in `5350010`.** Canonical object verification now uses
+`VerifyingKey::verify_strict`; the existing round-trip and tamper tests exercise
+the common verification boundary.
 
 **Severity: low (hygiene). Direction: n/a in current design.**
 [canon.rs:136](crates/asf-kernel/src/canon.rs:136) uses `vk.verify`, which
@@ -117,7 +121,13 @@ verification (ledger export, multi-actor) and as defense-in-depth.
 
 **Fix:** `verify_strict`. One-line change; add a malleability test vector.
 
-## RF-5 — keystore dir perms, chmod-after-write race, no zeroization (#5) — open
+## RF-5 — keystore dir perms, chmod-after-write race, no zeroization (#5) — fixed
+
+**Fixed in `5350010`.** Keystore directories are forced to `0700`; private
+files are fully written at `0600` before atomic no-overwrite publication;
+concurrent first starts converge on one key; dalek zeroization is enabled; and
+local KEK/DEK/raw-key buffers use `Zeroizing`. The same pass makes the fabric
+home and CAS private and restricts the approval socket to `0600`.
 
 **Severity: low. Direction: exposure, not authority.**
 Three sub-items in `keys.rs`:
@@ -163,7 +173,12 @@ post-shred. Inherent to plaintext content-addressing.
 once present." A salted/keyed address would close the oracle at the cost of
 cross-object dedup; revisit only for a high-sensitivity payload class.
 
-## RF-8 — `materialize_fs` does not re-validate entry paths (#8) — open
+## RF-8 — `materialize_fs` does not re-validate entry paths (#8) — fixed
+
+**Fixed in `5350010`.** Loaded tree objects now require safe relative paths,
+valid entry shapes and modes, and no duplicate paths before materialization or
+composition. A crafted `../` tree regression test proves the destination
+cannot be escaped.
 
 **Severity: low. Direction: defense-in-depth (local trust boundary).**
 [materialize_fs](crates/asf-kernel/src/snapshot.rs:203) joins each tree
@@ -198,10 +213,11 @@ shutdown. Result: every real session's branch was stranded — writes reported
 as successful, never promoted, no ledger record of the non-promotion, and no
 CLI to gate an orphaned branch after the fact. The scripted smoke test
 passed because piped stdin closes cleanly — a client-fidelity gap in the
-test harness. Residual (accepted, v0): a tools/call in flight at
-signal-time may complete on the branch after its result recording is cut
-off; the gate's trace check still sees the recorded call, and the branch
-state is what gets merged. PID-reuse against the liveness check reads a
+test harness. Residual hardening in `5350010`: promotion now requires every
+candidate branch root to equal the final signed
+`tool_call.state_root_after` (or the manifest base when no call was recorded).
+A call that mutates after result recording is cut off therefore cannot smuggle
+that untraced state into trunk. PID-reuse against the liveness check reads a
 reused pid as dead only if the new process isn't an `asf` invocation —
 recovery of a genuinely live session is prevented by the args match.
 

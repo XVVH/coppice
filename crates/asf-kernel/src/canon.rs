@@ -6,7 +6,7 @@
 //! same bytes (SI-2). Verification always recomputes from raw JSON so unknown
 //! fields are preserved and hashed (§0 extensibility).
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -133,7 +133,11 @@ pub fn verify(raw: &Value, vk: &VerifyingKey) -> Result<(), CanonError> {
         .try_into()
         .map_err(|_| CanonError::SigEncoding("signature must be 64 bytes".into()))?;
     let bytes = body_bytes(obj)?;
-    vk.verify(&bytes, &Signature::from_bytes(&sig_bytes))?;
+    // Strict verification rejects non-canonical S values and weak/small-order
+    // components. Object ids exclude signatures, so the former behavior was
+    // not directly forgeable, but exported ledgers must have one canonical
+    // verification boundary (RF-4).
+    vk.verify_strict(&bytes, &Signature::from_bytes(&sig_bytes))?;
     Ok(())
 }
 

@@ -89,6 +89,16 @@ impl Fabric {
             path: dir.to_path_buf(),
             source,
         })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(
+                |source| snapshot::SnapError::Io {
+                    path: dir.to_path_buf(),
+                    source,
+                },
+            )?;
+        }
         let conn = Connection::open(dir.join("fabric.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         trace::init(&conn)?;

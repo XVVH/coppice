@@ -1,9 +1,10 @@
-# Testing theory — Stage 2 snapshot
+# Testing theory — Stage 3 dogfooding baseline
 
-Hinge document for the milestone-3 testing deep-dive. This records what the
-suite *is*, what it deliberately is not yet, and the questions the deep-dive
-must answer — so that conversation starts from analysis, not archaeology.
-Written 2026-07-08, at 55 tests / milestones 1–2 complete.
+This records what the suite is, what it deliberately is not yet, and which
+kind of automation owns each claim. Updated 2026-07-10 with the full named
+suite plus 576 shrinkable generated cases in the default run and deeper
+scheduled automation. The promotion gate is complete; dogfooding is now the
+product-signal lane, not a substitute for correctness testing.
 
 ## What the suite is now
 
@@ -40,30 +41,48 @@ impossible" claim in the spec gets a test that tries to do X.
 
 **4. Demos are executable acceptance tests.** `asf demo` and
 `asf broker-demo` narrate the milestone stories and `bail!` on any
-deviation — they are the human-legible face of the same assertions.
+deviation — they are the human-legible face of the same assertions. The
+canonical `scripts/ci test` lane runs both after the Rust test targets.
 
-**5. Negative space is tracked explicitly.** Invariants with NO test today,
-because their machinery doesn't exist yet: C3 (signed fabric→user
-messages), C4 (delivery ceilings), C5 (sender binding), M3 (Tier-3 as_of
-surfacing), the taint dimensions (currently proven only to fail closed),
-promotion-gate invariants (§5.3: three-way merge, agent-never-wins,
-trace-vs-capability check), StandingRule schema enforcement (k≥3,
-counterfactuals, domain match). These are absences by sequencing, not
-oversight; each activates with its milestone. The deep-dive should keep
-this list current — an untracked untested invariant is how "the spec is
-the source of truth" quietly stops being true.
+**5. Negative space is tracked explicitly.** Invariants with no conformant
+test because their machinery or ratified representation does not exist yet:
+C3 (signed fabric→user messages), C4 (delivery ceilings), C5 (sender binding),
+M3 (Tier-3 `as_of` surfacing), M4 runtime behavior attestation, M7's brokered
+manifest authority edge (SI-21), the taint dimensions, and StandingRule schema
+enforcement (k≥3, counterfactuals, domain match). These are absences by
+sequencing, not oversight; each activates with its milestone. An untracked
+untested invariant is how "the spec is the source of truth" quietly stops
+being true.
+
+## Current invariant matrix
+
+| Invariant | Automated evidence | Status |
+| --- | --- | --- |
+| M1 roots cover capability reach | `m1_mint_rejects_uncovered_store`, `attenuation_rechecks_m1_for_the_child_manifest` | covered |
+| M2 capability binds manifest | `m2_capability_dies_with_its_manifest`, broker/gate suites | covered |
+| M3 Tier-3 `as_of` in consent | none; Tier-3 absent | future milestone |
+| M4 loaded behavior attestation | behavior lineage is recorded, but first-call runtime attestation is absent | open implementation gap |
+| M5 re-manifest on behavior change | `m5_behavior_change_forces_remanifest` | covered |
+| M6 cheap/frequent manifests | exercised throughout multi-boundary tests; guidance rather than a binary predicate | exercised |
+| M7 observed vs brokered authority | SI-21 records the unresolved content-address cycle | blocked on ratification |
+| M8 attribution completeness | e2e, gate, proxy timing tests, generated state-machine histories | covered for current consumers |
+| C1 authority provenance | intent and escalation/approval integration tests | covered for current channels |
+| C2 agent outside approval path | real proxy/socket topology plus invented in-band method rejection | covered |
+| C3–C5 | channel/delivery machinery absent | future milestone |
+
+Every new invariant or new consumer of live state must add a row or extend an
+existing row in the same change that implements it.
 
 ## Known gaps — the deep-dive agenda
 
-**G1. Property-based testing.** *(Status update, milestone 3: the core
-properties landed in `tests/properties.rs` — merge identities/conflict
-soundness over seeded random tree triples, exhaustive glob-cover
-soundness, and the semantic-subset property below over random capability
-pairs. Implementation is seeded-xorshift + exhaustive enumeration, no
-proptest dependency; counterexample shrinking quality is the remaining
-open question for the deep-dive.)* The highest-value target in the
-codebase, because attenuation is an algebra and hand-picked cases
-undersample it:
+**G1. Property and model testing.** The core properties live in
+`tests/properties.rs`: merge identities/conflict soundness over seeded random
+tree triples, exhaustive bounded glob-cover soundness, the original semantic
+subset generator, chronology comparison, and a shrinkable full-vocabulary
+attenuation property covering every Stage-2 caveat dimension. The real-store
+state machine in `tests/model.rs` generates interleaved human/agent histories
+through broker calls, trace attestations, promotion, conflict approval, M8,
+and ledger explanation. Remaining extensions:
 - *Semantic subset property (the big one):* `verify_attenuation(parent,
   child) == Ok` must imply that for every call context, child-allows →
   parent-allows. Randomly generate caveat sets and call contexts; any
@@ -75,9 +94,9 @@ undersample it:
   `glob_matches(c, path) → glob_matches(p, path)` — fuzz paths against
   glob pairs. (Completeness is deliberately absent — SI-12's conservative
   rule — but soundness must be total.)
-- The promotion gate's three-way merge, when it lands, is the second big
-  candidate (merge properties: human-trunk-wins, rename detection never
-  renders as delete).
+- attenuation transitivity and malformed/duplicate-dimension generation;
+- generated delete/move/rename histories and multi-store sqlite histories;
+- controlled crash and process-concurrency transitions (G3/G4).
 
 **G2. Differential canonicalization.** Cross-implementation JCS vectors —
 hash the same objects with a second RFC 8785 implementation (any language)
@@ -87,24 +106,68 @@ proposed in ADR 0002. Deliverable shape: a language-neutral fixture file
 (object JSON → expected id) that lives with the spec, not with this repo's
 tests.
 
-**G3. Crash consistency.** Revert is prepare-all-then-swap-all; the claim
-is that a crash mid-swap leaves recoverable staging, never a half-written
-store. Nothing kills a process mid-revert today. Same family: WAL/-shm
-sidecar handling when a sqlite store is restored under a crashed reader.
+**G3. Crash consistency.** Preparation failure, injected interruption, hard
+process exit during an in-place filesystem apply, reopen, and idempotent replay
+are covered; session-boundary SIGKILL recovery is covered too. Nothing yet kills
+a process *during* a multi-root promotion/revert commit, between state mutation
+and event append, or between event append and expected-root updates. Add that
+full subprocess crash matrix when the atomic commit protocol is designed. Same
+family: WAL/-shm sidecars under a crashed reader.
 
-**G4. Concurrency.** `Mutex<Broker>` serializes decisions, but nothing
-tests interleavings: concurrent in-flight tools/calls through the proxy,
-approval-socket resolutions racing metered calls, meter increments under
-contention. The id-routing map in the proxy is tested only implicitly.
+**G4. Concurrency.** Generated model histories cover logical interleavings. A
+programmable downstream barrier now forces both in-flight timing directions:
+queued EOF records the call before promotion, while SIGTERM after mutation but
+before result recording rejects the untraced branch and retains its recovery
+marker. Approval and retry start simultaneously and preserve exactly one
+bounded use. A self-spawned helper process proves the fabric-home `flock`
+excludes a second gate process. Still needed: out-of-order MCP responses,
+simultaneous supported proxies sharing one home, and barriers inside the future
+multi-root commit protocol.
 
-**G5. Coverage honesty.** No mutation testing; assertion strength is
-unmeasured. A cheap first pass: mutate the evaluator's comparison
-operators and confirm the suite notices.
+**G5. Coverage honesty.** Scheduled mutation testing covers authority
+evaluation and promotion policy. The first evaluator sweep found two surviving
+mutations (external-reach direction and empty write-path extraction); explicit
+semantic tests were added, and the repeat killed all 32 viable mutants (one was
+compiler-rejected). The exact scheduled evaluator+merge lane catches 58
+mutants, with three compiler-rejected and zero missed/timeouts. Capability glob
+mutations remain outside the blocking mutation lane: exhaustive/property tests
+cover their semantics, while several deliberately broken matchers do not
+terminate and make mutation-run exit status noisy.
 
-**G6. Soak / growth.** Thousands-of-events runs: ledger size, WAL
-behavior, meter table growth, verify_all_spans latency over real volume.
-This is also where the ADR 0002 tripwire instrumentation (`asf stats`)
-gets its baseline numbers before dogfooding starts.
+**G6. Soak / growth.** Scheduled CI runs release mode with deeper generated
+case counts. A true thousands-of-events/files run remains: ledger size, WAL
+behavior, meter growth, verification latency, and ADR 0002 `asf stats`
+baselines.
+
+**G7. Process-harness fidelity.** Proxy tests use bounded pipe/socket reads,
+bounded child exit, captured stderr, and child status in failures. They can now
+substitute a barrier-controlled downstream instead of relying only on the
+in-tree vault server. The remaining adversarial MCP corpus is malformed large
+frames, duplicate/out-of-order ids, unsolicited notifications, and downstream
+death at each protocol phase.
+
+## Automation lanes
+
+| Lane | Purpose |
+| --- | --- |
+| Local required / pre-push | strict Clippy; every workspace target; deterministic/exhaustive and bounded shrinkable properties; both executable acceptance demos |
+| Local full | required lane plus the networked RustSec advisory audit |
+| Weekly/manual deep | release-mode suite with 4,096 authority cases and 512 real-store model histories |
+| Weekly/manual mutation | scoped authority-evaluator and promotion-policy mutation run |
+| Future fault/soak | full process crash matrix, adversarial MCP corpus, thousands-of-events/storage growth |
+| Dogfooding | denial false-positive judgment, legibility, approval latency, bypass behavior, and real-corpus tripwires |
+
+`scripts/ci` is the canonical definition of every implemented lane. The
+repository-owned pre-push hook runs `scripts/ci required`; enable it per clone
+with `scripts/install-hooks`. GitHub Actions is a Linux/macOS and scheduling
+mirror that calls the same commands, not the source of their meaning. Push/PR
+runs may cancel superseded runs, while scheduled/manual deep runs use separate
+concurrency groups and are never cancelled by an ordinary `main` push.
+
+The P7 meta-test compares the caveat dimensions emitted by its full-vocabulary
+generator with `capability::KNOWN_DIMS`. Adding an evaluator dimension without
+adding generated semantic-subset coverage therefore fails the ordinary suite
+instead of silently weakening the claim.
 
 ## Tests as the future conformance suite
 

@@ -37,8 +37,14 @@ pub enum SnapError {
     Symlink(PathBuf),
     #[error("blob {0} missing from CAS")]
     MissingBlob(String),
+    #[error("invalid sha256 CAS address {0}")]
+    InvalidHash(String),
+    #[error("CAS integrity failure: requested {expected}, read {observed}")]
+    HashMismatch { expected: String, observed: String },
     #[error("malformed tree object {0}")]
     MalformedTree(String),
+    #[error("unsafe path {path:?} in tree object {root}")]
+    UnsafePath { root: String, path: String },
     #[error("store root {0} does not exist")]
     MissingRoot(PathBuf),
 }
@@ -86,37 +92,64 @@ impl Cas {
     pub fn open(dir: impl AsRef<Path>) -> Result<Self, SnapError> {
         let dir = dir.as_ref().to_path_buf();
         fs::create_dir_all(&dir).map_err(io_err(&dir))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(io_err(&dir))?;
+        }
         Ok(Self { dir })
     }
 
-    fn blob_path(&self, hash: &str) -> PathBuf {
-        let hex = hash.strip_prefix("sha256:").unwrap_or(hash);
-        self.dir.join(&hex[..2]).join(hex)
+    fn blob_path(&self, hash: &str) -> Result<PathBuf, SnapError> {
+        let Some(raw) = hash.strip_prefix("sha256:") else {
+            return Err(SnapError::InvalidHash(hash.into()));
+        };
+        let decoded = hex::decode(raw).map_err(|_| SnapError::InvalidHash(hash.into()))?;
+        if decoded.len() != 32 {
+            return Err(SnapError::InvalidHash(hash.into()));
+        }
+        let canonical = hex::encode(decoded);
+        Ok(self.dir.join(&canonical[..2]).join(canonical))
     }
 
     pub fn put(&self, content: &[u8]) -> Result<String, SnapError> {
         let hash = sha256_hex(content);
-        let path = self.blob_path(&hash);
+        let path = self.blob_path(&hash)?;
         if !path.exists() {
             let parent = path.parent().expect("blob path has parent");
             fs::create_dir_all(parent).map_err(io_err(parent))?;
-            let tmp = path.with_extension("tmp");
+            let mut nonce = [0u8; 8];
+            use rand::RngCore;
+            rand::rngs::OsRng.fill_bytes(&mut nonce);
+            let tmp = path.with_extension(format!("tmp-{}", hex::encode(nonce)));
             fs::write(&tmp, content).map_err(io_err(&tmp))?;
             fs::rename(&tmp, &path).map_err(io_err(&path))?;
+        } else {
+            // An existing address is not proof that its bytes are intact.
+            // Refuse to reuse a corrupted or substituted CAS object.
+            self.get(&hash)?;
         }
         Ok(hash)
     }
 
     pub fn has(&self, hash: &str) -> bool {
-        self.blob_path(hash).exists()
+        self.blob_path(hash).is_ok_and(|p| p.exists())
     }
 
     pub fn get(&self, hash: &str) -> Result<Vec<u8>, SnapError> {
-        let path = self.blob_path(hash);
+        let path = self.blob_path(hash)?;
         if !path.exists() {
             return Err(SnapError::MissingBlob(hash.into()));
         }
-        fs::read(&path).map_err(io_err(&path))
+        let bytes = fs::read(&path).map_err(io_err(&path))?;
+        let observed = sha256_hex(&bytes);
+        if observed != hash.to_ascii_lowercase() {
+            return Err(SnapError::HashMismatch {
+                expected: hash.into(),
+                observed,
+            });
+        }
+        Ok(bytes)
     }
 }
 
@@ -217,7 +250,55 @@ fn capture_sqlite(cas: &Cas, db_path: &Path) -> Result<String, SnapError> {
 /// Load and parse a stored fs_tree object.
 pub fn load_tree_object(cas: &Cas, root: &str) -> Result<Value, SnapError> {
     let bytes = cas.get(root)?;
-    serde_json::from_slice(&bytes).map_err(|_| SnapError::MalformedTree(root.into()))
+    let tree: Value =
+        serde_json::from_slice(&bytes).map_err(|_| SnapError::MalformedTree(root.into()))?;
+    validate_tree_object(&tree, root)?;
+    Ok(tree)
+}
+
+fn validate_tree_path(root: &str, rel: &str) -> Result<(), SnapError> {
+    use std::path::Component;
+    let path = Path::new(rel);
+    if rel.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(SnapError::UnsafePath {
+            root: root.into(),
+            path: rel.into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_tree_object(tree: &Value, root: &str) -> Result<(), SnapError> {
+    if tree["kind"] != "fs_tree" {
+        return Err(SnapError::MalformedTree(root.into()));
+    }
+    let entries = tree["entries"]
+        .as_array()
+        .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in entries {
+        let rel = entry["path"]
+            .as_str()
+            .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+        validate_tree_path(root, rel)?;
+        if !seen.insert(rel) {
+            return Err(SnapError::MalformedTree(format!(
+                "{root}: duplicate path {rel}"
+            )));
+        }
+        if entry["hash"].as_str().is_none()
+            || !matches!(entry["mode"].as_str(), Some("644" | "755"))
+            || entry["size"].as_u64().is_none()
+        {
+            return Err(SnapError::MalformedTree(root.into()));
+        }
+    }
+    Ok(())
 }
 
 /// Materialize an fs tree root into `dest` (created; must not be live —
@@ -270,6 +351,7 @@ pub fn compose_tree(
 ) -> Result<String, SnapError> {
     let mut entries: Vec<Value> = Vec::new();
     'outer: for (path, hash) in merged {
+        validate_tree_path("composed tree", path)?;
         // Exact (path, hash) match first (covers moves/renames via the
         // side that has the new path), then any entry with this hash.
         for pass in 0..2 {
@@ -410,6 +492,18 @@ pub fn commit_restore(cas: &Cas, prepared: PreparedRestore) -> Result<(), SnapEr
 /// detection attributes anything left over. Excluded dirs (`.git`) are
 /// never written to and never deleted.
 fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), SnapError> {
+    apply_fs_in_place_with_hook(cas, root, entries, &mut |_| Ok(()))
+}
+
+/// Test seam for deterministic interruption at content-mutation boundaries.
+/// Production supplies a no-op hook; unit tests can fail after mutation N and
+/// verify that replay converges without encoding sleeps or permission tricks.
+fn apply_fs_in_place_with_hook(
+    cas: &Cas,
+    root: &Path,
+    entries: &[FsEntry],
+    before_mutation: &mut dyn FnMut(&Path) -> Result<(), SnapError>,
+) -> Result<(), SnapError> {
     fs::create_dir_all(root).map_err(io_err(root))?;
     let desired: std::collections::BTreeMap<&str, &FsEntry> =
         entries.iter().map(|e| (e.rel.as_str(), e)).collect();
@@ -433,6 +527,7 @@ fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), 
             .to_string_lossy()
             .replace(std::path::MAIN_SEPARATOR, "/");
         if !desired.contains_key(rel.as_str()) {
+            before_mutation(entry.path())?;
             fs::remove_file(entry.path()).map_err(io_err(entry.path()))?;
         }
     }
@@ -448,6 +543,7 @@ fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), 
         if let Some(p) = target.parent() {
             fs::create_dir_all(p).map_err(io_err(p))?;
         }
+        before_mutation(&target)?;
         let tmp = target.with_file_name(format!(
             ".asf-tmp-{}",
             target.file_name().unwrap_or_default().to_string_lossy()
@@ -662,6 +758,182 @@ mod tests {
         // Bogus root: prepare fails, live content untouched.
         assert!(prepare_restore(&cas, &spec, "sha256:deadbeefdeadbeef").is_err());
         assert_eq!(fs::read_to_string(vault.join("a.md")).unwrap(), "live");
+    }
+
+    #[test]
+    fn interrupted_in_place_apply_is_idempotently_recoverable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let live = tmp.path().join("live");
+        let desired = tmp.path().join("desired");
+        fs::create_dir_all(&live).unwrap();
+        fs::create_dir_all(&desired).unwrap();
+        write(&live.join("a.md"), "old a");
+        write(&live.join("b.md"), "old b");
+        write(&live.join("obsolete.md"), "remove me");
+        write(&desired.join("a.md"), "new a");
+        write(&desired.join("b.md"), "new b");
+        let desired_root = capture_fs(&cas, &desired).unwrap();
+        let prepared = prepare_restore(&cas, &fs_spec(&live), &desired_root).unwrap();
+        let RestorePlan::FsInPlace { entries } = prepared.plan else {
+            panic!("fs restore must use in-place plan");
+        };
+
+        let mut mutations = 0;
+        let result = apply_fs_in_place_with_hook(
+            &cas,
+            &live,
+            &entries,
+            &mut |_| {
+                mutations += 1;
+                if mutations == 2 {
+                    return Err(SnapError::Io {
+                        path: live.clone(),
+                        source: std::io::Error::other("injected interruption"),
+                    });
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err(), "the deterministic failpoint must fire");
+        assert_ne!(
+            capture_fs(&cas, &live).unwrap(),
+            desired_root,
+            "the interruption should leave a mixed, not falsely complete, tree"
+        );
+
+        apply_fs_in_place(&cas, &live, &entries).unwrap();
+        assert_eq!(
+            capture_fs(&cas, &live).unwrap(),
+            desired_root,
+            "replaying the same restore must converge exactly"
+        );
+    }
+
+    /// Child-process half of `hard_exit_mid_apply_reopens_and_converges`.
+    /// It is also discovered by the normal test harness, where it is a no-op;
+    /// the parent re-invokes this exact test with an explicit crash scenario.
+    #[test]
+    fn crash_during_fs_apply_helper() {
+        let Ok(cas_dir) = std::env::var("ASF_CRASH_CAS") else {
+            return;
+        };
+        let live = PathBuf::from(std::env::var("ASF_CRASH_LIVE").unwrap());
+        let desired_root = std::env::var("ASF_CRASH_ROOT").unwrap();
+        let marker = PathBuf::from(std::env::var("ASF_CRASH_MARKER").unwrap());
+        let cas = Cas::open(cas_dir).unwrap();
+        let prepared = prepare_restore(&cas, &fs_spec(&live), &desired_root).unwrap();
+        let RestorePlan::FsInPlace { entries } = prepared.plan else {
+            panic!("fs restore must use in-place plan");
+        };
+        let mut mutations = 0;
+        let result = apply_fs_in_place_with_hook(&cas, &live, &entries, &mut |_| {
+            mutations += 1;
+            if mutations == 2 {
+                fs::write(&marker, b"crash boundary reached").unwrap();
+                // Hard process exit: no Rust unwinding or destructor cleanup.
+                std::process::exit(86);
+            }
+            Ok(())
+        });
+        panic!("crash helper returned instead of exiting: {result:?}");
+    }
+
+    #[test]
+    fn hard_exit_mid_apply_reopens_and_converges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas_dir = tmp.path().join("cas");
+        let cas = Cas::open(&cas_dir).unwrap();
+        let live = tmp.path().join("live");
+        let desired = tmp.path().join("desired");
+        let marker = tmp.path().join("crash-reached");
+        fs::create_dir_all(&live).unwrap();
+        fs::create_dir_all(&desired).unwrap();
+        write(&live.join("a.md"), "old a");
+        write(&live.join("b.md"), "old b");
+        write(&live.join("obsolete.md"), "remove me");
+        write(&desired.join("a.md"), "new a");
+        write(&desired.join("b.md"), "new b");
+        let desired_root = capture_fs(&cas, &desired).unwrap();
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "snapshot::tests::crash_during_fs_apply_helper",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("ASF_CRASH_CAS", &cas_dir)
+            .env("ASF_CRASH_LIVE", &live)
+            .env("ASF_CRASH_ROOT", &desired_root)
+            .env("ASF_CRASH_MARKER", &marker)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(86),
+            "helper did not exit at failpoint: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(marker.exists());
+        assert_ne!(
+            capture_fs(&cas, &live).unwrap(),
+            desired_root,
+            "hard exit should expose a detectable mixed tree"
+        );
+
+        // Simulate restart: reopen the CAS, rebuild the prepared plan, replay,
+        // and require exact convergence to the intended content root.
+        drop(cas);
+        let reopened = Cas::open(&cas_dir).unwrap();
+        let prepared = prepare_restore(&reopened, &fs_spec(&live), &desired_root).unwrap();
+        commit_restore(&reopened, prepared).unwrap();
+        assert_eq!(capture_fs(&reopened, &live).unwrap(), desired_root);
+    }
+
+    #[test]
+    fn cas_get_rehashes_content_before_returning_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let root = cas.put(b"authentic").unwrap();
+        let path = cas.blob_path(&root).unwrap();
+        fs::write(&path, b"substituted").unwrap();
+
+        assert!(matches!(
+            cas.get(&root),
+            Err(SnapError::HashMismatch { expected, .. }) if expected == root
+        ));
+        assert!(matches!(
+            cas.put(b"authentic"),
+            Err(SnapError::HashMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn materialization_rejects_paths_outside_destination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let blob = cas.put(b"escape").unwrap();
+        let tree = json!({
+            "kind": "fs_tree",
+            "entries": [{
+                "path": "../outside.md",
+                "mode": "644",
+                "size": 6,
+                "hash": blob,
+            }],
+        });
+        let root = cas
+            .put(&serde_json_canonicalizer::to_vec(&tree).unwrap())
+            .unwrap();
+        let dest = tmp.path().join("dest");
+
+        assert!(matches!(
+            materialize_fs(&cas, &root, &dest),
+            Err(SnapError::UnsafePath { .. })
+        ));
+        assert!(!tmp.path().join("outside.md").exists());
     }
 
     #[test]

@@ -19,6 +19,33 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
+## SI-21 — brokered manifest authority creates a content-address cycle (§3, M1/M2/M7) — open
+
+The live proxy creates and seals a Manifest at the step boundary with
+`authority` omitted, then asks the broker to mint a capability whose
+`bound_manifest` is that Manifest id. M7 says an omitted `authority` denotes an
+observed run for which broker enforcement does not exist, so a genuinely
+brokered run is mislabeled. Adding the capability id to `authority` after mint
+does not work: it changes the Manifest id, which in turn invalidates the
+capability's `bound_manifest`, creating a content-hash cycle.
+
+**Current implementation** (`kernel.rs`, `broker.rs`, `proxy.rs`): the sealed
+Manifest remains capability-less and the later capability binds to it. This is
+adequate to exercise the Stage 2 broker path, but it is not treated as a
+spec-compliant resolution of M7.
+
+**Open question for the spec:** which edge is authoritative and how is it
+represented without a cycle? Candidate families include a separate signed
+authority-binding object/event, a predeclared capability commitment that is not
+the final capability id, or redefining Manifest `authority` as a post-seal
+registration relationship. The kernel must not choose among them silently.
+
+This was deliberately not changed during the dogfooding-readiness remediation:
+the choice changes canonical signed artifacts and their ids, so it requires
+author ratification before implementation.
+
+---
+
 ## SI-20 — mid-session out-of-band edits can be absorbed unattributed (A12 vs §5.3) — RESOLVED (author, 2026-07-09)
 
 **Resolution: the candidate ratified as amendment A20 (spec v0.5), with two

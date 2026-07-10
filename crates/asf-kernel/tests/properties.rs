@@ -1,7 +1,6 @@
 //! Property tests (testing-theory G1). Deterministic: a seeded xorshift
-//! generator (no external dep, fully reproducible) plus one exhaustive
-//! enumeration. Shrinking-quality proptest adoption remains open — these
-//! establish the properties; a counterexample here prints its seed/case.
+//! generator (fully reproducible), one exhaustive enumeration, and shrinkable
+//! `proptest` cases over the complete Stage-2 caveat vocabulary.
 //!
 //! Properties:
 //! - P1 merge identities: branch==base → merged==trunk; trunk==base →
@@ -15,9 +14,10 @@
 //!   child, then ANY call the child allows, the parent allows — a
 //!   counterexample is a privilege escalation through §5.2.
 
-use asf_kernel::capability::{glob_covers, glob_matches, verify_attenuation};
+use asf_kernel::capability::{glob_covers, glob_matches, verify_attenuation, KNOWN_DIMS};
 use asf_kernel::evaluate::{evaluate, CallCtx, Outcome};
 use asf_kernel::promote::{three_way, Tree};
+use proptest::prelude::*;
 use serde_json::{json, Value};
 
 struct Rng(u64);
@@ -309,5 +309,186 @@ fn p6_instant_compare_agrees_with_chronology_strings_do_not() {
             ti <= tj,
             "instant compare disagreed with chronology: {si} vs {sj}"
         );
+    }
+}
+
+// ---- P7: shrinkable full-vocabulary attenuation semantics ------------
+
+fn actions_from_mask(mask: u8) -> Vec<&'static str> {
+    ACTIONS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, action)| (mask & (1 << i) != 0).then_some(*action))
+        .collect()
+}
+
+fn ranked<'a>(rank: u8, values: &'a [&'a str]) -> &'a str {
+    values[usize::from(rank)]
+}
+
+fn shrinkable_cases() -> u32 {
+    std::env::var("ASF_PROPTEST_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(512)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn full_cap(
+    id: &str,
+    parent: Option<&str>,
+    actions: u8,
+    rev: u8,
+    reach: u8,
+    budget: u8,
+    scope: u8,
+    not_before_hour: u8,
+    not_after_hour: u8,
+    auth: u8,
+) -> Value {
+    let revs = ["reversible", "compensable", "irreversible"];
+    let reaches = ["none", "mocks", "live"];
+    let scopes = ["**", "inbox/**", "inbox/drafts/**"];
+    let strengths = ["unverified", "platform_oauth", "passkey"];
+    json!({
+        "id": id,
+        "parent": parent,
+        "holder": "prin:agent",
+        "bound_manifest": "man:x",
+        "issued_at": "2026-07-08T00:00:00Z",
+        "expires_at": "2027-01-01T00:00:00Z",
+        "caveats": [
+            {"dim": "action.allow", "tools": ["tool:vault@1.0"],
+             "actions": actions_from_mask(actions)},
+            {"dim": "reversibility.max", "max": ranked(rev, &revs)},
+            {"dim": "external_reach", "mode": ranked(reach, &reaches)},
+            {"dim": "budget.count", "action_class": "write",
+             "max": budget, "window": "run"},
+            {"dim": "paths.write", "globs": [ranked(scope, &scopes)]},
+            {"dim": "time",
+             "not_before": format!("2026-07-08T{not_before_hour:02}:00:00Z"),
+             "not_after": format!("2026-07-08T{not_after_hour:02}:00:00Z")},
+            {"dim": "approval.min_auth", "min": ranked(auth, &strengths)},
+        ],
+        "on_violation": {"default": "deny", "escalatable": []},
+    })
+}
+
+#[test]
+fn p7_generator_tracks_the_evaluator_vocabulary() {
+    let cap = full_cap("cap:coverage", None, 1, 0, 0, 0, 0, 0, 13, 0);
+    let mut generated: Vec<&str> = cap["caveats"]
+        .as_array()
+        .expect("generated capability has caveats")
+        .iter()
+        .map(|caveat| caveat["dim"].as_str().expect("generated caveat has a dimension"))
+        .collect();
+    generated.sort_unstable();
+    generated.dedup();
+
+    let mut evaluated = KNOWN_DIMS.to_vec();
+    evaluated.sort_unstable();
+    evaluated.dedup();
+
+    assert_eq!(
+        generated, evaluated,
+        "P7 must generate every mechanically evaluated caveat dimension; update full_cap when KNOWN_DIMS changes"
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: shrinkable_cases(),
+        max_shrink_iters: 10_000,
+        ..ProptestConfig::default()
+    })]
+
+    /// The shrinkable form of P5 covers every dimension known to the
+    /// evaluator. A failure prints a minimal authority-widening witness.
+    #[test]
+    fn p7_full_vocabulary_attenuation_is_semantic_subset(
+        parent_action_mask in 1u8..16,
+        child_action_seed in 1u8..16,
+        rev_a in 0u8..3,
+        rev_b in 0u8..3,
+        reach_a in 0u8..3,
+        reach_b in 0u8..3,
+        budget_a in 0u8..8,
+        budget_b in 0u8..8,
+        scope_a in 0u8..3,
+        scope_b in 0u8..3,
+        auth_a in 0u8..3,
+        auth_b in 0u8..3,
+        child_start in 0u8..7,
+        child_end in 7u8..13,
+        call_action in 0usize..ACTIONS.len(),
+        call_rev in 0u8..3,
+        call_external in any::<bool>(),
+        call_path in 0u8..4,
+        used in 0u64..9,
+        now_hour in 0u8..14,
+    ) {
+        let mut child_action_mask = parent_action_mask & child_action_seed;
+        if child_action_mask == 0 {
+            child_action_mask = parent_action_mask & parent_action_mask.wrapping_neg();
+        }
+        let (parent_rev, child_rev) = (rev_a.max(rev_b), rev_a.min(rev_b));
+        let (parent_reach, child_reach) = (reach_a.max(reach_b), reach_a.min(reach_b));
+        let (parent_budget, child_budget) = (budget_a.max(budget_b), budget_a.min(budget_b));
+        // Higher scope index is narrower: ** → inbox/** → inbox/drafts/**.
+        let (parent_scope, child_scope) = (scope_a.min(scope_b), scope_a.max(scope_b));
+        // Higher auth rank is a stricter approval requirement.
+        let (parent_auth, child_auth) = (auth_a.min(auth_b), auth_a.max(auth_b));
+
+        let parent = full_cap(
+            "cap:parent", None, parent_action_mask, parent_rev, parent_reach,
+            parent_budget, parent_scope, 0, 13, parent_auth,
+        );
+        let child = full_cap(
+            "cap:child", Some("cap:parent"), child_action_mask, child_rev,
+            child_reach, child_budget, child_scope, child_start, child_end,
+            child_auth,
+        );
+        prop_assert!(
+            verify_attenuation(&parent, &child).is_ok(),
+            "constructed attenuation rejected:\nparent={parent}\nchild={child}"
+        );
+
+        let action = ACTIONS[call_action];
+        let class = match action {
+            "note.delete" => "delete",
+            "note.move" => "move",
+            "note.read" => "read",
+            _ => "write",
+        };
+        let paths = ["inbox/drafts/d.md", "inbox/a.md", "MOCs/m.md", "elsewhere/x.md"];
+        let write_paths = (class != "read").then(|| vec![paths[usize::from(call_path)].to_string()]);
+        let ctx = CallCtx {
+            tool: "tool:vault@1.0",
+            action,
+            reversibility: ranked(call_rev, &["reversible", "compensable", "irreversible"]),
+            side_effect: if call_external { "external" } else { "local" },
+            action_class: class,
+            write_paths,
+            now: &format!("2026-07-08T{now_hour:02}:00:00Z"),
+            current_manifest: "man:x",
+        };
+        let child_eval = evaluate(&child, &ctx, &mut |_| used, &mut |_| None);
+        if child_eval.outcome == Outcome::Allow {
+            let parent_eval = evaluate(&parent, &ctx, &mut |_| used, &mut |_| None);
+            prop_assert_eq!(
+                parent_eval.outcome,
+                Outcome::Allow,
+                "PRIVILEGE ESCALATION:\naction={} class={} external={} path={:?} used={} now={}\nparent={}\nchild={}",
+                action,
+                class,
+                call_external,
+                ctx.write_paths,
+                used,
+                ctx.now,
+                parent,
+                child,
+            );
+        }
     }
 }

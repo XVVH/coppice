@@ -350,6 +350,8 @@ fn escalation_batch_approval_cycle() {
     assert_eq!(appr.raw["body"]["channel"], "chan:tty");
     assert_eq!(appr.raw["body"]["auth_strength"], "local_session");
     assert_eq!(appr.raw["body"]["escalation"], esc);
+    assert_eq!(appr.raw["body"]["capability"], cap);
+    assert_eq!(appr.raw["body"]["caveat"], "budget.count:write");
 
     // Two exempted writes pass (checks show the exemption)…
     for p in ["inbox/c.md", "inbox/d.md"] {
@@ -433,6 +435,77 @@ fn attenuation_through_broker() {
     assert!(matches!(
         w.broker.attenuate(&cap, &w.agent, &w.manifest, wide, vec![], &far_expiry()),
         Err(BrokerError::Cap(_))
+    ));
+}
+
+#[test]
+fn attenuation_rechecks_m1_for_the_child_manifest() {
+    let mut w = setup();
+    w.broker
+        .register_tool(
+            "tool:memory@1.0",
+            json!([{
+                "name": "memory.write",
+                "side_effect": "local",
+                "surface": "fixed",
+                "reversibility": "reversible",
+                "domain": "memory.local",
+                "class": "write",
+                "store": "db:memory",
+                "path_args": []
+            }]),
+        )
+        .unwrap();
+    let caveats = vec![json!({
+        "dim": "action.allow",
+        "tools": ["tool:memory@1.0"],
+        "actions": ["memory.write"]
+    })];
+    let parent = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            caveats.clone(),
+            vec![],
+            &far_expiry(),
+        )
+        .unwrap();
+
+    // Mint a valid fabric-signed child manifest that deliberately omits the
+    // memory store. A child capability retaining memory.write must be rejected
+    // by M1 even though its parent covered that store.
+    let home = w._tmp.path().join("fabric");
+    let vault_only = w
+        .broker
+        .fabric
+        .stores()
+        .iter()
+        .find(|s| s.store == "fs:vault")
+        .unwrap()
+        .clone();
+    let mut subset = Fabric::open(&home, vec![vault_only]).unwrap();
+    let child_manifest = subset
+        .step_boundary(
+            &w.human,
+            &w.agent,
+            &w.intent,
+            json!({"bundle":"sha256:child","skills":[]}),
+        )
+        .unwrap()
+        .manifest;
+    drop(subset);
+
+    assert!(matches!(
+        w.broker.attenuate(
+            &parent,
+            &w.agent,
+            &child_manifest,
+            caveats,
+            vec![],
+            &far_expiry(),
+        ),
+        Err(BrokerError::M1 { ref store, .. }) if store == "db:memory"
     ));
 }
 

@@ -1,0 +1,130 @@
+#!/bin/sh
+# Canonical local verification harness. GitHub Actions calls these same lanes;
+# the repository, rather than a hosting provider, defines what "verified" means.
+
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+
+heading() {
+    printf '\n==> %s\n' "$1"
+}
+
+need_command() {
+    if command -v "$1" >/dev/null 2>&1; then
+        return
+    fi
+
+    cargo_bin=${CARGO_HOME:-"$HOME/.cargo"}/bin
+    if [ -x "$cargo_bin/$1" ]; then
+        PATH="$cargo_bin:$PATH"
+        export PATH
+        return
+    fi
+
+    printf 'missing required command: %s\n' "$1" >&2
+    printf '%s\n' "$2" >&2
+    exit 127
+}
+
+run_static() {
+    heading "strict Clippy"
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+}
+
+run_test() {
+    heading "workspace tests (all current and future targets)"
+    cargo test --workspace --all-targets --locked
+
+    heading "kernel acceptance demo"
+    cargo run --quiet --locked -p asf -- demo
+
+    heading "broker acceptance demo"
+    cargo run --quiet --locked -p asf -- broker-demo
+}
+
+run_audit() {
+    need_command cargo-audit \
+        "install it with: cargo install cargo-audit --locked --version 0.22.2"
+    heading "RustSec dependency audit"
+    cargo audit
+}
+
+run_deep() {
+    ASF_PROPTEST_CASES=${ASF_PROPTEST_CASES:-4096}
+    ASF_MODEL_CASES=${ASF_MODEL_CASES:-512}
+    export ASF_PROPTEST_CASES ASF_MODEL_CASES
+
+    heading "release tests (${ASF_PROPTEST_CASES} authority cases; ${ASF_MODEL_CASES} model histories)"
+    cargo test --workspace --all-targets --release --locked
+}
+
+run_mutation() {
+    need_command cargo-mutants \
+        "install it with: cargo install cargo-mutants --locked --version 27.1.0"
+    heading "authority-evaluation and promotion-policy mutation tests"
+    cargo mutants \
+        -f crates/asf-kernel/src/evaluate.rs \
+        -f crates/asf-kernel/src/promote.rs \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+}
+
+usage() {
+    cat <<'EOF'
+usage: scripts/ci <lane>
+
+lanes:
+  static    strict Clippy over the workspace and all targets
+  test      all workspace targets plus both executable acceptance demos
+  required  static + test; deterministic/offline and suitable for pre-push
+  audit     RustSec advisory audit (requires cargo-audit and network/cache)
+  full      required + audit
+  deep      release suite with elevated property/model case counts
+  mutation  scoped evaluator/promotion mutation run (requires cargo-mutants)
+  all       full + deep + mutation
+EOF
+}
+
+case "${1:-required}" in
+    static)
+        run_static
+        ;;
+    test)
+        run_test
+        ;;
+    required)
+        run_static
+        run_test
+        ;;
+    audit)
+        run_audit
+        ;;
+    full)
+        run_static
+        run_test
+        run_audit
+        ;;
+    deep)
+        run_deep
+        ;;
+    mutation)
+        run_mutation
+        ;;
+    all)
+        run_static
+        run_test
+        run_audit
+        run_deep
+        run_mutation
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 64
+        ;;
+esac

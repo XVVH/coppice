@@ -16,8 +16,9 @@
 
 use crate::canon;
 use crate::trace;
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde_json::{json, Map, Value};
+use std::collections::BTreeSet;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
@@ -29,6 +30,8 @@ pub enum ToolError {
     Trace(#[from] trace::TraceError),
     #[error("tool {tool} has no declared action {action} — undeclared actions cannot be called")]
     UndeclaredAction { tool: String, action: String },
+    #[error("tool object {0} is not live through a verified registration event")]
+    NotLive(String),
 }
 
 /// Registration-time normalization: apply §0/§4 conservative defaults and
@@ -107,31 +110,63 @@ pub fn register(
 
 /// Look up a registered action. `tool_ref` is the registered tool name
 /// (e.g. "tool:vault@1.0"). Absent tool or action → error (uncallable).
+fn registered_tools(
+    conn: &rusqlite::Connection,
+    fabric_vk: &VerifyingKey,
+) -> Result<Vec<Value>, ToolError> {
+    let events = trace::all_events(conn)?;
+    let spans: BTreeSet<String> = events
+        .iter()
+        .filter(|e| e.kind == "register" && e.raw["body"]["object_kind"] == "tool")
+        .map(|e| e.span.clone())
+        .collect();
+    for span in spans {
+        trace::verify_span(conn, fabric_vk, &span)?;
+    }
+
+    let live: BTreeSet<String> = events
+        .iter()
+        .filter(|e| e.kind == "register" && e.raw["body"]["object_kind"] == "tool")
+        .filter_map(|e| e.raw["body"]["object"].as_str().map(str::to_string))
+        .collect();
+
+    let mut objects = Vec::new();
+    for id in live {
+        let obj = trace::get_object(conn, &id)?;
+        if canon::verify(&obj, fabric_vk).is_err() {
+            return Err(ToolError::NotLive(id));
+        }
+        let stored_kind: String = conn
+            .query_row("SELECT kind FROM objects WHERE id = ?1", [&id], |r| r.get(0))
+            .map_err(trace::TraceError::from)?;
+        if stored_kind != "tool" {
+            return Err(ToolError::NotLive(id));
+        }
+        objects.push(obj);
+    }
+    Ok(objects)
+}
+
 pub fn lookup_action(
     conn: &rusqlite::Connection,
+    fabric_vk: &VerifyingKey,
     tool_ref: &str,
     action: &str,
 ) -> Result<Value, ToolError> {
-    let found: Option<Value> = {
-        let mut stmt = conn
-            .prepare("SELECT raw FROM objects WHERE kind = 'tool'")
-            .map_err(trace::TraceError::from)?;
-        let rows = stmt
-            .query_map([], |r| r.get::<_, String>(0))
-            .map_err(trace::TraceError::from)?;
-        let mut hit = None;
-        for raw in rows {
-            let obj: Value = serde_json::from_str(&raw.map_err(trace::TraceError::from)?)
-                .expect("stored objects are valid JSON");
-            if obj["tool"] == tool_ref {
-                hit = obj["actions"]
-                    .as_array()
-                    .and_then(|a| a.iter().find(|x| x["name"] == action).cloned());
-                break;
-            }
-        }
-        hit
-    };
+    let matching: Vec<Value> = registered_tools(conn, fabric_vk)?
+        .into_iter()
+        .filter(|obj| obj["tool"] == tool_ref)
+        .collect();
+    if matching.len() > 1 {
+        return Err(ToolError::Malformed(format!(
+            "multiple live registrations for immutable tool ref {tool_ref}"
+        )));
+    }
+    let found = matching.first().and_then(|obj| {
+        obj["actions"]
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["name"] == action).cloned())
+    });
     found.ok_or_else(|| ToolError::UndeclaredAction {
         tool: tool_ref.into(),
         action: action.into(),
@@ -139,17 +174,22 @@ pub fn lookup_action(
 }
 
 /// All stores any allowed action of `tool_ref` operates on — the M1 input.
-pub fn stores_for_tool(conn: &rusqlite::Connection, tool_ref: &str) -> Result<Vec<String>, ToolError> {
+pub fn stores_for_tool(
+    conn: &rusqlite::Connection,
+    fabric_vk: &VerifyingKey,
+    tool_ref: &str,
+) -> Result<Vec<String>, ToolError> {
     let mut stores = Vec::new();
-    let mut stmt = conn
-        .prepare("SELECT raw FROM objects WHERE kind = 'tool'")
-        .map_err(trace::TraceError::from)?;
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(trace::TraceError::from)?;
-    for raw in rows {
-        let obj: Value = serde_json::from_str(&raw.map_err(trace::TraceError::from)?)
-            .expect("stored objects are valid JSON");
+    let matching: Vec<Value> = registered_tools(conn, fabric_vk)?
+        .into_iter()
+        .filter(|obj| obj["tool"] == tool_ref)
+        .collect();
+    if matching.len() > 1 {
+        return Err(ToolError::Malformed(format!(
+            "multiple live registrations for immutable tool ref {tool_ref}"
+        )));
+    }
+    for obj in matching {
         if obj["tool"] == tool_ref {
             for a in obj["actions"].as_array().into_iter().flatten() {
                 if let Some(s) = a["store"].as_str() {
@@ -192,7 +232,7 @@ mod tests {
     fn conservative_defaults_applied_at_registration() {
         let (mut conn, sk, span) = setup();
         register(&mut conn, &sk, &span, "tool:vault@1.0", vault_actions(), "t0").unwrap();
-        let fetch = lookup_action(&conn, "tool:vault@1.0", "web.fetch").unwrap();
+        let fetch = lookup_action(&conn, &sk.verifying_key(), "tool:vault@1.0", "web.fetch").unwrap();
         assert_eq!(fetch["reversibility"], "irreversible", "missing reversibility = irreversible");
         assert_eq!(fetch["egress"], true, "undeclared egress on external open surface = egress");
         assert_eq!(fetch["surface"], "open", "undeclared surface treated as open (worst case)");
@@ -203,10 +243,10 @@ mod tests {
         let (mut conn, sk, span) = setup();
         register(&mut conn, &sk, &span, "tool:vault@1.0", vault_actions(), "t0").unwrap();
         assert!(matches!(
-            lookup_action(&conn, "tool:vault@1.0", "note.nuke"),
+            lookup_action(&conn, &sk.verifying_key(), "tool:vault@1.0", "note.nuke"),
             Err(ToolError::UndeclaredAction { .. })
         ));
-        assert!(lookup_action(&conn, "tool:other@1.0", "note.read").is_err());
+        assert!(lookup_action(&conn, &sk.verifying_key(), "tool:other@1.0", "note.read").is_err());
     }
 
     #[test]
@@ -220,6 +260,57 @@ mod tests {
     fn stores_derivation_for_m1() {
         let (mut conn, sk, span) = setup();
         register(&mut conn, &sk, &span, "tool:vault@1.0", vault_actions(), "t0").unwrap();
-        assert_eq!(stores_for_tool(&conn, "tool:vault@1.0").unwrap(), vec!["fs:vault"]);
+        assert_eq!(
+            stores_for_tool(&conn, &sk.verifying_key(), "tool:vault@1.0").unwrap(),
+            vec!["fs:vault"]
+        );
+    }
+
+    #[test]
+    fn object_row_without_registration_event_is_inert() {
+        let (conn, sk, _span) = setup();
+        let mut body = Map::new();
+        body.insert("tool".into(), json!("tool:orphan@1"));
+        body.insert("actions".into(), normalize_actions(&vault_actions()).unwrap());
+        body.insert("registered_at".into(), json!("t0"));
+        let sealed = canon::seal("tool", body, &sk).unwrap();
+        trace::put_object(&conn, "tool", &sealed, "t0").unwrap();
+
+        assert!(lookup_action(
+            &conn,
+            &sk.verifying_key(),
+            "tool:orphan@1",
+            "note.read"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn tampered_registered_tool_is_inert() {
+        let (mut conn, sk, span) = setup();
+        let id = register(
+            &mut conn,
+            &sk,
+            &span,
+            "tool:vault@1.0",
+            vault_actions(),
+            "t0",
+        )
+        .unwrap();
+        let mut obj = trace::get_object(&conn, &id).unwrap();
+        obj["actions"][0]["store"] = json!("fs:other");
+        conn.execute(
+            "UPDATE objects SET raw = ?2 WHERE id = ?1",
+            rusqlite::params![id, serde_json::to_string(&obj).unwrap()],
+        )
+        .unwrap();
+
+        assert!(lookup_action(
+            &conn,
+            &sk.verifying_key(),
+            "tool:vault@1.0",
+            "note.read"
+        )
+        .is_err());
     }
 }

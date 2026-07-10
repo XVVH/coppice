@@ -368,6 +368,40 @@ mod tests {
     }
 
     #[test]
+    fn write_with_no_extractable_paths_fails_closed() {
+        let e = eval(&cap(vec![], vec![]), &ctx("note.write", Some(vec![])), 0);
+        assert!(matches!(e.outcome, Outcome::Deny { ref failed, .. }
+            if failed == &vec!["paths.write".to_string()]));
+        let paths = e.checks.iter().find(|check| check.caveat == "paths.write").unwrap();
+        assert!(paths.meter["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("no extractable paths")));
+    }
+
+    #[test]
+    fn external_reach_requires_live_only_for_external_calls() {
+        for mode in ["none", "mocks"] {
+            let c = cap(vec![], vec![json!({"dim":"external_reach","mode":mode})]);
+            let mut cx = ctx("note.read", None);
+            cx.side_effect = "external";
+            assert!(matches!(eval(&c, &cx, 0).outcome, Outcome::Deny { ref failed, .. }
+                if failed.contains(&"external_reach".to_string())));
+
+            cx.side_effect = "local";
+            assert_eq!(
+                eval(&c, &cx, 0).outcome,
+                Outcome::Allow,
+                "local calls do not consume external reach"
+            );
+        }
+
+        let c = cap(vec![], vec![json!({"dim":"external_reach","mode":"live"})]);
+        let mut cx = ctx("note.read", None);
+        cx.side_effect = "external";
+        assert_eq!(eval(&c, &cx, 0).outcome, Outcome::Allow);
+    }
+
+    #[test]
     fn unlisted_action_denies() {
         let e = eval(&cap(vec![], vec![]), &ctx("note.delete", None), 0);
         assert!(matches!(e.outcome, Outcome::Deny { ref failed, .. } if failed.contains(&"action.allow".to_string())));

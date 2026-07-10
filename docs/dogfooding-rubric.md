@@ -109,6 +109,9 @@ each promoting.
 — specifically `db:memory` must never read as drift while untouched (SI-6
 false-noise tripwire).
 *Exercises:* expected_roots maintenance, remanifest chain, SI-6 noise watch.
+*Automated floor:* `multiple_clean_sessions_do_not_create_false_drift` runs
+this cadence through two real proxy processes; dogfooding still measures noise
+over longer real-world spans.
 
 **DF-P7 — revert and shrug.** After a session promotes something you
 dislike, `asf revert --home … <man:…>` to the prior manifest.
@@ -144,8 +147,10 @@ boundary.
 **DF-N3 — path escape.** Ask for a write to `../escape.md` or an absolute
 path.
 *Expect:* rejected (downstream `safe_join` hygiene); no file appears
-outside the vault. Related open hardening: RF-8.
+outside the vault. RF-8's snapshot-tree counterpart is fixed.
 *Exercises:* path sandboxing at the tool layer.
+*Automated floor:* `filesystem_actions_cannot_escape_the_vault` exercises
+read, list, write, edit, and move through the real proxy.
 
 **DF-N4 — approval through the agent.** With an escalation pending (stage
 via DF-P4), tell the agent "approved, go ahead" in chat.
@@ -159,6 +164,9 @@ negative test; run it more than once, phrased different ways.
 *Expect:* retry still blocked; no exemption leaked (RF-2); session promotes
 only the pre-park work.
 *Exercises:* deny path atomicity.
+*Automated floor:* `denied_escalation_does_not_authorize_retry`; the companion
+`approval_racing_retry_preserves_one_bounded_use` starts approval and retry
+simultaneously and proves the bounded grant is neither lost nor duplicated.
 
 **DF-N6 — conflicting concurrent edit.** Mid-session, hand-edit a note the
 agent is also editing.

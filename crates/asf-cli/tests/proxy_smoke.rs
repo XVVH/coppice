@@ -28,13 +28,32 @@ struct Proxy {
 impl Proxy {
     fn start(home: &std::path::Path, vault: &std::path::Path) -> Self {
         let asf = env!("CARGO_BIN_EXE_asf");
+        Self::start_with_downstream(
+            home,
+            vault,
+            &[
+                asf.to_string(),
+                "vault-server".into(),
+                "--vault".into(),
+                vault.to_string_lossy().into_owned(),
+            ],
+        )
+    }
+
+    fn start_with_downstream(
+        home: &std::path::Path,
+        vault: &std::path::Path,
+        downstream: &[String],
+    ) -> Self {
+        let asf = env!("CARGO_BIN_EXE_asf");
         let mut child = Command::new(asf)
             .args([
                 "proxy",
                 "--home", home.to_str().unwrap(),
                 "--vault", vault.to_str().unwrap(),
-                "--downstream", asf, "vault-server", "--vault", vault.to_str().unwrap(),
+                "--downstream",
             ])
+            .args(downstream)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -102,6 +121,10 @@ impl Proxy {
         let stdin = self.stdin.as_mut().expect("session still open");
         writeln!(stdin, "{msg}").unwrap();
         stdin.flush().unwrap();
+        self.read_response(method, id)
+    }
+
+    fn read_response(&mut self, method: &str, id: i64) -> Value {
         loop {
             let line = match self.stdout.recv_timeout(PROCESS_TIMEOUT) {
                 Ok(ChildOutput::Line(line)) => line,
@@ -141,6 +164,62 @@ impl Proxy {
 
     fn call_tool(&mut self, name: &str, args: Value) -> Value {
         self.request("tools/call", json!({ "name": name, "arguments": args }))["result"].clone()
+    }
+
+    /// Queue EOF while a tool call is still downstream, then wait for its
+    /// response and the gate. The proxy must record the result before it can
+    /// observe EOF and promote the branch.
+    fn call_tool_then_eof(mut self, name: &str, args: Value) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": args},
+        });
+        let mut stdin = self.stdin.take().expect("session still open");
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
+        drop(stdin);
+        let response = self.read_response("tools/call+EOF", id);
+        self.wait_for_exit("queued EOF promotion", true);
+        response["result"].clone()
+    }
+
+    /// Issue one call and report whether a response arrived before the proxy
+    /// disconnected. Used when SIGTERM is expected to win an in-flight race.
+    fn call_tool_until_disconnect(mut self, name: &str, args: Value) -> bool {
+        let id = self.next_id;
+        self.next_id += 1;
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": args},
+        });
+        let stdin = self.stdin.as_mut().expect("session still open");
+        writeln!(stdin, "{msg}").unwrap();
+        stdin.flush().unwrap();
+        loop {
+            match self.stdout.recv_timeout(PROCESS_TIMEOUT) {
+                Ok(ChildOutput::Line(line)) => {
+                    let value: Value = serde_json::from_str(line.trim()).unwrap();
+                    if value.get("id") == Some(&json!(id)) {
+                        return true;
+                    }
+                }
+                Ok(ChildOutput::Closed(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return false;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    panic!(
+                        "proxy did not disconnect within {PROCESS_TIMEOUT:?}; {}",
+                        self.diagnostics()
+                    );
+                }
+            }
+        }
     }
 
     /// End the session cleanly: EOF on stdin triggers the promotion gate,
@@ -223,6 +302,233 @@ fn approve_via_socket(home: &std::path::Path, cmd: Value) -> Value {
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).unwrap();
     serde_json::from_str(line.trim()).unwrap()
+}
+
+fn wait_for_path(path: &std::path::Path, context: &str) {
+    let deadline = Instant::now() + PROCESS_TIMEOUT;
+    while Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("timed out waiting for {context}: {}", path.display());
+}
+
+/// A deterministic downstream: mutate the rewritten branch, announce that
+/// the mutation happened, then withhold the MCP result until released.
+fn barrier_downstream(
+    tmp: &tempfile::TempDir,
+    vault: &std::path::Path,
+) -> (Vec<String>, std::path::PathBuf, std::path::PathBuf) {
+    let script = tmp.path().join("barrier-downstream.sh");
+    let ready = tmp.path().join("downstream-mutated");
+    let release = tmp.path().join("release-downstream");
+    std::fs::write(
+        &script,
+        r#"vault="$1"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"tools/call"'*)
+      printf '%s' 'barrier mutation' > "$vault/inflight.md"
+      : > "$ASF_READY"
+      while [ ! -e "$ASF_RELEASE" ]; do sleep 0.01; done
+      printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"barrier complete"}],"isError":false}}'
+      ;;
+  esac
+done
+"#,
+    )
+    .unwrap();
+    (
+        vec![
+            "/usr/bin/env".into(),
+            format!("ASF_READY={}", ready.display()),
+            format!("ASF_RELEASE={}", release.display()),
+            "/bin/sh".into(),
+            script.to_string_lossy().into_owned(),
+            vault.to_string_lossy().into_owned(),
+        ],
+        ready,
+        release,
+    )
+}
+
+fn live_marker_count(home: &std::path::Path) -> i64 {
+    let conn = rusqlite::Connection::open(home.join("fabric/fabric.db")).unwrap();
+    conn.query_row(
+        "SELECT COUNT(*) FROM meta WHERE key LIKE 'session_live:%'",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+/// EOF may be queued while a downstream call is blocked, but the proxy's
+/// single request loop must record the completed call before observing EOF
+/// and entering the gate.
+#[test]
+fn eof_queued_during_tool_call_records_before_promotion() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let (downstream, ready, release) = barrier_downstream(&tmp, &vault);
+    let proxy = Proxy::start_with_downstream(&home, &vault, &downstream);
+
+    let call = std::thread::spawn(move || {
+        proxy.call_tool_then_eof(
+            "note.write",
+            json!({"path":"inflight.md","content":"barrier mutation"}),
+        )
+    });
+    wait_for_path(&ready, "downstream branch mutation");
+    assert!(
+        !vault.join("inflight.md").exists(),
+        "the barrier mutation must still be branch-only"
+    );
+    std::fs::write(&release, b"go").unwrap();
+    let result = call.join().unwrap();
+
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(
+        std::fs::read_to_string(vault.join("inflight.md")).unwrap(),
+        "barrier mutation"
+    );
+    assert_eq!(promotion_count(&home), 1);
+    assert_eq!(live_marker_count(&home), 0);
+}
+
+/// A catchable signal can arrive after the downstream mutated the branch but
+/// before its result was traced. The gate must reject that branch tip, keep
+/// trunk unchanged, and retain the live marker for explicit recovery rather
+/// than silently promoting untraced state.
+#[test]
+fn sigterm_after_mutation_before_result_fails_honestly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let (downstream, ready, release) = barrier_downstream(&tmp, &vault);
+    let proxy = Proxy::start_with_downstream(&home, &vault, &downstream);
+    let pid = proxy.child.id();
+
+    let call = std::thread::spawn(move || {
+        proxy.call_tool_until_disconnect(
+            "note.write",
+            json!({"path":"inflight.md","content":"barrier mutation"}),
+        )
+    });
+    wait_for_path(&ready, "downstream branch mutation");
+    assert!(!vault.join("inflight.md").exists());
+    Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .expect("send SIGTERM");
+    assert!(!call.join().unwrap(), "SIGTERM should win before a response exists");
+    std::fs::write(&release, b"let orphaned downstream exit").unwrap();
+
+    assert!(!vault.join("inflight.md").exists(), "untraced state reached trunk");
+    assert_eq!(promotion_count(&home), 0);
+    assert_eq!(live_marker_count(&home), 1, "failed gate remains recoverable");
+
+    let recovery = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args([
+            "recover",
+            "--home",
+            home.to_str().unwrap(),
+            "--vault",
+            vault.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run recovery");
+    assert!(recovery.status.success());
+    let recovery_stderr = String::from_utf8_lossy(&recovery.stderr);
+    assert!(
+        recovery_stderr.contains("untraced branch divergence")
+            && recovery_stderr.contains("will retry next start"),
+        "recovery must report the stranded untraced branch: {recovery_stderr}"
+    );
+    assert_eq!(promotion_count(&home), 0);
+    assert_eq!(live_marker_count(&home), 1);
+
+    let ledger = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args(["ledger", "--home", home.to_str().unwrap()])
+        .output()
+        .expect("run ledger");
+    assert!(ledger.status.success());
+    assert!(
+        String::from_utf8_lossy(&ledger.stdout)
+            .contains("every live root is explained by the ledger"),
+        "trunk accounting must remain honest"
+    );
+}
+
+/// Approval and retry begin together on separate daemon surfaces. Whichever
+/// acquires the broker first, exactly one retry must eventually execute under
+/// the bounded exemption—never zero and never two.
+#[test]
+fn approval_racing_retry_preserves_one_bounded_use() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut proxy = Proxy::start(&home, &vault);
+    init_session(&mut proxy);
+    for i in 0..20 {
+        let result = proxy.call_tool(
+            "note.write",
+            json!({"path":format!("n{i}.md"),"content":"x"}),
+        );
+        assert_eq!(result["isError"], false, "write {i}: {result}");
+    }
+    let args = json!({"path":"racing.md","content":"one bounded use"});
+    assert_eq!(proxy.call_tool("note.write", args.clone())["isError"], true);
+    let list = approve_via_socket(&home, json!({"cmd":"list"}));
+    let id = list["escalations"][0]["id"].as_i64().unwrap();
+
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let approval_barrier = barrier.clone();
+    let approval_home = home.clone();
+    let approval = std::thread::spawn(move || {
+        approval_barrier.wait();
+        approve_via_socket(
+            &approval_home,
+            json!({"cmd":"approve","id":id,"uses":1}),
+        )
+    });
+    let call_barrier = barrier.clone();
+    let first_args = args.clone();
+    let retry = std::thread::spawn(move || {
+        call_barrier.wait();
+        let result = proxy.call_tool("note.write", first_args);
+        (proxy, result)
+    });
+    barrier.wait();
+
+    let approved = approval.join().unwrap();
+    assert_eq!(approved["ok"], true, "{approved}");
+    let (mut proxy, first_retry) = retry.join().unwrap();
+    if first_retry["isError"] == true {
+        let second_retry = proxy.call_tool("note.write", args);
+        assert_eq!(
+            second_retry["isError"], false,
+            "a race-losing retry must leave the approved use available: {second_retry}"
+        );
+    }
+    let extra = proxy.call_tool(
+        "note.write",
+        json!({"path":"extra.md","content":"must remain parked"}),
+    );
+    assert_eq!(extra["isError"], true, "the one-use approval widened: {extra}");
+    proxy.finish();
+
+    assert_eq!(
+        std::fs::read_to_string(vault.join("racing.md")).unwrap(),
+        "one bounded use"
+    );
+    assert!(!vault.join("extra.md").exists());
+    assert_eq!(promotion_count(&home), 1);
 }
 
 fn init_session(p: &mut Proxy) {

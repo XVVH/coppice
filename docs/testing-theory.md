@@ -1,7 +1,7 @@
 # Testing theory — Stage 3 dogfooding baseline
 
 This records what the suite is, what it deliberately is not yet, and which
-kind of automation owns each claim. Updated 2026-07-09 at 110 named tests,
+kind of automation owns each claim. Updated 2026-07-10 at 117 named tests,
 plus 576 shrinkable generated cases in the default run and deeper scheduled
 CI. The promotion gate is complete; dogfooding is now the product-signal lane,
 not a substitute for correctness testing.
@@ -105,19 +105,23 @@ proposed in ADR 0002. Deliverable shape: a language-neutral fixture file
 (object JSON → expected id) that lives with the spec, not with this repo's
 tests.
 
-**G3. Crash consistency.** Preparation failure is covered and process death at
-the session boundary is covered. Nothing yet kills a process *during* a
-multi-root promotion/revert commit, between state mutation and event append,
-or between event append and expected-root updates. Add deterministic
-test-only failpoints and a subprocess crash matrix when the atomic commit
-protocol is designed. Same family: WAL/-shm sidecars under a crashed reader.
+**G3. Crash consistency.** Preparation failure, injected interruption, hard
+process exit during an in-place filesystem apply, reopen, and idempotent replay
+are covered; session-boundary SIGKILL recovery is covered too. Nothing yet kills
+a process *during* a multi-root promotion/revert commit, between state mutation
+and event append, or between event append and expected-root updates. Add that
+full subprocess crash matrix when the atomic commit protocol is designed. Same
+family: WAL/-shm sidecars under a crashed reader.
 
-**G4. Concurrency.** Generated model histories cover logical interleavings but
-not simultaneous execution. Still needed: a programmable downstream with
-barriers to force in-flight calls against SIGTERM/EOF, approval resolutions
-against metered calls, out-of-order MCP responses, and multiple proxies
-contending on one fabric home. Use real processes and barriers; sleeps do not
-prove an ordering.
+**G4. Concurrency.** Generated model histories cover logical interleavings. A
+programmable downstream barrier now forces both in-flight timing directions:
+queued EOF records the call before promotion, while SIGTERM after mutation but
+before result recording rejects the untraced branch and retains its recovery
+marker. Approval and retry start simultaneously and preserve exactly one
+bounded use. A self-spawned helper process proves the fabric-home `flock`
+excludes a second gate process. Still needed: out-of-order MCP responses,
+simultaneous supported proxies sharing one home, and barriers inside the future
+multi-root commit protocol.
 
 **G5. Coverage honesty.** Scheduled mutation testing covers authority
 evaluation and promotion policy. The first evaluator sweep found two surviving
@@ -135,10 +139,11 @@ behavior, meter growth, verification latency, and ADR 0002 `asf stats`
 baselines.
 
 **G7. Process-harness fidelity.** Proxy tests use bounded pipe/socket reads,
-bounded child exit, captured stderr, and child status in failures. The next
-step is an adversarial MCP peer corpus (malformed frames, notifications,
-duplicate/out-of-order ids, delayed replies, and downstream death), rather
-than testing only against the in-tree vault server.
+bounded child exit, captured stderr, and child status in failures. They can now
+substitute a barrier-controlled downstream instead of relying only on the
+in-tree vault server. The remaining adversarial MCP corpus is malformed large
+frames, duplicate/out-of-order ids, unsolicited notifications, and downstream
+death at each protocol phase.
 
 ## Automation lanes
 

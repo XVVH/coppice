@@ -810,6 +810,88 @@ mod tests {
         );
     }
 
+    /// Child-process half of `hard_exit_mid_apply_reopens_and_converges`.
+    /// It is also discovered by the normal test harness, where it is a no-op;
+    /// the parent re-invokes this exact test with an explicit crash scenario.
+    #[test]
+    fn crash_during_fs_apply_helper() {
+        let Ok(cas_dir) = std::env::var("ASF_CRASH_CAS") else {
+            return;
+        };
+        let live = PathBuf::from(std::env::var("ASF_CRASH_LIVE").unwrap());
+        let desired_root = std::env::var("ASF_CRASH_ROOT").unwrap();
+        let marker = PathBuf::from(std::env::var("ASF_CRASH_MARKER").unwrap());
+        let cas = Cas::open(cas_dir).unwrap();
+        let prepared = prepare_restore(&cas, &fs_spec(&live), &desired_root).unwrap();
+        let RestorePlan::FsInPlace { entries } = prepared.plan else {
+            panic!("fs restore must use in-place plan");
+        };
+        let mut mutations = 0;
+        let result = apply_fs_in_place_with_hook(&cas, &live, &entries, &mut |_| {
+            mutations += 1;
+            if mutations == 2 {
+                fs::write(&marker, b"crash boundary reached").unwrap();
+                // Hard process exit: no Rust unwinding or destructor cleanup.
+                std::process::exit(86);
+            }
+            Ok(())
+        });
+        panic!("crash helper returned instead of exiting: {result:?}");
+    }
+
+    #[test]
+    fn hard_exit_mid_apply_reopens_and_converges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas_dir = tmp.path().join("cas");
+        let cas = Cas::open(&cas_dir).unwrap();
+        let live = tmp.path().join("live");
+        let desired = tmp.path().join("desired");
+        let marker = tmp.path().join("crash-reached");
+        fs::create_dir_all(&live).unwrap();
+        fs::create_dir_all(&desired).unwrap();
+        write(&live.join("a.md"), "old a");
+        write(&live.join("b.md"), "old b");
+        write(&live.join("obsolete.md"), "remove me");
+        write(&desired.join("a.md"), "new a");
+        write(&desired.join("b.md"), "new b");
+        let desired_root = capture_fs(&cas, &desired).unwrap();
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "snapshot::tests::crash_during_fs_apply_helper",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("ASF_CRASH_CAS", &cas_dir)
+            .env("ASF_CRASH_LIVE", &live)
+            .env("ASF_CRASH_ROOT", &desired_root)
+            .env("ASF_CRASH_MARKER", &marker)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(86),
+            "helper did not exit at failpoint: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(marker.exists());
+        assert_ne!(
+            capture_fs(&cas, &live).unwrap(),
+            desired_root,
+            "hard exit should expose a detectable mixed tree"
+        );
+
+        // Simulate restart: reopen the CAS, rebuild the prepared plan, replay,
+        // and require exact convergence to the intended content root.
+        drop(cas);
+        let reopened = Cas::open(&cas_dir).unwrap();
+        let prepared = prepare_restore(&reopened, &fs_spec(&live), &desired_root).unwrap();
+        commit_restore(&reopened, prepared).unwrap();
+        assert_eq!(capture_fs(&reopened, &live).unwrap(), desired_root);
+    }
+
     #[test]
     fn cas_get_rehashes_content_before_returning_it() {
         let tmp = tempfile::tempdir().unwrap();

@@ -436,10 +436,12 @@ pub fn run(home: PathBuf, vault: PathBuf, downstream: Vec<String>) -> Result<()>
         ])?;
         thread::spawn(move || {
             if signals.forever().next().is_some() {
-                // Taking the broker lock serializes with any in-flight
-                // tools/call; a response the downstream produces after this
-                // point is lost, but its tool_call is already in the trace
-                // and its write is on the branch — the gate sees both.
+                // Taking the broker lock serializes with result recording,
+                // not with the downstream effect itself. If the result was
+                // recorded, the gate sees its signed root. If the downstream
+                // mutated first but has not returned, branch-tip verification
+                // rejects the untraced root and the live marker remains for
+                // explicit recovery; nothing silently reaches trunk.
                 finish_session(&broker, &manifest, &branch);
                 std::process::exit(0);
             }

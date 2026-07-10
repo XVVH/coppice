@@ -6,7 +6,8 @@
 > `asf-schema-spec.md` v0.4 (changelog A15–A19). This file is preserved
 > as the amendment provenance record; per-entry statuses below are
 > historical. New issues found under v0.4 start at **SI-20** (resolved in
-> v0.5 as A20); new issues under v0.5 start at **SI-21**.
+> v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; new issues under
+> v0.6 start at **SI-22**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -19,7 +20,55 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
-## SI-21 — brokered manifest authority creates a content-address cycle (§3, M1/M2/M7) — open
+## SI-21 — brokered manifest authority creates a content-address cycle (§3, M1/M2/M7) — RESOLVED (author, 2026-07-10)
+
+**Resolution: binding-as-event, ratified as amendment A21 (spec v0.6) —
+the event flavor of the "separate signed authority-binding object/event"
+candidate family, plus a mode declaration and an export-view corollary.**
+
+- Core: the capability id never enters the manifest body. The authority
+  lineage is two acyclic edges — **backward** `cap.bound_manifest ==
+  man.id` (M2, content-addressed; trustworthy exactly because mint
+  follows seal) and **forward** the broker's signed `grant` event
+  countersigning the mint at its substrate offset (the SI-10 pattern:
+  the event is the proof, the field is a convenience). The temporal
+  observation that decided the framing: state/intent/behavior are
+  past-facing lineages and live in the body as content hashes; trace and
+  (brokered) authority are future-facing and were always going to bind
+  through the chain — the manifest never contained its trace either, it
+  named a span.
+- Mode declaration: manifests declare `authority: {"mode": "brokered"}`;
+  absent = observed (conservative default; every historical manifest
+  reads observed, which is correct for its era — a one-time note, not a
+  migration). Under brokered mode the gate fails closed: every
+  `tool_call` must carry its capability, and a verified grant event
+  binding that capability to this manifest must precede it in substrate
+  order. Declared-brokered never silently reclassifies as observed.
+  Observed mode claims nothing and forbids nothing — attributed calls
+  are still fully checked (M1/M2 bind whenever a capability exists); the
+  declaration only ever adds constraints.
+- Rejected — envelope-as-object (`ManifestCore → Capability →
+  DelegationEnvelope`): under crash analysis (mint lands, envelope seal
+  does not) the envelope's absence is ambiguous between observed-by-
+  intent and brokered-but-crashed, so the discriminator falls back to
+  the substrate — the envelope can only ever be a *view* of chain truth,
+  which is A15's row-without-event rule restated. Adopted instead as the
+  *derived export artifact* (manifest + capabilities + grant refs, the
+  §7.2 TrustRecord-export pattern). Rejected — pre-seal capability
+  commitment: welds the broker into the seal critical path, invents a
+  second body-minus-field hashing rule (SI-1 déjà vu), and has no
+  mid-run re-grant story.
+- Review adjustments at implementation: grant events stay on the
+  fabric-lifetime span with `manifest` set (the register/intent/approval
+  family, A15) — the broker already emitted exactly this event at mint,
+  so A21 promotes existing bookkeeping to constitutional; the fail-closed
+  rule is stated per-effect with offset ordering (an empty
+  declared-brokered run gates clean — the rule binds effects, not
+  sessions); multiple grants per manifest are legal (expiry re-mint,
+  attenuation) — the lineage is the offset-ordered grant set.
+- Provenance: ratified 2026-07-10 in the SI-21 design exchange (both
+  candidate families steelmanned; the crash-degeneration argument was
+  decisive). Original analysis below, preserved as provenance.
 
 The live proxy creates and seals a Manifest at the step boundary with
 `authority` omitted, then asks the broker to mint a capability whose

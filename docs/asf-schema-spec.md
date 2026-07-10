@@ -1,8 +1,8 @@
 # Agent State Fabric — Schema Specification
 
-**Draft v0.5 — July 2026 — Companion to the Architecture Brief**
+**Draft v0.6 — July 2026 — Companion to the Architecture Brief**
 
-*v0.3 integrated amendments A1–A14 from the wedge paper runs (Hermes agent; workflows: web research → vault distillation, Discord message management, vault maintenance). v0.4 integrated A15–A19 from the Stage 1–3 reference implementation (Coppice): the first amendments forced by running code rather than paper runs. Every A15–A19 decision traces to the implementation sessions via `docs/spec-issues.md` (SI-1…SI-19, all resolved in that version). v0.5 integrates A20 (SI-20, M8 attribution completeness) — the first amendment forced by dogfooding rather than by implementation. Changelog at end. Risk-review requirements carried since v0.1: **(R2)** read authority is first-class, **(R3)** payloads are hash-referenced and destroyable, **(R6)** trust is domain-scoped, never scalar.*
+*v0.3 integrated amendments A1–A14 from the wedge paper runs (Hermes agent; workflows: web research → vault distillation, Discord message management, vault maintenance). v0.4 integrated A15–A19 from the Stage 1–3 reference implementation (Coppice): the first amendments forced by running code rather than paper runs. Every A15–A19 decision traces to the implementation sessions via `docs/spec-issues.md` (SI-1…SI-19, all resolved in that version). v0.5 integrates A20 (SI-20, M8 attribution completeness) — the first amendment forced by dogfooding rather than by implementation. v0.6 integrates A21 (SI-21): brokered authority binds by mode declaration plus grant event, never by an embedded capability id — resolving the content-address cycle at the kernel object. Changelog at end. Risk-review requirements carried since v0.1: **(R2)** read authority is first-class, **(R3)** payloads are hash-referenced and destroyable, **(R6)** trust is domain-scoped, never scalar.*
 
 ---
 
@@ -75,7 +75,7 @@ Manifest {
     { "store": "db:books",     "tier": 2, "kind": "branch", "root": "branch:bk_4f2" },
     { "store": "shadow:discord","tier": 3, "kind": "mirror", "root": "sha256:…",
       "as_of": "2026-07-08T13:58:01Z" } ] },
-  "authority": { "capability": "cap:…" },
+  "authority": { "mode": "brokered" },
   "behavior":  { "bundle": "sha256:…",
                  "skills": [ { "skill": "vault-filing", "version": "sha256:…",
                                "domains": ["files.vault"] } ] },
@@ -91,7 +91,7 @@ Manifest {
 - **M4** `behavior.bundle` matches the bundle actually loaded; runtime attests at first tool call.
 - **M5 — Re-manifest on behavior change (A2).** A bundle change mid-run (skill created or hot-loaded) triggers, at the next step boundary, a self-delegation: child manifest, new behavior hash, same capability (attenuation-identity is legal). Even self-modification has lineage; the trace shows which steps ran under which behavior.
 - **M6 — Small manifests (A11 guidance).** Prefer frequent re-manifesting over long-lived branches; promotion divergence (§5.3) grows with branch age, and M5 makes re-baselining cheap.
-- **M7 — Observed runs (A19).** `authority` is optional. A manifest without it denotes an *observed* run: snapshots, trace, drift attribution, and revert apply in full; no broker enforcement exists, and the manifest itself makes that ledger-visible. M1/M2 bind whenever a capability exists. Stage 2's observe-everything shipping posture is this mode by construction.
+- **M7 — Authority mode and binding (A21; supersedes the A19 observed-run form).** `authority` declares the run's enforcement mode and never embeds a capability id: `{ "mode": "brokered" }`, or absent. Absent denotes an *observed* run — snapshots, trace, drift attribution, and revert apply in full; no broker enforcement is claimed, and the manifest makes that ledger-visible. The capability id cannot live in the body because authority is a *response* to the sealed fork (F1 mints against `man.id`), so the authority lineage is two acyclic edges: **backward**, `cap.bound_manifest == man.id` (M2, content-addressed — trustworthy exactly because mint follows seal); **forward**, the broker's signed `grant` event (§6) countersigning the capability into the substrate at its activation offset. The event is the proof; the field is the mode (the SI-10 pattern). **Fail-closed rule:** under `mode: "brokered"`, every effect must be attributed — each `tool_call` carries its capability, and a verified `grant` event binding that capability to this manifest must precede it in substrate order. A declared-brokered manifest whose effects cannot satisfy this is invalid at the gate; it never silently reclassifies as observed. Observed mode claims nothing and forbids nothing: capability-attributed calls, where present, are checked in full (M1/M2 bind whenever a capability exists) — the declaration only ever adds constraints. Multiple grants over one manifest are legal and expected (expiry re-mint, §5.2 attenuation); the authority lineage is the offset-ordered set of verified grants. Export note: the portable single-artifact form is a *derived* DelegationEnvelope — manifest + capabilities + their grant-event references, materialized on the §7.2 export pattern (object + referenced events) — never load-bearing; the chain is ground truth.
 - **M8 — Attribution completeness (A20).** Every window of out-of-band divergence (the net change between consecutive root attestations) is recorded by exactly one drift event — carrying A12 attribution and an A13 operation-class summary — before the diverged state is consumed by any merge or attested as expected by any subsequent event. Ledger attribution never depends on when a change occurred relative to session lifetime. Stated as a property of the ledger, not of the gate, so no future code path reopens the window by other means: every consumer of live state (auto-promotion, approval-time re-merge, revert) attributes first, and gates serialize per §5.3.
 - **Root encoding (A16 interim).** State roots become CIDv1 (F2, §9); `sha256:<hex>` is the sanctioned interim encoding until the F2 execution checkpoint. Readers MUST accept both during the transition. sqlite roots are the checkpointed main-file byte image in the interim; page-aligned chunked DAGs at F2 execution.
 
@@ -236,6 +236,8 @@ Event { "id": "evt:…", "span": "span:…", "seq": 41, "prev": "evt:…",
 
 **escalation body — batching (A9):** violations aggregate per (caveat, action_class): `{ count: 28, sample: [5 refs], guard_status: "all_pass" }` → one approval covers the batch. Twenty-eight pings is the R1 fatigue machine rebuilt; one legible batch is not.
 
+**grant body (A21):** `{ capability, parent }` — the broker countersigns every mint (and every §5.2 attenuation) into the substrate. Recorded on the fabric-lifetime span with `manifest` set to the capability's `bound_manifest`, alongside the other authority acts (`register`/`intent`/`approval`, A15). Its offset is the capability's activation point; M7's ordering check compares it against effect offsets. A capability object row without a verified grant event fails closed — the A15 materialized-view rule applied to authority.
+
 **drift body — attribution classes (A12), narrative (A20):** `{ store, expected_root, observed_root, between: [offset_lo, offset_hi], attribution: "human_local" | "tool_known" | "unattributed", ops: [A13 operation-class summary] }` — `between` brackets the unobserved change in substrate offsets (A19). `ops` names what changed in the same vocabulary rules and promotion previews speak (rename/move detection per A17; opaque stores degrade to whole-store `modify` per SI-18), so the ledger narrative is equivalent no matter when the edit happened (M8) — a drift that names its paths is much harder to misread than one that names two hashes. Paths land in the plaintext substrate: the same exposure promotion event bodies already accept; any future substrate-minimization pass treats both together. Zero-authorship default for the solo operator: local edits outside agent spans attribute quietly to the human (logged, not alerted); only `unattributed` drift is loud. In a co-edited vault drift is Tuesday, not an incident.
 
 **Human-originated events** (approvals, ratifications) carry `{ channel, auth_strength }` per C1.
@@ -312,6 +314,12 @@ Not a score: raw, trace-backed counters per (principal, domain, skill-version). 
 4. Run: each tool call traced with checks, meters, summary, `state_root_after`. Unknown-recipient draft → escalation → one-tap approval (channel-stamped). Third similar approval this month → clerk drafts a rule (k=3, least-general, counterfactuals attached, domain-matched, domain-scoped pin) for ratification at `approval.min_auth`.
 5. Promotion gate: trace re-verified against capability; three-way merge to trunk; promotion event. Sixty days on, email payloads hit TTL → shred events. The run stays forever explainable, no longer readable.
 
+## Changelog — v0.6 (amendment A21)
+
+*Resolves SI-21 (filed 2026-07-09 by the dogfooding-readiness review; ratified 2026-07-10; provenance in `docs/spec-issues.md`).*
+
+A21 — brokered authority binds without a content-address cycle: manifest `authority` becomes a mode declaration (`{"mode":"brokered"}`; absent = observed), never an embedded capability id; the authority lineage is two edges — backward `cap.bound_manifest` (M2, content-addressed) and forward the signed `grant` event (§6) at its substrate offset; M7 rewritten with the fail-closed rule (brokered effects require an attributed capability whose grant precedes them in substrate order; declared-brokered never silently reclassifies as observed; observed mode only ever loses constraints, not checks); grant body specified; DelegationEnvelope named as a derived export view on the §7.2 pattern. Candidate families considered and rejected: envelope-as-object (under crash analysis its absence is ambiguous, so the discriminator falls back to the substrate — A15's row-without-event rule already governs; adopted as export view only) and pre-seal capability commitment (welds the broker into the seal critical path, invents a second body-minus-field hash rule, no re-grant story).
+
 ## Changelog — v0.5 (amendment A20)
 
 *The first amendment forced by dogfooding (SI-20, found and ratified 2026-07-09; provenance in `docs/spec-issues.md`).*
@@ -330,4 +338,4 @@ A1 domain-scoped behavior pinning · A2 re-manifest on bundle change (M5) · A3 
 
 ---
 
-*Status: v0.4, post-implementation of Stages 1–3. v0.3's grammar survived three dissimilar paper workflows with amendments but no redesign; v0.4's amendments came from running code and again cluster on precision, not missing concepts — the compositional-grammar thesis is holding. Next pressure comes from dogfooding.*
+*Status: v0.6, mid-dogfooding. v0.3's grammar survived three dissimilar paper workflows with amendments but no redesign; v0.4's amendments came from running code; A20 came from dogfooding and A21 from its readiness review — every wave clusters on precision, not missing concepts; the compositional-grammar thesis is holding.*

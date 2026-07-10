@@ -721,6 +721,16 @@ impl Broker {
         trace::verify_span(&self.fabric.conn, &self.fabric.fabric_vk(), span)?;
         let events = trace::events_in_span(&self.fabric.conn, span)?;
 
+        // A21/M7: the manifest's declared authority mode. Brokered fails
+        // closed below — every effect capability-attributed, and its grant
+        // event at a lower substrate offset. Observed claims nothing;
+        // attributed calls are still checked in full.
+        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
+        canon::verify(&man, &self.fabric.fabric_vk()).map_err(|e| {
+            BrokerError::GateTraceViolation(format!("manifest {manifest_id} unverifiable: {e}"))
+        })?;
+        let brokered = man["authority"]["mode"] == "brokered";
+
         // Approved budget headroom: approval events grant `uses` against an
         // escalation's (cap, caveat-key). The authority binding comes from
         // the signed event itself, never the mutable escalation table.
@@ -731,7 +741,18 @@ impl Broker {
             substrate_span,
         )?;
         let mut approved: BTreeMap<(String, String), i64> = BTreeMap::new();
+        // Grant activation offsets per capability for THIS manifest, from
+        // the verified substrate span (M7 forward edge).
+        let mut grants: BTreeMap<String, i64> = BTreeMap::new();
         for ev in trace::all_events(&self.fabric.conn)? {
+            if ev.span == substrate_span
+                && ev.kind == "grant"
+                && ev.manifest.as_deref() == Some(manifest_id)
+            {
+                if let Some(cap) = ev.raw["body"]["capability"].as_str() {
+                    grants.entry(cap.to_string()).or_insert(ev.offset);
+                }
+            }
             if ev.span != substrate_span
                 || ev.kind != "approval"
                 || ev.raw["body"]["resolution"] != "approved"
@@ -769,7 +790,13 @@ impl Broker {
             tool_calls += 1;
             let body = &ev.raw["body"];
             let Some(cap_id) = body["summary"]["capability"].as_str() else {
-                unattributed += 1; // pre-broker record (SI-7): nothing to check against
+                if brokered {
+                    return Err(violation(format!(
+                        "event {} has no capability attribution under brokered authority (M7)",
+                        ev.id
+                    )));
+                }
+                unattributed += 1; // observed mode: kernel-recorded call, nothing to check against
                 continue;
             };
             let cap = match caps.get(cap_id) {
@@ -788,6 +815,27 @@ impl Broker {
                     c
                 }
             };
+            if brokered {
+                match grants.get(cap_id) {
+                    Some(g) if *g < ev.offset => {}
+                    Some(_) => {
+                        return Err(violation(format!(
+                            "event {} precedes the grant of {cap_id} (M7 ordering)",
+                            ev.id
+                        )));
+                    }
+                    // Unreachable through honest storage — mint appends the
+                    // grant before returning the cap id, and A15 fails closed
+                    // on object rows without events. Defense in depth against
+                    // writers that bypass the broker.
+                    None => {
+                        return Err(violation(format!(
+                            "event {}: no verified grant event binds {cap_id} to this manifest (M7)",
+                            ev.id
+                        )));
+                    }
+                }
+            }
             let caveat = |dim: &str| -> Option<Value> {
                 cap["caveats"].as_array()?.iter().find(|c| c["dim"] == dim).cloned()
             };

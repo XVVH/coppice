@@ -26,7 +26,7 @@ jobs:
       # Only first-party actions/checkout is used; the toolchain is installed
       # via the runner's preinstalled rustup rather than a marketplace action,
       # keeping CI's supply-chain surface minimal (on-brand for this project).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal --component clippy
@@ -46,7 +46,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal
@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal

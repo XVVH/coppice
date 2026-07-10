@@ -2,9 +2,11 @@
 //! revert. Spec §3 (DelegationManifest), §6 (events), A12 (drift
 //! attribution); brief §4.
 //!
-//! Stage 1 scope: Tier-1 stores only, no broker, no capabilities —
-//! `authority` is omitted from manifests (SI-7) and `checks` on tool_call
-//! events are empty until milestone 2 wires capability evaluation in.
+//! Manifests declare their enforcement mode, never a capability id (A21):
+//! `authority: {"mode":"brokered"}` for broker-fronted runs, omitted for
+//! observed runs. The capability binds backward via `bound_manifest` (M2)
+//! and forward via the broker's signed `grant` event (§6, M7); the gate
+//! enforces the brokered fail-closed rule in `broker.rs`.
 
 use crate::canon;
 use crate::keys::{Kek, Keystore, Role};
@@ -78,6 +80,15 @@ pub struct StepOutcome {
     pub span: String,
     pub drift: Vec<DriftReport>,
     pub remanifest: bool,
+}
+
+/// M7 (A21): the enforcement mode a manifest declares. `Observed` omits
+/// `authority` — the conservative default; `Brokered` seals
+/// `authority: {"mode":"brokered"}`, which the gate enforces fail-closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorityMode {
+    Observed,
+    Brokered,
 }
 
 impl Fabric {
@@ -515,12 +526,29 @@ impl Fabric {
     /// registered root, bind state + behavior + a fresh trace span, sign,
     /// record. If a parent manifest exists this is a re-manifest (M5 when
     /// the behavior hash changed; M6 makes frequent re-manifesting normal).
+    ///
+    /// This form declares no authority mode — an observed run (M7).
     pub fn step_boundary(
         &mut self,
         delegator: &str,
         delegate: &str,
         intent: &str,
         behavior: Value,
+    ) -> Result<StepOutcome, KernelError> {
+        self.step_boundary_with_mode(delegator, delegate, intent, behavior, AuthorityMode::Observed)
+    }
+
+    /// `step_boundary` with an explicit M7 authority-mode declaration.
+    /// `Brokered` seals `authority: {"mode":"brokered"}` into the body; the
+    /// gate then requires every effect to be capability-attributed with a
+    /// verified grant event at a lower substrate offset (A21, fail-closed).
+    pub fn step_boundary_with_mode(
+        &mut self,
+        delegator: &str,
+        delegate: &str,
+        intent: &str,
+        behavior: Value,
+        mode: AuthorityMode,
     ) -> Result<StepOutcome, KernelError> {
         let drift = self.check_drift()?;
 
@@ -556,7 +584,9 @@ impl Fabric {
         body.insert("delegate".into(), json!(delegate));
         body.insert("intent".into(), json!(intent));
         body.insert("state".into(), json!({ "roots": roots }));
-        // `authority` omitted in Stage 1 — SI-7.
+        if mode == AuthorityMode::Brokered {
+            body.insert("authority".into(), json!({ "mode": "brokered" }));
+        }
         body.insert("behavior".into(), behavior);
         body.insert(
             "trace".into(),

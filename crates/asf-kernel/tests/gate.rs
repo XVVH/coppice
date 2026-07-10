@@ -11,9 +11,24 @@
 //!   `destructive_ops_park_then_apply_on_approval`
 //! - Coherent multi-store promotion (sqlite whole-store rule, SI-18):
 //!   `sqlite_branch_change_promotes_whole_store`
+//! - M7 authority mode (A21): brokered fails closed on unattributed effects
+//!   (`m7_brokered_manifest_rejects_unattributed_calls`), the honest
+//!   brokered path gates clean with grant-before-effect ordering
+//!   (`m7_brokered_end_to_end_gates_clean`), and observed mode stays
+//!   lenient (`m7_observed_manifest_tolerates_unattributed_calls`).
+//! - A21 adversarial substitution/lineage cases: cross-manifest capability
+//!   substitution dies at the gate's M2 arm
+//!   (`gate_rejects_call_attributed_to_another_manifests_capability`),
+//!   unresolvable attribution fails closed
+//!   (`gate_fails_closed_on_unresolvable_capability_attribution`), a
+//!   multi-grant lineage gates clean
+//!   (`m7_brokered_run_with_two_grants_gates_clean`). Grant deletion and
+//!   reorder tamper belong to chain verification (trace.rs
+//!   `deleting_a_middle_event_breaks_the_chain`; offset-integrity residual
+//!   tracked as RF-13).
 
 use asf_kernel::broker::{Broker, BrokerError, Decision, PromotionOutcome};
-use asf_kernel::kernel::Fabric;
+use asf_kernel::kernel::{AuthorityMode, Fabric};
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
 use asf_kernel::trace;
 use rusqlite::Connection;
@@ -27,7 +42,9 @@ struct World {
     vault: PathBuf,
     memory_db: PathBuf,
     broker: Broker,
+    human: String,
     agent: String,
+    intent: String,
     manifest: String,
     branch: BTreeMap<String, PathBuf>,
     cap: String,
@@ -58,6 +75,14 @@ fn caveats() -> Vec<Value> {
 }
 
 fn setup() -> World {
+    setup_mode(AuthorityMode::Observed)
+}
+
+fn setup_brokered() -> World {
+    setup_mode(AuthorityMode::Brokered)
+}
+
+fn setup_mode(mode: AuthorityMode) -> World {
     let tmp = tempfile::tempdir().unwrap();
     let vault = tmp.path().join("vault");
     fs::create_dir_all(vault.join("inbox")).unwrap();
@@ -87,7 +112,7 @@ fn setup() -> World {
         .capture_intent(&human, &chan, "local_session", "vault maintenance", json!({}), None)
         .unwrap();
     let step = fabric
-        .step_boundary(&human, &agent, &intent, json!({"bundle":"sha256:g","skills":[]}))
+        .step_boundary_with_mode(&human, &agent, &intent, json!({"bundle":"sha256:g","skills":[]}), mode)
         .unwrap();
     let branch = fabric.create_branch(&step.manifest).unwrap();
 
@@ -101,7 +126,9 @@ fn setup() -> World {
         vault,
         memory_db,
         broker,
+        human,
         agent,
+        intent,
         manifest: step.manifest,
         branch,
         cap,
@@ -452,4 +479,235 @@ fn destructive_ops_park_then_apply_on_approval() {
         Err(BrokerError::NoSuchPromotion(_))
     ));
     let _ = w.agent;
+}
+
+/// M7/A21: under `authority: {"mode":"brokered"}` every effect must be
+/// capability-attributed. A kernel-recorded call with no capability in its
+/// summary (the SI-7 pre-broker shape) is a gate violation, not a tolerated
+/// unattributed record — declared-brokered never silently degrades to
+/// observed.
+#[test]
+fn m7_brokered_manifest_rejects_unattributed_calls() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/ok.md", "fine\n");
+    // An effect recorded outside the broker: no `capability` in the summary.
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.write",
+            br#"{"path":"inbox/side.md"}"#,
+            b"{}",
+            json!({"action_class": "write", "paths": ["inbox/side.md"]}),
+            json!([]),
+            Some("reversible"),
+        )
+        .unwrap();
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains("no capability attribution"), "{msg}");
+        }
+        other => panic!("brokered mode must reject unattributed effects: {other:?}"),
+    }
+    // Nothing merged: trunk untouched.
+    assert!(!w.vault.join("inbox/ok.md").exists());
+}
+
+/// M7/A21 happy path: the manifest declares brokered, mint's grant event
+/// precedes every recorded effect in substrate order, and the gate promotes
+/// clean. Also pins the declared shape of the sealed manifest body.
+#[test]
+fn m7_brokered_end_to_end_gates_clean() {
+    let mut w = setup_brokered();
+    let man = trace::get_object(&w.broker.fabric.conn, &w.manifest).unwrap();
+    assert_eq!(man["authority"]["mode"], "brokered");
+
+    agent_write(&mut w, "inbox/c.md", "new note\n");
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("attributed brokered run must gate clean: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(w.vault.join("inbox/c.md")).unwrap(), "new note\n");
+
+    // The forward edge exists and precedes the effect: a verified grant
+    // event for this manifest at a lower substrate offset than the call.
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    let grant = events
+        .iter()
+        .find(|e| e.kind == "grant" && e.manifest.as_deref() == Some(w.manifest.as_str()))
+        .expect("mint countersigned a grant event");
+    assert_eq!(grant.raw["body"]["capability"], json!(w.cap));
+    let call = events
+        .iter()
+        .find(|e| e.kind == "tool_call" && e.raw["body"]["summary"]["capability"] == json!(w.cap))
+        .expect("recorded call");
+    assert!(grant.offset < call.offset, "grant must precede the effect");
+}
+
+/// M7/A21: observed mode (authority absent) claims nothing and forbids
+/// nothing — an unattributed kernel-recorded call is tolerated at the gate,
+/// exactly as before A21. The declaration only ever adds constraints.
+#[test]
+fn m7_observed_manifest_tolerates_unattributed_calls() {
+    let mut w = setup();
+    let man = trace::get_object(&w.broker.fabric.conn, &w.manifest).unwrap();
+    assert!(man.get("authority").is_none(), "observed manifests omit authority");
+
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.write",
+            br#"{"path":"inbox/side.md"}"#,
+            b"{}",
+            json!({"action_class": "write", "paths": ["inbox/side.md"]}),
+            json!([]),
+            Some("reversible"),
+        )
+        .unwrap();
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("observed mode must tolerate unattributed records: {other:?}"),
+    }
+}
+
+/// Adversarial (A21 substitution): a call attributed to a capability bound
+/// to a DIFFERENT manifest must die at the gate's M2 arm. The claimed cap is
+/// a real, verifiable object — it just doesn't belong to this run's fork.
+#[test]
+fn gate_rejects_call_attributed_to_another_manifests_capability() {
+    let mut w = setup_brokered();
+    let old_cap = w.cap.clone();
+
+    // Re-manifest (the M5 shape): a new brokered manifest supersedes the
+    // first; the old capability stays bound to the old manifest.
+    let step2 = w
+        .broker
+        .fabric
+        .step_boundary_with_mode(
+            &w.human,
+            &w.agent,
+            &w.intent,
+            json!({"bundle":"sha256:g2","skills":[]}),
+            AuthorityMode::Brokered,
+        )
+        .unwrap();
+    let branch2 = w.broker.fabric.create_branch(&step2.manifest).unwrap();
+
+    // Forge: an effect in the new span claiming the OLD manifest's cap.
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.write",
+            br#"{"path":"inbox/x.md"}"#,
+            b"{}",
+            json!({"capability": old_cap, "action_class": "write", "paths": ["inbox/x.md"]}),
+            json!([]),
+            Some("reversible"),
+        )
+        .unwrap();
+
+    match w.broker.promote_manifest(&step2.manifest, &branch2) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains("different manifest"), "{msg}");
+        }
+        other => panic!("cross-manifest capability substitution must be rejected: {other:?}"),
+    }
+}
+
+/// Adversarial (A21 substitution): attribution to a capability id that
+/// resolves to no stored object fails the promotion outright — the check is
+/// never skipped, and nothing merges.
+#[test]
+fn gate_fails_closed_on_unresolvable_capability_attribution() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/ok.md", "fine\n");
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.write",
+            br#"{"path":"inbox/ghost.md"}"#,
+            b"{}",
+            json!({
+                "capability": "cap:0000000000000000000000000000000000000000000000000000000000000000",
+                "action_class": "write",
+                "paths": ["inbox/ghost.md"]
+            }),
+            json!([]),
+            Some("reversible"),
+        )
+        .unwrap();
+    let branch = w.branch.clone();
+    assert!(
+        w.broker.promote_manifest(&w.manifest, &branch).is_err(),
+        "unresolvable capability attribution must fail the gate"
+    );
+    // Nothing merged: trunk untouched.
+    assert!(!w.vault.join("inbox/ok.md").exists());
+}
+
+/// A21: multiple grants over one manifest are legal (re-mint, attenuation) —
+/// the authority lineage is the offset-ordered grant set. A brokered run
+/// using both the parent capability and an attenuated child gates clean,
+/// each claimed capability covered by its own preceding grant.
+#[test]
+fn m7_brokered_run_with_two_grants_gates_clean() {
+    let mut w = setup_brokered();
+    let child_caveats = vec![
+        json!({"dim":"action.allow","tools":["tool:vault@1.0"],"actions":["note.write"]}),
+        json!({"dim":"paths.write","globs":["inbox/**"]}),
+        json!({"dim":"budget.count","action_class":"write","max":2,"window":"run"}),
+        json!({"dim":"approval.min_auth","min":"local_session"}),
+    ];
+    let child = w
+        .broker
+        .attenuate(&w.cap, &w.agent, &w.manifest, child_caveats, vec![], "2026-12-01T00:00:00Z")
+        .unwrap();
+
+    agent_write(&mut w, "inbox/parent.md", "via parent cap\n");
+    // A write through the attenuated child capability.
+    let d = w
+        .broker
+        .propose_call(
+            &child,
+            "tool:vault@1.0",
+            "note.write",
+            &json!({"path": "inbox/child.md", "content": "via child cap\n"}),
+        )
+        .unwrap();
+    match d {
+        Decision::Allowed { ticket, .. } => {
+            fs::write(w.branch["fs:vault"].join("inbox/child.md"), "via child cap\n").unwrap();
+            w.broker.record_result(ticket, b"{}").unwrap();
+        }
+        other => panic!("expected allow under child cap: {other:?}"),
+    }
+
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("two-grant brokered run must gate clean: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(w.vault.join("inbox/parent.md")).unwrap(), "via parent cap\n");
+    assert_eq!(fs::read_to_string(w.vault.join("inbox/child.md")).unwrap(), "via child cap\n");
+
+    // Both grants exist for this manifest, and each precedes the call that
+    // claimed its capability.
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    let grant_offsets: BTreeMap<String, i64> = events
+        .iter()
+        .filter(|e| e.kind == "grant" && e.manifest.as_deref() == Some(w.manifest.as_str()))
+        .filter_map(|e| e.raw["body"]["capability"].as_str().map(|c| (c.to_string(), e.offset)))
+        .collect();
+    assert_eq!(grant_offsets.len(), 2);
+    for ev in events.iter().filter(|e| e.kind == "tool_call") {
+        if let Some(cap) = ev.raw["body"]["summary"]["capability"].as_str() {
+            assert!(grant_offsets[cap] < ev.offset, "grant precedes each claimed effect");
+        }
+    }
 }

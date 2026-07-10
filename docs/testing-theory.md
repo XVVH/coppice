@@ -47,10 +47,11 @@ canonical `scripts/ci test` lane runs both after the Rust test targets.
 **5. Negative space is tracked explicitly.** Invariants with no conformant
 test because their machinery or ratified representation does not exist yet:
 C3 (signed fabric→user messages), C4 (delivery ceilings), C5 (sender binding),
-M3 (Tier-3 `as_of` surfacing), M4 runtime behavior attestation, M7's brokered
-manifest authority edge (SI-21), the taint dimensions, and StandingRule schema
-enforcement (k≥3, counterfactuals, domain match). These are absences by
-sequencing, not oversight; each activates with its milestone. An untracked
+M3 (Tier-3 `as_of` surfacing), M4 runtime behavior attestation, the taint
+dimensions, and StandingRule schema enforcement (k≥3, counterfactuals, domain
+match). These are absences by sequencing, not oversight; each activates with
+its milestone. (M7's brokered-authority edge left this list with A21/SI-21:
+mode declaration + grant-event binding, tested in the gate suite.) An untracked
 untested invariant is how "the spec is the source of truth" quietly stops
 being true.
 
@@ -64,7 +65,7 @@ being true.
 | M4 loaded behavior attestation | behavior lineage is recorded, but first-call runtime attestation is absent | open implementation gap |
 | M5 re-manifest on behavior change | `m5_behavior_change_forces_remanifest` | covered |
 | M6 cheap/frequent manifests | exercised throughout multi-boundary tests; guidance rather than a binary predicate | exercised |
-| M7 observed vs brokered authority | SI-21 records the unresolved content-address cycle | blocked on ratification |
+| M7 authority mode + grant binding (A21) | `m7_brokered_manifest_rejects_unattributed_calls`, `m7_brokered_end_to_end_gates_clean` (grant-before-effect ordering), `m7_observed_manifest_tolerates_unattributed_calls`; the proxy suite now runs declared-brokered end-to-end | covered |
 | M8 attribution completeness | e2e, gate, proxy timing tests, generated state-machine histories | covered for current consumers |
 | C1 authority provenance | intent and escalation/approval integration tests | covered for current channels |
 | C2 agent outside approval path | real proxy/socket topology plus invented in-band method rejection | covered |

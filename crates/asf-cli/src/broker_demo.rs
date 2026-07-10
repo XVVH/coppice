@@ -5,7 +5,7 @@
 
 use anyhow::{bail, Result};
 use asf_kernel::broker::{Broker, Decision};
-use asf_kernel::kernel::Fabric;
+use asf_kernel::kernel::{AuthorityMode, Fabric};
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
 use asf_kernel::trace;
 use rusqlite::Connection;
@@ -35,8 +35,14 @@ pub fn run(dir: &Path) -> Result<()> {
     let chan = fabric.register_channel(&human, "local_session", b"tty", "local_session")?;
     let intent = fabric.capture_intent(&human, &chan, "local_session",
         "tidy the vault; touch nothing outside inbox and MOCs", json!({}), None)?;
-    let step = fabric.step_boundary(&human, &agent, &intent, json!({"bundle":"sha256:demo2","skills":[]}))?;
-    println!("manifest {}", step.manifest);
+    let step = fabric.step_boundary_with_mode(
+        &human,
+        &agent,
+        &intent,
+        json!({"bundle":"sha256:demo2","skills":[]}),
+        AuthorityMode::Brokered,
+    )?;
+    println!("manifest {} (authority mode: brokered)", step.manifest);
 
     let mut broker = Broker::new(fabric)?;
     broker.register_tool("tool:vault@1.0", json!([

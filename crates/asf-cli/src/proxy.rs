@@ -24,7 +24,7 @@ use crate::mcp;
 use anyhow::{Context, Result};
 use asf_kernel::broker::{Broker, Decision};
 use asf_kernel::capability::{reach_rank, reversibility_rank};
-use asf_kernel::kernel::Fabric;
+use asf_kernel::kernel::{AuthorityMode, Fabric};
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
 use asf_kernel::{tools, trace};
 use rusqlite::Connection;
@@ -224,7 +224,10 @@ pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
     };
 
     let behavior = json!({ "bundle": "sha256:asfd-stage2", "skills": [] });
-    let step = fabric.step_boundary(&human, &agent, &intent, behavior)?;
+    // A21/M7: this run is broker-fronted, and the manifest says so — the
+    // gate will require every effect to trace to a granted capability.
+    let step =
+        fabric.step_boundary_with_mode(&human, &agent, &intent, behavior, AuthorityMode::Brokered)?;
     for d in &step.drift {
         eprintln!("asfd: drift in {} attributed {} (ledger evt {})", d.store, d.attribution, d.event_id);
     }

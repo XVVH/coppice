@@ -284,6 +284,55 @@ part.
 
 ---
 
+## RF-13 — substrate offsets are index metadata, not signature-bound; cross-span ordering claims rest on them — open
+
+**Severity: low (defanged by the current trust boundary). Direction:
+FAIL-OPEN at future boundaries (export, backups, multi-actor); fail-closed
+griefing possible locally.** Found during the A21 adversarial-coverage
+review (2026-07-10). Event `offset` is the sqlite rowid: it appears in no
+signed body and — unlike `span`/`seq`/`kind`/`id` — is not cross-checked
+against the signed object by `verify_span`
+([trace.rs:266](crates/asf-kernel/src/trace.rs:266));
+`events_in_span` iterates `ORDER BY seq`, so within-span rowid order is
+never compared to chain order either. Every cross-span ordering claim
+therefore rests on unattested storage metadata: M7's grant-before-effect
+check (A21), drift `between` windows (SI-8), intent `captured_before`
+anchors (SI-10 — the countersigning event's offset is the proof's anchor),
+and the gate's approval-headroom reads.
+
+**Failure scenario:** an adversary with database write access who first
+drops the append-only triggers (the trigger-bypass scenario the suite
+already exercises for content tamper) renumbers rowids without touching a
+signed byte: no chain breaks, no signature fails. A grant renumbered
+"before" a call it actually followed launders an M7 ordering violation
+(fail-open); renumbered "after", it makes an honest run unpromotable
+(fail-closed griefing); drift windows and `captured_before` anchors shift
+arbitrarily.
+
+**Why not currently exploitable:** on a single-user fabric home, the access
+that writes `fabric.db` also reads `keys/` (same account) — that adversary
+holds the fabric key and can forge signed events outright, which no
+ordering hardening prevents. The same-user boundary is the audit's accepted
+dogfooding limitation. This finding matters exactly where that assumption
+breaks: exported ledgers verified by third parties, backups/replicas
+rewritable offline, and multi-actor deployments where DB access and key
+custody separate.
+
+**Fix directions** (bundle with the deferred trace-head-anchoring release
+gate — A21 makes M7 a new consumer of it):
+1. Cheap now: `verify_span` additionally checks within-span offset
+   monotonicity against seq. Catches renumbering that inverts a span's
+   internal order; cross-span-only reorders that preserve each span's
+   internal order still escape.
+2. Real fix: attest global order — a single per-home substrate chain
+   interleaving all spans (offset becomes a chained seq), or periodic
+   signed anchor events committing `(span, seq) → offset` mappings (the
+   §6 analog of SI-10's countersign pattern).
+3. Export rule regardless: exported evidence bundles carry chain order,
+   never rowids, as the ordering authority.
+
+---
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

@@ -134,6 +134,32 @@ is not required for enforcement. Early operator/security closure is always a
   restore rollback detection are production/distribution prerequisites for
   revocation, not merely audit polish.
 
+### Posture-ledger crosswalk
+
+W-8 directly closes **P25**, the docs↔implementation gap this review added to
+`posture-assumptions.md`: F1 says revocable while runtime authority has only
+expiry. It does not absorb the neighboring posture gaps:
+
+- **P22** supplies the durable dispatch boundary for live external effects;
+  SI-24 defines which side of that boundary revocation governs but W-8 alone
+  does not make in-flight effects durable.
+- **P10** still owns broker-outage behavior; SI-24 constrains it by forbidding
+  stale/unknown revocation state from proving liveness.
+- **P15 / RF-13** still own signed cross-span ordering, tail anchoring, and
+  rollback detection; revocation makes their absence an authority-resurrection
+  risk rather than fixing them.
+- **P20** still owns per-session context and same-home concurrency. W-8 must
+  serialize dispatch vs revoke independently of mutable home-global session
+  pointers.
+- **P21** still owns cross-host fencing. Distributed brokers need a shared
+  revocation high-water mark and may not dispatch from a stale partition.
+- **P3 / P4 / P5 / P12** still own proof-of-human and actuation-safe approval
+  surfaces under SI-23. Revocation supplies the kill-switch operation, not an
+  unreachable/authenticated surface on which to invoke it.
+- **P6 / P8** may trigger tool- or behavior-driven revocation once their own
+  attestation/containment work exists; revocation does not verify tool metadata
+  or behavior identity.
+
 ### Adjacent lifecycles — reserve the rule, do not overload the event
 
 The shared constitutional rule is temporal: authority-bearing objects are

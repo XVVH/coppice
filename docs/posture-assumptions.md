@@ -73,6 +73,10 @@ read surface into the exfiltration perimeter.
 - **P10** Broker/proxy **fails closed** on outage, contradicting the
   non-negotiable loud fail-open posture. → Broker-outage `on_broker_outage`
   (roadmap parked; audit; `AGENTS.md` boundary).
+- **P25** Capabilities have mandatory expiry but no early revocation despite
+  F1 calling them revocable. Once a live capability is compromised or no
+  longer wanted, authority survives until its timestamp closes. → SI-24;
+  W-8.
 - **P22** In-flight allowed-but-unrecorded calls held in memory; remote
   effect can land before it is recorded. → **Durable external-effect
   protocol** (roadmap parked); RF-3 (accepted residual).
@@ -88,6 +92,9 @@ default cannot save this class retroactively.
   "already believed wrong under live actuation." → **SI-23** (open, gated).
 - **P5** The approval socket's "out-of-band" property is a 0600 Unix socket
   owned by the operator — reachable by granted hands. → SI-23 gap 1.
+- **P25** No operator kill switch can close the actuation capability subtree;
+  expiry is the only implemented stop. → SI-24/W-8, composed with SI-23's
+  unreachable approval surface.
 - **P3 / P4** *(NEW gate wiring)* Approval `auth_strength` is hardcoded
   `"local_session"`, **asserted, never authenticated** — no peer-cred check,
   no user-presence proof — on both the daemon socket and the offline
@@ -110,6 +117,8 @@ default cannot save this class retroactively.
   (roadmap); audit "trust boundary is the Unix account."
 - **P3 / P4 / P5** Self-approvable escalations (above) — an agent with a
   shell/HID connects to the same socket and approves its own request.
+- **P25** A compromised agent retains already-minted authority until expiry;
+  no signed closure exists. → SI-24/W-8.
 - **P8** Placeholder identity: principal pubkeys `"01"`/`"02"`, one reused
   static intent, behavior hash literal `"sha256:asfd-stage2"`, no M4
   attestation. → audit High (brokered-recorded-as-observed); W-4(a).
@@ -154,12 +163,17 @@ default cannot save this class retroactively.
   disk-theft / backup surface.
 - **P22** durable call identity / idempotency for external effects (also
   G-EGRESS).
+- **P25** Early authority closure and incident-response kill switch are absent;
+  expiry alone cannot terminate a compromised long-lived capability. →
+  SI-24/W-8.
 
 ### G-PUBLISH — before publishing the spec / any cross-implementation artifact  *(relaxes single-implementation)*
 - **P24** JCS numeric constraint (`|n| < 2^53`) not enforced at seal/verify.
   → audit Medium; W-6 conformance (G2 differential vectors).
 - **P23** Object `id` type-prefix not covered by the signature (defanged
   locally by full-id lookup + fail-closed field reads). → RF-6 (open).
+- **P25** F1 calls broker-minted capabilities revocable, but the published
+  lifecycle has no early-closure semantics. → SI-24 must resolve before W-6.
 - SI-23 constraints and the brief §8 landscape claim should also be settled
   before publication (both already tracked).
 
@@ -167,7 +181,7 @@ default cannot save this class retroactively.
 
 ## The shortcut ledger (backing index)
 
-All 24, grouped by tracking status at time of sweep. `SU/COOP/LOCAL/NOACT/
+All 25 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 1SESS/1HUMAN/1TEN/DEBUG` = the invariant(s) that make each safe now.
 
 ### Tier 1 — items this sweep filed or newly gated
@@ -180,6 +194,7 @@ All 24, grouped by tracking status at time of sweep. `SU/COOP/LOCAL/NOACT/
 | P3 | Approval `auth_strength` hardcoded `local_session`, asserted-not-authenticated (socket) | `proxy.rs:334,339,347,351` | SU COOP | audit prose + **new G-ACTUATION/G-ADVERSARIAL gate** |
 | P4 | Same, offline `asf approve` path (`chan:local`) | `proxy.rs:638-666` | SU COOP | same |
 | P6 | Self-declared tool metadata unverified; no gate on third-party registration | `tools.rs:84-98`, `proxy.rs:48-69` | COOP (first-party only) | **new G-3P-TOOL gate**; W-4 + domain-taxonomy |
+| P25 | F1 calls capabilities revocable, but implementation/spec lifecycle has expiry only and no signed early closure | `asf-schema-spec.md:302`; `evaluate.rs:84-97`, `trace.rs:40-60`, `broker.rs` | COOP LOCAL NOACT DEBUG | **SI-24**; W-8; G-EGRESS/G-ACTUATION/G-ADVERSARIAL/G-PRODUCTION/G-PUBLISH |
 
 ### Tier 2 — items already tracked (this ledger just indexes and gates them)
 
@@ -219,3 +234,5 @@ All 24, grouped by tracking status at time of sweep. `SU/COOP/LOCAL/NOACT/
 - **Indexed** the other 18 shortcuts against their existing trackers, so the
   set is auditable and each transition has a checklist. Nothing in Tier 2 was
   under-tracked; the value there is the order-of-operations, not new findings.
+- **Follow-up (SI-24, 2026-07-11):** added P25 when the revocation design
+  review found that F1's "revocable" claim had no early-closure mechanism.

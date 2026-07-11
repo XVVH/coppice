@@ -152,6 +152,11 @@ vault itself is fine — pleasingly recursive).
 
 ## Graduation criteria
 
+The full set of shortcuts each transition un-safes — and where each fix is
+tracked — is the `posture-assumptions.md` ledger; the criteria below are the
+dogfooding-facing subset. Before flipping any posture invariant, read that
+transition's graduation gate there.
+
 - **Copy → live vault:** a few weeks of clean promotions, no revert
   surprises, denial-FP rate low and falling.
 - **Build the checkpoint boundary:** the ADR 0004 tripwire fires.
@@ -175,7 +180,23 @@ vault itself is fine — pleasingly recursive).
   approval surface is the vulnerable class — the "agent with a shell could
   approve its own escalations" hole above, generalized — and the
   conservative default cannot save it retroactively, so the gate is on
-  registration itself. Same pattern as the egress/R2 criterion.
+  registration itself. Same pattern as the egress/R2 criterion. Related
+  precondition: **approval authentication** — today `auth_strength` is
+  hardcoded `local_session`, asserted not proven (P3/P4 in the ledger); a
+  real proof-of-human (hardware-attested presence) must exist before either
+  actuation or an adversarial-agent posture, not just before SI-23's ranking
+  change.
+- **Register any third-party (non-first-party) tool:** only after tool
+  containment (W-4 sandbox) and domain-taxonomy governance exist. Tool
+  metadata (`reversibility`, `store`, `path_args`, class) is self-declared
+  trusted-mechanical (P6); a lying or buggy tool defeats every caveat keyed
+  on it, and there is no generic registration path today precisely because
+  that gate is unbuilt.
+- **Go multi-tenant, or accept a disk-theft / backup threat model:** only
+  after at-rest confidentiality is addressed — keys and secrets (RF-14) and
+  fabric-home state (RF-15) are plaintext, protected by filesystem perms
+  alone; the owner KEK sitting beside the ciphertext nullifies the payload
+  encryption at rest.
 - **Invite a second person:** only after multi-actor roots/visibility policy
   exists (§8.2 mechanism reserved, policy deferred) — not in v0.
 

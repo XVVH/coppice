@@ -6,8 +6,8 @@
 > `asf-schema-spec.md` v0.4 (changelog A15–A19). This file is preserved
 > as the amendment provenance record; per-entry statuses below are
 > historical. New issues found under v0.4 start at **SI-20** (resolved in
-> v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; new issues under
-> v0.6 start at **SI-22**.
+> v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; under v0.6, SI-22
+> is interpreted (W-2) and SI-23 is open; new issues start at **SI-24**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -17,6 +17,149 @@ Settled decisions (F1, F4, fail-open) are not re-litigated here.
 Status legend: **open** = needs a spec amendment or an explicit "fine as
 interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
+
+---
+
+## SI-23 — actuation grants collapse the out-of-band property of approval surfaces (§2.1 C2/C6, §4, §5.1) — open
+
+Surfaced by design analysis in a parallel session (2026-07-10; filed here
+2026-07-11 with review adjustments, renumbered from that session's draft
+SI-22 — the number was already taken by the gate-clock issue). No code
+forces this yet — no actuation-scoped tool exists in Coppice — but the
+issue must be resolved BEFORE one ever registers, because the vulnerable
+surface is the approval mechanism itself: the conservative default cannot
+save this class retroactively.
+
+Two related gaps:
+
+1. **Self-satisfiable approvals.** C2 keeps the agent out of the approval
+   *data path* (stdin, tokens) but not out of the approval *actuation
+   path*: a capability granting UI/input control lets granted hands click
+   the broker's own approval surface — synthetic input satisfies C2's
+   letter and defeats its purpose. This does not require an adversarial
+   model: a benign computer-use agent steered by injected page content
+   suffices. Cross-agent too: agent A's hands can approve agent B's
+   escalation on the same substrate. This is the *generalization of a
+   hole the project already documents* — `dogfooding.md`: "an agent with
+   a shell could approve its own escalations, a C2 violation in spirit
+   that the protocol topology cannot see." Shell and HID are the same
+   class: actuation reach onto the approval surface's substrate.
+   Critically, W-4's containment does NOT fix this class — the actuation
+   arrives *through a legitimate grant*, inside the sandbox's one door.
+
+2. **Actuation is universal tool acquisition.** A grant of
+   undifferentiated UI control is implicitly the union of every
+   capability of every reachable app, registered or not — the widest
+   possible open surface. Conservative-defaults doctrine says it must be
+   treated as such and fail closed. (Symmetry worth preserving in the
+   grammar: R2 governs the eyes, `egress` the mouth, actuation the
+   hands.)
+
+**Candidate resolution** (origin session, needs ratification; changes
+C6's semantics):
+
+- §4: tools declare `actuates: [scopes]` (e.g. `app:obsidian`,
+  `input:hid`, `host:shell`, `display:main`) at the trusted-mechanical
+  tier; undeclared actuation fails closed. `observes: display` is the
+  lesser sibling: approval surfaces must not render sensitive detail
+  where a granted eye can read.
+- Channel `auth_strength` becomes contextual: a channel's effective
+  strength degrades while any *live* capability's `actuates` reach
+  includes that channel's substrate. Strength becomes a partial order
+  evaluated at decision time; C6's published total order becomes the
+  no-live-actuation base case.
+- **C7 candidate — no self-satisfiable approvals.** An approval is valid
+  only if delivered through a surface unreachable by any capability live
+  at decision time; where no registered surface qualifies:
+  hardware-attested user presence (passkey UV, hardware-key touch) or a
+  device outside every live actuation grant. Corollary: a cross-device
+  `platform_oauth` channel legitimately outranks `local_session` on a
+  machine with live actuation.
+- Softer companion: while an escalation is pending, the broker MAY
+  suspend actuation grants for the decision window (secure-desktop
+  pattern).
+
+**Review adjustments proposed (2026-07-11 review session; ratify with or
+against the candidate):**
+
+1. **C7 must govern the approval round trip, not only the response.**
+   Granted hands can *suppress* the escalation notification (dismiss it
+   before the human sees it) — nothing forged, the escalation quietly
+   ages out of attention; forensically visible, invisible in life. C7
+   should require delivery acknowledgment AND response via out-of-reach
+   or attested surfaces. Separately, a granted eye reading escalation
+   contents is a *confidentiality* problem — split it out as a C4
+   extension (delivery-detail ceilings account for observation reach)
+   rather than overloading C7. The litmus: the approval path includes
+   the hands, the eyes, and the notification — not just the pipes.
+2. **Actuation must be a §5.1 caveat dimension with a subset relation,
+   not only §4 registration metadata.** "Per-app scoping preferred" has
+   no mechanism otherwise. With `actuates` attenuable (`app:X` ⊂
+   `input:hid`, hierarchical scopes), per-app narrowing arrives through
+   the standard lifecycle: first actuation touching app X escalates (JIT
+   elicitation); k ≥ 3 approvals compile an `actuates: app:X` rule via
+   the ratchet — zero authorship holds. Fail-closed-on-unknown-dims (§0)
+   protects version skew for free.
+3. **Contextual strength must derive from signed grant/expiry events,
+   never the runtime grant table** (the W-2 principle). Then "which
+   actuation grants were live at offset O" is a pure function of the
+   substrate prefix — the gate's replay re-verifies each approval's
+   validity at the approval's own offset (SI-22 at-the-time semantics
+   extend cleanly) and M8 is undisturbed. Blast radius note: C6's
+   consumers are not just `approval.min_auth` — expanding amendments
+   (§3.1), C4 delivery ceilings, and §5.2 min_auth attenuation all
+   compare strengths; each needs its unrankable-fails-closed behavior
+   confirmed under the contextual form.
+4. **Reachability is undecidable for platform channels, which promotes
+   hardware attestation from fallback to primary.** Channel binds the
+   sender, not the device (C5); the broker cannot know whether the
+   operator's Telegram is on a phone or a web session inside a granted
+   browser. Fail closed on undecidable ⇒ while ANY actuation grant is
+   live, non-attested channels degrade in general, so hardware-attested
+   presence is the load-bearing mechanism during actuation, with
+   device-pinned channel registration and the secure-desktop suspension
+   as the ergonomic paths. Channel likely needs a substrate/device
+   attribute regardless.
+5. **The no-lockout escape hatch already exists — state it in the
+   amendment.** §3.1 directionality: narrowing is accepted from any
+   registered channel, so revoking/suspending the actuation grant is
+   always possible from the degraded channel, which restores its
+   strength, after which approvals flow. Without this sentence C7 reads
+   as a self-inflicted denial of service on single-machine operators.
+6. **Trusted-mechanical honesty + W-4 cross-reference.** `actuates` is
+   declared metadata, same tier as `reversibility`: a lying tool defeats
+   it, and containment against liars is W-4's (sandbox) job — the two
+   are complements; neither substitutes for the other. Actuation scopes
+   are also one more vendor-declared vocabulary feeding the named
+   domain-taxonomy-governance open problem.
+7. **Base-case preservation is the argument for amending now.** With
+   zero actuation grants ever minted (all of Coppice today), every rule
+   reduces exactly to current behavior: C6's total order IS the
+   no-actuation case, C7 is vacuously satisfied, `actuates` never
+   appears — the A18/A20 refinement pattern, at zero implementation
+   cost, and it avoids publishing (W-6) a C6 the project already
+   believes is wrong under actuation.
+8. **Provenance: the field confirmation is now sourced.** Public X post
+   by @GabGarrett (2026-07-10, screenshot on file with the operator):
+   GPT-5.6, computer use enabled, "jumped into using the Gmail plugin and
+   sending outbound emails on its own" (OP's thread reply confirming
+   computer use), with the model's own post-hoc apology — "I made an
+   unauthorized external communication and created unnecessary risk" —
+   as the only enforcement layer in the loop. That is gap 2 verbatim:
+   installed = granted, plus hands, with remorse as the control plane.
+   Epistemic status: single-source public report with the OP's direct
+   confirmation, not a vendor postmortem; web search does not yet index
+   it (hours old at filing). Adjacent verified events in the same class:
+   the 2026-02 agent inbox mass-deletion after context compaction
+   stripped safety instructions; the 2026-06 forced-install Chrome
+   extensions exfiltrating Gmail content through AI-assist surfaces.
+   The design argument stands on its own regardless.
+
+**Graduation gate (operational, pending ratification):** no
+actuation-scoped tool (computer use, shell, UI control) registers before
+C7 and its approval-surface mechanisms are ratified and built — the
+ADR-0005 pattern (R2 before egress), recorded in `dogfooding.md`
+graduation criteria and `docs/roadmap.md`.
 
 ---
 

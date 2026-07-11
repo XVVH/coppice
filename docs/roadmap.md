@@ -108,8 +108,14 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Parked (trigger-gated — do not start without the trigger)
 
-- **F2 CID/DAG migration** — ADR 0002 tripwires (CAS growth, memory-db
-  size, SI-6 noise) or spec publication (W-6), whichever first.
+- **SI-23 actuation/approval-surface mechanisms (C7 candidate)** —
+  trigger: any actuation-scoped tool (computer use, shell, UI control)
+  approaching registration; the dogfooding graduation gate blocks
+  registration until ratified AND built. Ratifying the *constraints* now
+  is cheap (base case = current behavior) and should precede spec
+  publication (W-6) — C6's total order is already believed wrong under
+  live actuation. Design input to W-4 (the two are complements:
+  attestation/containment vs. approval-surface integrity).
 - **Checkpoint session boundary** — ADR 0004 tripwire (ops-per-promotion /
   conflict incidence).
 - **R2 read-authority family** — before the first `external_reach: live`

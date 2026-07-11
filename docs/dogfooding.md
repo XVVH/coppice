@@ -169,6 +169,13 @@ vault itself is fine — pleasingly recursive).
   the same scope (names are content: list results filter to scope, the
   `filter_tools_result` pattern). Adjacent open problem, not solved by
   this: A3 cross-run memory taint.
+- **Register any actuation-scoped tool (computer use, shell, UI control):**
+  only after SI-23 resolves and its approval-surface mechanisms exist (C7
+  candidate: no self-satisfiable approvals). Actuation reach onto the
+  approval surface is the vulnerable class — the "agent with a shell could
+  approve its own escalations" hole above, generalized — and the
+  conservative default cannot save it retroactively, so the gate is on
+  registration itself. Same pattern as the egress/R2 criterion.
 - **Invite a second person:** only after multi-actor roots/visibility policy
   exists (§8.2 mechanism reserved, policy deferred) — not in v0.
 

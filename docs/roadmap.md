@@ -96,6 +96,8 @@ decision, not by drift. From the 2026-07-10 review sessions:
   re-earns pins after skill mutation. Primitives already exist.
 - **Effect receipts** — broker-signed verifiable receipts (manifest +
   intent + capability refs) per external effect; the network-effect play.
+  (The *internal* durability side of the same primitive is parked as the
+  durable external-effect protocol below — the receipt is one stage of it.)
 - **Provenance-aware store interface** — publish the interface that turns
   A3 (memory taint) from open problem into an ecosystem standard; sidecar
   lineage index as reference implementation.
@@ -124,6 +126,21 @@ decision, not by drift. From the 2026-07-10 review sessions:
   bundle; production/live-egress release gates (security audit).
 - **Broker-outage loud fail-open + `on_broker_outage`** — live-egress
   integration.
+- **Durable external-effect protocol** — trigger: the first tool that
+  produces a real *external* effect (a remote side effect can land before
+  its result is recorded — Tier-1-local never has this problem). One
+  coherent staged protocol, currently scattered across three trackers,
+  consolidated here so it is reassembled as a unit rather than
+  rediscovered piecemeal at first egress:
+  `effect_intent → authority reservation → dispatch (idempotency key) →
+  effect receipt → state commit → completion receipt`. Its pieces already
+  live in: crash-atomic multi-root commit (parked, above), broker-outage
+  posture (parked, above), effect receipts (candidate), and durable
+  call-identity/idempotency (scalability analysis, "broker availability
+  and in-flight effects"). Surfaced by the 2026-07-10 design review as a
+  distinct synthesis; filed 2026-07-11 so first-egress work starts from
+  one design, not four references. Composes with the R2 read-authority
+  gate (both fire at first live-egress tool).
 - **Forensic crypto-shredding** — post-dogfooding release gate.
 - **Multi-actor roots/visibility, HA topology, model judge/clerk-as-model,
   Tier-2/3 stores** — deferred until the W-1..W-3 loop produces pull

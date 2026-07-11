@@ -197,6 +197,23 @@ ordering/anchoring work is the durable answer). Flagging rather than
 silently picking: the spec should state the clock, since it is
 enforcement semantics, not implementation detail.
 
+**Design-choice note — re-evaluation, not a signed decision certificate
+(2026-07-11).** A design review proposed the gate *verify a signed
+decision certificate* the broker emits at call time, rather than
+re-run the evaluator. W-2 deliberately chose re-evaluation. The reason is
+load-bearing and worth recording so it is not "fixed" later by adding
+certificates: a faithfully-signed certificate attests *what the broker
+decided*, so it reproduces a decision-time evaluator **bug** exactly
+(a buggy Allow verifies clean forever), whereas re-evaluation attests
+*what the capability actually permits* over the signed record and so
+catches the RF-1 class — a call the evaluator wrongly admitted. The
+verdict event already carries the full check record (SI-14) for
+legibility and audit; it is evidence, not the gate's authority. Net: the
+signed certificate is the weaker check for this job; re-evaluation
+subsumes it. (A certificate would still matter for *third-party*
+verification without the evaluator — a W-6 conformance/export concern,
+not a gate concern.)
+
 ---
 
 ## SI-21 — brokered manifest authority creates a content-address cycle (§3, M1/M2/M7) — RESOLVED (author, 2026-07-10)

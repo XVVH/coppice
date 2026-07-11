@@ -138,7 +138,7 @@ Everything else (behavior pinning, the drafting clerk, counterfactual replay, co
 
 ## 8. Landscape and whitespace
 
-The market is building every layer separately; nobody has unified them.
+The market is building these layers separately. A wave of "agent control plane" entrants now *claims* to unify them (Onepane's independent governance plane with rollback and audit; hyperscaler suites such as Microsoft Agent 365), but that unification is a management surface over the same separate layers — none binds authority to behavior version, and none makes standing grants contingent on the recoverable outcomes that earned them. That specific binding, not "nobody has unified," is the claim to defend. *(Landscape note, 2026-07-11: the naïve "nobody has unified" framing was retired after two independent design reviews and verified competitor positioning; the differentiator below survives it.)*
 
 **Workspace/filesystem:** hyperscalers re-plumbing object storage into live agent filesystems (S3 Files); enterprise NAS vendors exposing snapshot/clone/provision operations to agents via MCP.
 

@@ -125,15 +125,21 @@ default cannot save this class retroactively.
   pointers; a second session clobbers the first's M2 binding; the broker is
   behind one process mutex. → SessionContext refactor (roadmap parked).
 
-### G-MULTITENANT — before a multi-tenant / multi-user host  *(relaxes 1TEN / SU)*
-- **P1 / P2** *(NEW tracking)* Keys and credentials in cleartext at rest —
-  `secrets.json` bodies and the owner KEK beside the ciphertext it protects.
-  → **RF-14** (new).
-- **P17** *(NEW tracking)* Fabric-home state (CAS, branches, `fabric.db`) in
-  cleartext; confidentiality is filesystem perms only. → **RF-15** (new).
-- **P14** Plaintext content-hash addressing is a cross-tenant existence
-  oracle (global dedup discloses whether a known blob exists elsewhere). →
-  RF-7 (accepted; the multi-tenant angle is un-gated — flagged here).
+### G-MULTITENANT — before tenants share one uid, home, or storage namespace  *(relaxes 1TEN / SU)*
+Separate fabric homes under separate Unix identities retain today's enforced
+0700/0600 confidentiality boundary; they require fleet machinery, but not a
+new at-rest cryptographic boundary merely because another tenant exists. This
+gate applies when tenants share a uid/home, when privileged-host compromise is
+in scope, or when storage leaves that filesystem boundary.
+- **P1 / P2** *(NEW tracking)* Keys and credentials are cleartext inside that
+  boundary — `secrets.json` bodies and the owner KEK beside the ciphertext it
+  protects. → **RF-14** (new).
+- **P17** *(NEW tracking)* Fabric-home state (CAS, branches, `fabric.db`) is
+  cleartext inside that boundary. → **RF-15** (new).
+- **P14** Plaintext content hashes are a same-home confirmation oracle. They
+  become a cross-tenant oracle only if a future deployment introduces global
+  deduplication; keep addressing tenant-scoped or keyed in that topology. →
+  RF-7 (accepted); scalability analysis.
 - **P21** Gate serialization is host-local `flock` — no cross-host fencing.
   → HA topology (roadmap parked; scalability).
 
@@ -146,8 +152,9 @@ default cannot save this class retroactively.
   is an unsigned rowid backing all cross-span ordering claims. → RF-13
   (open); audit High; trace-head anchoring (roadmap parked).
 - **P13** Crypto-shred is logical only; WAL/freelist/snapshot/backup residue
-  survives (and RF-14's KEK survival defeats it regardless). → forensic
-  crypto-shredding (roadmap parked; audit; `AGENTS.md` boundary).
+  may retain old ciphertext and wrapped-DEK pairs, which RF-14's persistent
+  KEK can decrypt. KEK survival alone cannot recreate a deleted random DEK.
+  → forensic crypto-shredding (roadmap parked; audit; `AGENTS.md` boundary).
 - **P19** AEAD does not bind hash/size/media-type/DEK-id as associated data
   → swappable row linkage. → audit High (future format-version decision).
 - **P1 / P2 / P17** at-rest confidentiality (above) — production is also a
@@ -174,9 +181,9 @@ All 24, grouped by tracking status at time of sweep. `SU/COOP/LOCAL/NOACT/
 
 | P | Shortcut | Where | Safe-because | Now tracked as |
 |---|----------|-------|--------------|----------------|
-| P1 | Live credentials (`secrets.json`) plaintext at rest, never KEK-wrapped | `keys.rs:107-119` | SU 1TEN DEBUG | **RF-14 (new)**; G-MULTITENANT/G-PRODUCTION |
-| P2 | Owner KEK cleartext beside the ciphertext it protects → nullifies payload encryption + shred | `keys.rs:133-141`, `payload.rs:148` | SU 1TEN DEBUG | **RF-14 (new)** |
-| P17 | Fabric-home state (CAS/branches/`fabric.db`) plaintext; perms-only confidentiality | `snapshot.rs:85,223`, `kernel.rs:83` | SU 1TEN DEBUG | **RF-15 (new)** — the audit's unfiled RF-5 expansion |
+| P1 | Live credentials (`secrets.json`) plaintext at rest, never KEK-wrapped | `keys.rs:107-128` | SU 1TEN DEBUG | **RF-14 (new)**; G-MULTITENANT/G-PRODUCTION |
+| P2 | Owner KEK cleartext beside live ciphertext → nullifies live-payload encryption against a copied home; enables residual-pair recovery after shred | `keys.rs:131-141`, `payload.rs:130-197` | SU 1TEN DEBUG | **RF-14 (new)** |
+| P17 | Fabric-home state (CAS/branches/`fabric.db`) plaintext; perms-only confidentiality | `snapshot.rs:91-100,176-247`, `kernel.rs:95-107` | SU 1TEN DEBUG | **RF-15 (new)** — the audit's unfiled RF-5 expansion |
 | P3 | Approval `auth_strength` hardcoded `local_session`, asserted-not-authenticated (socket) | `proxy.rs:334,339,347,351` | SU COOP | audit prose + **new G-ACTUATION/G-ADVERSARIAL gate** |
 | P4 | Same, offline `asf approve` path (`chan:local`) | `proxy.rs:638-666` | SU COOP | same |
 | P6 | Self-declared tool metadata unverified; no gate on third-party registration | `tools.rs:84-98`, `proxy.rs:48-69` | COOP (first-party only) | **new G-3P-TOOL gate**; W-4 + domain-taxonomy |
@@ -192,8 +199,8 @@ All 24, grouped by tracking status at time of sweep. `SU/COOP/LOCAL/NOACT/
 | P10 | Fails closed on broker outage (spec wants fail-open-loud) | `proxy.rs:11-15,556-571` | LOCAL | roadmap parked; audit; `AGENTS.md` |
 | P11 | No mock router; external ⇒ needs `live` | `evaluate.rs:150-151` | LOCAL | egress gate (`dogfooding.md`) |
 | P12 | Flat `auth_rank` total order (`local_session==passkey`) | `capability.rs:47-58` | NOACT | SI-23 (open) |
-| P13 | Logical-only crypto-shred; residue survives | `payload.rs:4-5`, `keys.rs:114` | DEBUG 1TEN | roadmap parked; audit; `AGENTS.md` |
-| P14 | Plaintext-hash confirmation oracle; cross-tenant existence disclosure | `payload.rs:74` | 1TEN | RF-7 (accepted; multi-tenant angle flagged here) |
+| P13 | Logical-only crypto-shred; old ciphertext + wrapped-DEK pairs may survive | `payload.rs:4-5,172-197`, `keys.rs:131-141` | DEBUG 1TEN | roadmap parked; audit; `AGENTS.md` |
+| P14 | Plaintext-hash confirmation oracle; cross-tenant only if future storage deduplicates globally | `payload.rs:71-100` | 1TEN | RF-7 (accepted; global-dedup topology flagged here) |
 | P15 | No durable trace head; unsigned `offset` backs ordering claims | `trace.rs:236,266`; `broker.rs` | DEBUG 1TEN | RF-13 (open); audit High |
 | P16 | Promotion/revert not crash-atomic across roots | `snapshot.rs`, `kernel.rs`, `broker.rs` | DEBUG | audit High; roadmap parked; scalability |
 | P18 | Drift attributed to the one human by default | `kernel.rs:448-453` | 1HUMAN | multi-actor (parked); SI-20; `dogfooding.md` |

@@ -192,11 +192,15 @@ transition's graduation gate there.
   trusted-mechanical (P6); a lying or buggy tool defeats every caveat keyed
   on it, and there is no generic registration path today precisely because
   that gate is unbuilt.
-- **Go multi-tenant, or accept a disk-theft / backup threat model:** only
-  after at-rest confidentiality is addressed — keys and secrets (RF-14) and
-  fabric-home state (RF-15) are plaintext, protected by filesystem perms
-  alone; the owner KEK sitting beside the ciphertext nullifies the payload
-  encryption at rest.
+- **Co-locate tenants inside one uid or fabric home:** only after tenant-
+  scoped authorization and storage isolation exist. Encryption alone is not
+  tenant isolation. Separate homes under separate Unix identities preserve
+  today's enforced filesystem boundary, though the fleet machinery in the
+  scalability analysis is still unbuilt.
+- **Accept an offline disk-theft / untrusted-backup threat model:** only after
+  at-rest confidentiality is addressed — keys and secrets (RF-14) and
+  fabric-home state (RF-15) are plaintext inside the filesystem boundary;
+  the owner KEK copied with the database nullifies live-payload encryption.
 - **Invite a second person:** only after multi-actor roots/visibility policy
   exists (§8.2 mechanism reserved, policy deferred) — not in v0.
 

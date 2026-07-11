@@ -341,37 +341,48 @@ exposure is the crown jewels.** Surfaced by the posture-assumptions sweep
 a 0700 dir, no encryption:
 
 1. **`secrets.json`** — the real credentials the broker injects into tool
-   calls, stored as plaintext JSON ([keys.rs:107-119](crates/asf-kernel/src/keys.rs:107),
+   calls, stored as plaintext JSON ([keys.rs:107-128](../crates/asf-kernel/src/keys.rs#L107-L128),
    `secret_set`/`secret_get`). Unlike payloads, these are **never**
    KEK-wrapped. The whole "agent never holds the real key" property
    protects the *agent context*; it does not protect the *disk*.
 2. **`owner.kek`** — the owner KEK as a raw 32-byte cleartext file
-   ([keys.rs:133-141](crates/asf-kernel/src/keys.rs:133)), sitting beside
+   ([keys.rs:131-141](../crates/asf-kernel/src/keys.rs#L131-L141)), sitting beside
    the ciphertext and DB it protects. Consequence: the payload AES-256-GCM
-   encryption we *did* build ([payload.rs:148](crates/asf-kernel/src/payload.rs:148))
+   encryption we *did* build ([payload.rs:130-155](../crates/asf-kernel/src/payload.rs#L130-L155))
    provides **zero** at-rest confidentiality against any reader who can
-   open `fabric.db` — because that same reader holds `keys/` — and
-   crypto-shredding is defeated by KEK survival (the DEKs are wrapped to a
-   key that never leaves the disk).
+   copy both `fabric.db` and `keys/`. This is distinct from logical shred:
+   shred deletes the live wrapped DEK and clears the live ciphertext
+   ([payload.rs:172-197](../crates/asf-kernel/src/payload.rs#L172-L197)), so
+   the KEK alone cannot reconstruct a random destroyed DEK. The forensic
+   gap is conditional but real: if WAL/freelist residue, snapshots, or
+   backups retain both an old ciphertext and its wrapped DEK, the persistent
+   KEK makes that recovered pair decryptable.
 
-**Failure scenario:** any of — a second local uid, a stolen disk or
-laptop, an unencrypted backup, a multi-tenant host, or a same-uid
-compromised process with a shell — reads live credentials and the master
-key directly. Every payload ever encrypted, and every future one, is
-readable; every shred is reversible.
+**Failure scenario:** any actor that bypasses or legitimately holds the
+filesystem boundary — a same-uid compromised process, privileged host
+compromise, an unprotected offline disk, or an unencrypted backup containing
+both the database and keys — reads live credentials and decrypts live
+payloads. A shredded payload is recoverable only where that actor also finds
+residual or historical copies of both its ciphertext and wrapped DEK. A
+separate unprivileged Unix uid is blocked by the enforced 0700/0600 modes;
+multi-user deployment does not by itself bypass that boundary.
 
-**Why not currently exploitable:** same-Unix-user + single-tenant + debug
-posture (the accepted dogfooding trust boundary). It bites the moment any
-of those relaxes.
+**Why accepted for current dogfooding:** same-Unix-user + single-tenant +
+debug posture explicitly excludes hostile same-uid processes and offline
+storage/backup compromise. The finding bites when those threats enter scope,
+or when tenants share one uid or fabric home; isolated per-uid homes retain
+the present filesystem boundary.
 
 **Prior tracking:** UNTRACKED as a confidentiality finding. RF-5 covered
 only the *directory perms leaking `secrets.json`'s filename*; the audit
 mentioned `keys.rs:114` only as *forensic residue* under crypto-shredding.
 Neither files the plaintext storage of the secret bodies or the KEK, nor
-the fact that the KEK-beside-ciphertext nullifies the payload encryption.
+the fact that the KEK-beside-ciphertext nullifies live-payload encryption
+against a copied fabric home.
 
-**Fix directions** (post-dogfooding graduation gate — bundled with forensic
-crypto-shredding, which is the same root cause): OS keychain / secure
+**Fix directions** (post-dogfooding graduation gate, coordinated with
+forensic crypto-shredding because key custody controls whether recovered
+wrapped DEKs remain useful): OS keychain / secure
 enclave custody for the KEK and secrets; or a passphrase/hardware-derived
 KEK never written in cleartext; or remote key custody (the scalability
 analysis's unbuilt fleet machinery). Tracked in the posture-assumptions
@@ -382,19 +393,21 @@ ledger under the multi-user / multi-tenant / production graduation gates.
 **Severity: medium. Direction: EXPOSURE.** Surfaced by the
 posture-assumptions sweep (2026-07-11); this is the RF-5 *expansion the
 audit explicitly asked for and that was never filed*
-([security audit](docs/security-correctness-audit-2026-07-09.md), "RF-5
+([security audit](security-correctness-audit-2026-07-09.md), "RF-5
 should be expanded to cover plaintext fabric home, CAS, branches"). CAS
-blobs ([snapshot.rs:85](crates/asf-kernel/src/snapshot.rs:85),
-[:223](crates/asf-kernel/src/snapshot.rs:223)), materialized session
+blobs ([snapshot.rs:91-100](../crates/asf-kernel/src/snapshot.rs#L91-L100),
+[:176-247](../crates/asf-kernel/src/snapshot.rs#L176-L247)), materialized session
 branches, and `fabric.db` (events, signed objects, and payload ciphertext)
 are stored in the clear; confidentiality rests entirely on the forced
 0700/0600 perms on the home. Distinct from RF-14 (that is keys/secrets —
 the crown jewels; this is the user's own content and trace).
 
-**Failure scenario:** traversable parent dirs, a second local uid, disk
-theft, or a multi-tenant host expose the full vault content, branch working
-state, and trace. Note the payload ciphertext in `fabric.db` is only as
-protected as RF-14's KEK — i.e. not, at rest.
+**Failure scenario:** a raw disk/backup copy, privileged or same-uid
+compromise, or tenants deliberately co-located inside one uid/home expose the
+full vault content, branch working state, and trace. The enforced home modes
+protect against an ordinary second uid, and separate per-uid fabric homes
+preserve that boundary. Note the payload ciphertext in `fabric.db` is only as
+protected against an offline copy as RF-14's colocated KEK.
 
 **Prior tracking:** the *perms hardening* was done (audit resolved 0700/0600
 across the home); the *plaintext-at-rest* residual was flagged for an RF-5
@@ -402,7 +415,10 @@ expansion that never happened. NOTED-NOT-FILED until now.
 
 **Fix directions:** at-rest encryption of the fabric home (envelope
 encryption under RF-14's custody fix), or full-disk/OS-level encryption as
-the deployment floor. Same graduation gates as RF-14.
+the offline-storage deployment floor. Shared-home tenancy additionally needs
+tenant-scoped authorization and storage isolation; encryption alone does not
+provide it. Separate homes under separate Unix identities remain a valid
+interim multi-user boundary.
 
 ---
 

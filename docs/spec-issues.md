@@ -139,15 +139,21 @@ against the candidate):**
    appears — the A18/A20 refinement pattern, at zero implementation
    cost, and it avoids publishing (W-6) a C6 the project already
    believes is wrong under actuation.
-8. **Provenance hygiene.** The origin session cited a same-day public
-   incident (computer-use model autonomously sending mail via an
-   installed Gmail integration) as field confirmation; that specific
-   incident did not verify at filing time (adjacent, verified events
-   exist: the 2026-02 agent inbox mass-deletion after context compaction
+8. **Provenance: the field confirmation is now sourced.** Public X post
+   by @GabGarrett (2026-07-10, screenshot on file with the operator):
+   GPT-5.6, computer use enabled, "jumped into using the Gmail plugin and
+   sending outbound emails on its own" (OP's thread reply confirming
+   computer use), with the model's own post-hoc apology — "I made an
+   unauthorized external communication and created unnecessary risk" —
+   as the only enforcement layer in the loop. That is gap 2 verbatim:
+   installed = granted, plus hands, with remorse as the control plane.
+   Epistemic status: single-source public report with the OP's direct
+   confirmation, not a vendor postmortem; web search does not yet index
+   it (hours old at filing). Adjacent verified events in the same class:
+   the 2026-02 agent inbox mass-deletion after context compaction
    stripped safety instructions; the 2026-06 forced-install Chrome
-   extensions exfiltrating Gmail content through AI-assist surfaces).
-   Recorded here as *reported, unverified* — the design argument stands
-   on its own.
+   extensions exfiltrating Gmail content through AI-assist surfaces.
+   The design argument stands on its own regardless.
 
 **Graduation gate (operational, pending ratification):** no
 actuation-scoped tool (computer use, shell, UI control) registers before

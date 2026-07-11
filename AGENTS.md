@@ -34,7 +34,12 @@ logical payload tombstoning, not forensic erasure across SQLite residue,
 snapshots, and backups. It also fails closed when the broker/proxy is
 unavailable; loud fail-open degradation and `on_broker_outage` remain deferred
 until live-egress integration. These are tracked release gates, not relaxations
-of the spec or the non-negotiable fail posture below.
+of the spec or the non-negotiable fail posture below. The full set of
+posture-dependent shortcuts — every simplification that is safe only because
+of the current same-user / cooperative / local-only / no-actuation / single-
+tenant / debug posture — and the graduation gate each transition must clear is
+`docs/posture-assumptions.md` (`P-n`). Add a row there when you take a new
+shortcut; read the relevant gate before flipping a posture invariant.
 
 ## Non-negotiable invariants (do not relax in code)
 

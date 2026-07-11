@@ -99,6 +99,10 @@ Open implementation findings are tracked in
 [docs/review-findings.md](docs/review-findings.md) (`RF-n`); spec ambiguities
 in [docs/spec-issues.md](docs/spec-issues.md) (`SI-n`); in-flight and queued
 work in [docs/roadmap.md](docs/roadmap.md) (`W-n` — decisions made in
-conversation land there before build). Dogfooding setup and
+conversation land there before build); the shortcuts our current
+debug/dogfooding posture relies on — and the graduation gate each posture
+transition must clear — in
+[docs/posture-assumptions.md](docs/posture-assumptions.md) (`P-n`).
+Dogfooding setup and
 methodology (corpus, wiring, metrics, graduation criteria) live in
 [docs/dogfooding.md](docs/dogfooding.md).

@@ -1110,3 +1110,63 @@ fn revoke_via_socket_kills_authority_mid_session() {
     );
     assert!(!vault.join("post.md").exists());
 }
+
+/// The kill switch's scripting contract: `asf revoke` must exit non-zero
+/// when the revocation did not take effect — an operator's
+/// `asf revoke … || page-me` must fire on a typo'd id, not narrate
+/// failure to nobody with exit 0. The happy path (including an idempotent
+/// re-kill of an already-closed capability) exits zero.
+#[test]
+fn revoke_cli_exit_status_reflects_outcome() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    // A finished session leaves a home with one minted capability and no
+    // daemon — the offline path.
+    let mut p = Proxy::start(&home, &vault);
+    init_session(&mut p);
+    let r = p.call_tool("note.write", json!({ "path": "n.md", "content": "x" }));
+    assert_eq!(r["isError"], false, "{r}");
+    p.finish();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .args([
+            "revoke",
+            "--home",
+            home.to_str().unwrap(),
+            "cap:doesnotexist",
+            "--reason",
+            "compromise",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "failed revocation must exit non-zero: stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+
+    let cap: String = rusqlite::Connection::open(home.join("fabric/fabric.db"))
+        .unwrap()
+        .query_row(
+            "SELECT id FROM objects WHERE kind = 'capability' ORDER BY rowid LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for round in ["first kill", "idempotent retry"] {
+        let ok = Command::new(env!("CARGO_BIN_EXE_asf"))
+            .args(["revoke", "--home", home.to_str().unwrap(), &cap, "--reason", "compromise"])
+            .output()
+            .unwrap();
+        assert!(
+            ok.status.success(),
+            "{round} must exit zero: stdout={} stderr={}",
+            String::from_utf8_lossy(&ok.stdout),
+            String::from_utf8_lossy(&ok.stderr),
+        );
+    }
+}

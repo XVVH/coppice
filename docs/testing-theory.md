@@ -80,7 +80,7 @@ failure — with review and mutation testing.
 | M6 cheap/frequent manifests | exercised throughout multi-boundary tests; guidance rather than a binary predicate | exercised |
 | M7 authority mode + grant binding (A21) | `m7_brokered_manifest_rejects_unattributed_calls`, `m7_brokered_end_to_end_gates_clean` (grant-before-effect ordering), `m7_observed_manifest_tolerates_unattributed_calls`; the proxy suite now runs declared-brokered end-to-end | covered |
 | M8 attribution completeness | e2e, gate, proxy timing tests, generated state-machine histories | covered for current consumers |
-| §5.4/A22 capability closure | the A22 contract (19 tests): decision-time closure in tests/broker.rs, gate liveness-at-offset matrix in tests/gate.rs, socket kill switch in proxy_smoke; targeted `a22_*` mutation lane | covered |
+| §5.4/A22 capability closure | the A22 contract (22 tests): decision-time closure in tests/broker.rs, gate liveness-at-offset matrix in tests/gate.rs, socket kill switch + CLI exit-status contract in proxy_smoke; targeted `a22_*` mutation lane | covered |
 | C1 authority provenance | intent and escalation/approval integration tests | covered for current channels |
 | C2 agent outside approval path | real proxy/socket topology plus invented in-band method rejection | covered |
 | C3–C5 | channel/delivery machinery absent | future milestone |
@@ -176,8 +176,12 @@ which no existing event occupies; excluded with `-E` and documented in
 survived because brokered-mode tests mask the a22 activation path behind
 the m7 check. The killer
 (`a22_non_grant_event_cannot_activate_capability_in_observed_mode`)
-pins the observed-mode path where a22 is the only activation check; the
-repeat run catches all 36 viable mutants.
+pins the observed-mode path where a22 is the only activation check. The
+pre-merge review then added the span-placement clause to
+`a22_grant_bindings` (grants activate only from the fabric-lifetime
+span), whose mutants
+`a22_grant_on_session_span_activates_nothing` kills on the same
+observed-mode surface; the current lane catches all 38 viable mutants.
 
 **G6. Soak / growth.** Scheduled CI runs release mode with deeper generated
 case counts. A true thousands-of-events/files run remains: ledger size, WAL
@@ -197,7 +201,7 @@ in broker.rs (`a22_revoke_offsets`/`a22_grant_bindings`/`a22_ancestry`/
 `a22_state_at` — the spec's `capability_state_at`, decomposed): a
 structural precondition in front of caveat evaluation, never a caveat
 dimension, shared verbatim by decision time (at the current head) and gate
-replay (at each effect's own offset). The A22 two-sided contract (19
+replay (at each effect's own offset). The A22 two-sided contract (22
 tests) covers the full matrix below; the scheduled `a22_*` mutation lane
 guards the predicates. Matrix, all landed:
 call before revoke succeeds; direct and ancestor revoke deny later calls —
@@ -207,14 +211,21 @@ evaluating manifest); child-only revoke preserves parent/siblings; revoke is
 non-retroactive and parked promotions of pre-revoke work remain approvable;
 unsigned rows move nothing (the view is event-derived) and a revoke naming
 an id no capability bears affects no other capability, while a
-verified-but-anomalous revoke (wrong `manifest` field, unexpected span)
-still closes its target, loudly — §5.4's doubt-never-widens, two-sided;
+verified-but-anomalous revoke (wrong `manifest` field, unexpected span,
+unpaired C1 provenance) still closes its target, loudly — each anomaly
+kind surfaced in `trace_check.closure_anomalies` — §5.4's
+doubt-never-widens, two-sided; the activation edge keeps the opposite
+posture: grants activate ONLY from the fabric-lifetime span, so a signed
+grant parked on a session span activates nothing at decision time or (in
+observed mode, where a22 is the sole activation check) at the gate;
 same-id re-grant (including revoked-before-first-grant) and post-revoke
 attenuation cannot reactivate, and the broker refuses to grant a closed id;
 ancestor earliest-grants must be well-ordered;
 approvals/exemptions cannot resurrect and closure denials are
 non-escalatable; a `revoke` event is accepted and an `expiry` event is no
-longer emittable (the kind left §6 with A22);
+longer emittable (the kind left §6 with A22); `asf revoke` exits non-zero
+when the revocation did not take effect (the kill switch's scripting
+contract) and zero on idempotent re-kills;
 and dispatch vs revoke has one signed total order. The external-effect form
 waits for the durable dispatch protocol rather than testing an in-memory
 ticket as if it were a receipt. The W-9 corpus verdict-invariance

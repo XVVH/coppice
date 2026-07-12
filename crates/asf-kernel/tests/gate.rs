@@ -1528,3 +1528,122 @@ fn a22_non_grant_event_cannot_activate_capability_in_observed_mode() {
     record_claimed_write(&mut w, &ungranted, "inbox/nogrant.md");
     assert_m7_rejected_without_promotion(&mut w, "no verified grant binds", "inbox/nogrant.md");
 }
+
+/// Append a fabric-signed event to an arbitrary span — for adversarial
+/// placement cases (§6 records authority acts on the fabric-lifetime span;
+/// these tests park them elsewhere on purpose).
+fn append_event_on_span(w: &mut World, span: &str, manifest: &str, kind: &str, body: Value) {
+    let sk = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    trace::append(
+        &mut w.broker.fabric.conn,
+        &sk,
+        span,
+        Some(manifest),
+        kind,
+        body,
+        "2026-07-12T00:00:01Z",
+    )
+    .unwrap();
+}
+
+fn run_span_of(w: &World, manifest: &str) -> String {
+    trace::get_object(&w.broker.fabric.conn, manifest).unwrap()["trace"]["span"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a22_grant_on_session_span_activates_nothing() {
+    // Observed mode: m7's brokered-only ordering check is skipped, so the
+    // a22 view is the ONLY activation check — exactly the surface where a
+    // misplaced grant would otherwise widen authority. §6 records
+    // authority acts on the fabric-lifetime span; a signed, body-perfect
+    // grant parked on a session span is an anomaly, and activation
+    // anomalies never widen (§5.4 doubt-never-widens, activation side —
+    // the deliberate asymmetry with revokes, which close from any span).
+    let mut w = setup();
+    let orphan = store_ungranted_capability(&mut w);
+    let run_span = run_span_of(&w, &w.manifest);
+    let man = w.manifest.clone();
+    append_event_on_span(
+        &mut w,
+        &run_span,
+        &man,
+        "grant",
+        json!({ "capability": orphan, "parent": null }),
+    );
+
+    // Decision time: not activated.
+    match w
+        .broker
+        .propose_call(&orphan, "tool:vault@1.0", "note.write", &json!({"path":"inbox/x.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Denied { structural: Some(s), .. } => {
+            assert!(s.contains("no verified grant binds"), "{s}");
+        }
+        other => panic!("session-span grant must not activate at decision time: {other:?}"),
+    }
+    // Gate, observed mode: not activated either.
+    record_claimed_write(&mut w, &orphan, "inbox/misplaced.md");
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant binds", "inbox/misplaced.md");
+}
+
+#[test]
+fn a22_unexpected_span_revoke_closes_loudly() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/pre-span.md", "authorized before closure\n");
+    // A signature-verified revoke emitted on the RUN span instead of the
+    // fabric-lifetime span, with unpaired C1 provenance (channel set,
+    // auth_strength null). Doubt never widens: it still closes — and BOTH
+    // anomalies surface loudly in the gate report.
+    let run_span = run_span_of(&w, &w.manifest);
+    let (cap, chan, man) = (w.cap.clone(), w.chan.clone(), w.manifest.clone());
+    append_event_on_span(
+        &mut w,
+        &run_span,
+        &man,
+        "revoke",
+        json!({ "capability": cap, "reason": "compromise", "channel": chan, "auth_strength": null }),
+    );
+
+    // Closure holds at decision time.
+    match w
+        .broker
+        .propose_call(&cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/y.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Denied { structural: Some(s), .. } => assert!(s.contains("revoked"), "{s}"),
+        other => panic!("unexpected-span revoke must still close: {other:?}"),
+    }
+
+    // Pre-revoke work promotes (non-retroactive); both anomalies are loud.
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("pre-revoke work must promote: {other:?}"),
+    }
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    let promo = events.iter().rev().find(|e| e.kind == "promotion").unwrap();
+    let anomalies: Vec<&str> = promo.raw["body"]["trace_check"]["closure_anomalies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(anomalies.len(), 2, "{anomalies:?}");
+    assert!(
+        anomalies.iter().any(|a| a.contains("instead of the fabric-lifetime span")),
+        "{anomalies:?}"
+    );
+    assert!(
+        anomalies.iter().any(|a| a.contains("unpaired C1 provenance")),
+        "{anomalies:?}"
+    );
+}

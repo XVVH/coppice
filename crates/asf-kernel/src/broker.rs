@@ -229,7 +229,7 @@ impl Broker {
         let events = trace::events_of_kinds(&self.fabric.conn, &["grant", "revoke"])
             .map_err(|e| format!("authority view unavailable: {e} (fail closed)"))?;
         let vk = self.fabric.fabric_vk();
-        let grants = a22_grant_bindings(&events, &vk);
+        let grants = a22_grant_bindings(&events, &vk, self.fabric.substrate_span());
         let revokes = a22_revoke_offsets(&events, &vk);
         let head = trace::head_offset(&self.fabric.conn)
             .map_err(|e| format!("substrate head unavailable: {e} (fail closed)"))?;
@@ -970,15 +970,24 @@ fn a22_revoke_offsets(
 /// A21's exact-binding activation edge for every link of an ancestry chain
 /// (`m7_grant_offsets` is the per-manifest projection of the same edge).
 /// Activation doubt resolves to not-granted: unverifiable rows activate
-/// nothing, and the binding manifest is read from the SIGNED raw, never
-/// the index column.
+/// nothing; the binding manifest and span are read from the SIGNED raw,
+/// never the index columns; and a grant activates ONLY from the
+/// fabric-lifetime span (§6 records authority acts there — a signed grant
+/// parked on a session span is an anomaly, and anomalies never widen
+/// authority). The deliberate asymmetry with [`a22_revoke_offsets`]:
+/// closure tolerates placement anomalies (doubt narrows), activation
+/// demands exact form.
 fn a22_grant_bindings(
     events: &[trace::EventRow],
     vk: &ed25519_dalek::VerifyingKey,
+    substrate_span: &str,
 ) -> BTreeMap<(String, String), i64> {
     let mut grants = BTreeMap::new();
     for ev in events {
-        if ev.kind == "grant" && canon::verify(&ev.raw, vk).is_ok() {
+        if ev.kind == "grant"
+            && ev.raw["span"].as_str() == Some(substrate_span)
+            && canon::verify(&ev.raw, vk).is_ok()
+        {
             if let (Some(cap), Some(man)) = (
                 ev.raw["body"]["capability"].as_str(),
                 ev.raw["manifest"].as_str(),
@@ -1231,19 +1240,40 @@ impl Broker {
         // A22/§5.4: the closure view, shared verbatim with decision time.
         // Revokes resolve by capability id across the whole substrate —
         // never filtered by the evaluating manifest (an M2 sub-agent child
-        // dies with its ancestor's revoke).
-        let a22_grants = a22_grant_bindings(&all_events, &self.fabric.fabric_vk());
+        // dies with its ancestor's revoke); grants activate only from the
+        // fabric-lifetime span (activation demands exact form).
+        let a22_grants =
+            a22_grant_bindings(&all_events, &self.fabric.fabric_vk(), substrate_span);
         let a22_revokes = a22_revoke_offsets(&all_events, &self.fabric.fabric_vk());
-        // §5.4 doubt-never-widens, loud side: a verified revoke whose
-        // manifest field disagrees with its target's bound_manifest still
-        // closes — the inconsistency surfaces here as substrate-integrity
-        // signal, ledger-visible through the promotion event's trace_check.
+        // §5.4 doubt-never-widens, loud side: a verified revoke with an
+        // anomalous body or placement still closes — but every
+        // inconsistency surfaces here as substrate-integrity signal,
+        // ledger-visible through the promotion event's trace_check:
+        // manifest field vs the target's bound_manifest, emission on an
+        // unexpected span, C1 provenance pairing (channel and
+        // auth_strength travel together), a missing target, or an empty
+        // reason. A kill that needed anomaly tolerance to land is a kill
+        // the operator should hear about.
         let mut closure_anomalies: Vec<String> = Vec::new();
         for ev in &all_events {
             if ev.kind != "revoke" || canon::verify(&ev.raw, &self.fabric.fabric_vk()).is_err() {
                 continue;
             }
-            let Some(target) = ev.raw["body"]["capability"].as_str() else { continue };
+            let body = &ev.raw["body"];
+            let Some(target) = body["capability"].as_str() else {
+                closure_anomalies.push(format!(
+                    "revoke {} names no capability — it closes nothing (§5.4)",
+                    ev.id
+                ));
+                continue;
+            };
+            if ev.raw["span"].as_str() != Some(substrate_span) {
+                closure_anomalies.push(format!(
+                    "revoke {} of {target} emitted on span {} instead of the fabric-lifetime span — closure holds (§5.4)",
+                    ev.id,
+                    ev.raw["span"].as_str().unwrap_or("?"),
+                ));
+            }
             if let Ok(obj) = trace::get_object(&self.fabric.conn, target) {
                 let bound = obj["bound_manifest"].as_str();
                 let stamped = ev.raw["manifest"].as_str();
@@ -1255,6 +1285,22 @@ impl Broker {
                         bound.unwrap_or("?"),
                     ));
                 }
+            }
+            let chan = body["channel"].as_str();
+            let auth = body["auth_strength"].as_str();
+            if chan.is_some() != auth.is_some() {
+                closure_anomalies.push(format!(
+                    "revoke {} of {target} has unpaired C1 provenance (channel {}, auth_strength {}) — closure holds (§5.4)",
+                    ev.id,
+                    chan.unwrap_or("null"),
+                    auth.unwrap_or("null"),
+                ));
+            }
+            if body["reason"].as_str().is_none_or(|r| r.trim().is_empty()) {
+                closure_anomalies.push(format!(
+                    "revoke {} of {target} carries no reason — closure holds (§5.4)",
+                    ev.id
+                ));
             }
         }
         for ev in &all_events {

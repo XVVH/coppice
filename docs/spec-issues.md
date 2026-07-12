@@ -6,9 +6,9 @@
 > `asf-schema-spec.md` v0.4 (changelog A15–A19). This file is preserved
 > as the amendment provenance record; per-entry statuses below are
 > historical. New issues found under v0.4 start at **SI-20** (resolved in
-> v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; under v0.6, SI-22
-> is interpreted (W-2), while SI-23 and SI-24 are open; new issues start
-> at **SI-25**.
+> v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; SI-22 is
+> interpreted (W-2); SI-24 is resolved in **v0.7 as A22** (implementation
+> is W-8); SI-23 remains open; new issues start at **SI-25**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -21,7 +21,106 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
-## SI-24 — capabilities are called revocable but have no early-closure semantics (§5, §6, §9 F1) — open
+## SI-24 — capabilities are called revocable but have no early-closure semantics (§5, §6, §9 F1) — RESOLVED (author, 2026-07-12)
+
+**Resolution: the event-derived candidate ratified as amendment A22 (spec v0.7, new §5.4) — permanent, prospective, descendant-closing via the ancestry view — with eight adjustments from the ratification challenge pass.**
+
+- Core, as candidated: `revoke` joins §6 as the signed dual of `grant`;
+  current validity is a materialized view of signed objects plus the
+  verified substrate prefix; liveness = earliest verified grant before
+  the operation, no revoke of the capability *or any ancestor* before
+  it, ordinary caveats/expiry at the SI-22 clock, fail-closed
+  verification; prospective, no backdating; permanent per id;
+  restoration = new mint (new `issued_at` ⇒ new id) + grant, with the
+  broker refusing to grant a closed id so a timestamp-colliding
+  identical-body re-mint fails loudly instead of silently issuing a
+  dead token.
+- **Adjustment 1 — `cascade` field dropped.** Descendant closure is
+  definitional (the ancestry quantifier in the liveness rule), never
+  enumerative; enforcement reads no field, and a one-legal-value field
+  enforcement ignores is a lie surface (the SI-10/A21 field-vs-event
+  lesson). Blast-radius display is a derived CLI view, not event body.
+- **Adjustment 2 — `source` field dropped.** Provenance derives from
+  `channel` per the C1 approval-event pattern: `channel: null` ⟺
+  broker-mechanical (which then requires a mechanical `reason`, never
+  `operator_request`); human-originated requires `channel` +
+  `auth_strength`. A separate `source` could contradict `channel` and
+  would need a precedence rule for zero gain.
+- **Adjustment 3 — doubt-never-widens, stated for both edges.**
+  Activation doubt → not granted (A21 already). Closure doubt → not
+  live: a signature-verified revoke with an anomalous body (e.g. wrong
+  `manifest` field) still closes its named target and descendants,
+  loudly — the candidate's "wrong-manifest events inert" would make the
+  kill switch *silently fail*, the worst outcome; there is no
+  escalation risk in honoring closure (forging the event requires the
+  broker key, which mints well-formed events anyway). "Inert" in the
+  evidence matrix is re-scoped to: unsigned rows move nothing (the view
+  is event-derived); revoking `C` never touches capabilities outside
+  `C`'s subtree; and a revoke naming an id no capability bears closes
+  nothing *currently* while permanently poisoning that id per the
+  condition-2 quantifier — reconciled explicitly in §5.4 so permanence
+  and "closes nothing" cannot be read as contradicting.
+- **Adjustment 4 — the liveness clock is the durable authorization
+  offset**: the first signed event committing the fabric to the
+  operation — today the `tool_call` event itself, later the durable
+  external-effect protocol's dispatch record. The wedge's
+  strand-at-revoke becomes a derived consequence, not a special case;
+  decision time enforces the same pure view at the current verified
+  head (that is what denies a post-revoke call before any effect); the
+  gate's re-evaluation at `O` is authoritative for durability.
+- **Adjustment 5 — ancestry verification bounded**: per hop — ancestor
+  signature verifies, earliest grants are well-ordered (ancestor's
+  precedes child's), no ancestor revoke before `O` (condition 2). The
+  view resolves revokes by capability id across the whole substrate,
+  never filtered by the evaluating manifest — a child bound to a
+  hermetic sub-agent manifest (M2) still dies with its ancestor's
+  revoke; grant scans are manifest-scoped (`m7_grant_offsets`) and
+  copying that pattern for revokes would silently miss cross-manifest
+  ancestry. §5.2 subset semantics stay mint-time-enforced and
+  F1-signature-protected (a
+  widened child cannot exist without the broker key); the gate MAY
+  re-derive them but liveness does not require it. Keeps W-8 scoped.
+- **Adjustment 6 — approval/promotion asymmetry made explicit.**
+  Closure denials are structural and never escalatable (an escalatable
+  closure is an un-revoke lever inside the agent's loop, against C2's
+  spirit); pending escalations become inert; **parked promotions of
+  pre-revoke work remain approvable** (non-retroactivity — promotion
+  ratifies past recorded work; the merge is the human's act); recovery
+  is never blocked — revert unaffected, compensation runs under fresh
+  narrow mints, never resurrected authority.
+- **Adjustment 7 — the `expiry` event kind is removed** (the
+  candidate's "if retained" decided in the negative): never emitted, no
+  body, no enforcement semantics; keeping it invites
+  absence-read-as-liveness and presence-read-as-enforcement. The signed
+  `expires_at` is the sole time closure; an observational kind can
+  return by amendment if UX ever needs one. (Code-side `EVENT_KINDS`
+  updates with W-8, per the file-first/implement-after-ratification
+  rule.)
+- **Adjustment 8 — closure is structural, never a caveat dimension** —
+  pinned mechanically by the W-9 verdict-invariance contract:
+  `asf corpus replay` calls the pure evaluator with synthetic
+  capabilities and no substrate (`corpus/replay.rs` mirrors
+  `broker::propose_call` structurally); closure-as-caveat or
+  evaluator-embedded liveness would either change corpus verdicts or
+  force substrate-awareness into the harness. `capability_state_at`
+  sits in front of caveat evaluation, shared verbatim by decision time
+  and gate replay (the W-8 constraint), so revocation-free corpora
+  reproduce `docs/baselines/w9-2026-07-12/` bit-for-bit under its
+  recorded pins.
+- Boundary confirmations: SI-23 owns the kill-switch *surface* (this
+  amendment supplies the *operation*: one revoke per live root,
+  subtrees close definitionally); P22 owns durable dispatch; P10 is
+  constrained (stale/unknown revocation state never proves liveness);
+  RF-13/P15 remain the authority-resurrection release gates; W-3
+  standing authority and any live egress/actuation wait for W-8's
+  implementation. P25 stays open as an implementation gap until W-8
+  lands.
+- Provenance: filed 2026-07-11 (key-destruction vs authority-revocation
+  separation); challenged and ratified 2026-07-12 — cascade semantics,
+  revocation authority (request vs sign), the in-flight-branch
+  question, and approval/exemption interaction each pressed; the eight
+  adjustments above are the deltas. Original analysis below, preserved
+  as provenance.
 
 Surfaced while separating key destruction from authority revocation
 (2026-07-11). F1 calls broker-minted capabilities "central, revocable,

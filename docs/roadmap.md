@@ -42,13 +42,21 @@ approvals to cluster — but not far after; this is where authority stops
 evaporating at session end. *Provenance: 2026-07-10 review (highest-
 confidence convergent recommendation: ratchet before judge).*
 
-**W-8 — Capability closure + revocation.** Blocked on SI-24 ratification.
-Implement the signed `revoke` edge as the permanent, descendant-cascading
-dual of A21's `grant`: pure event-derived `capability_state_at` shared by
-decision and gate replay; verified parent ancestry; operator-side revoke;
-approvals/exemptions inert after closure; two-sided adversarial coverage and
-a targeted mutation lane. Must land before W-3 progresses from candidate
-generation to standing authority, and before live egress or actuation.
+**W-8 — Capability closure + revocation.** Unblocked: SI-24 ratified as
+A22 (spec v0.7 §5.4, 2026-07-12; the eight ratification deltas live in
+the SI-24 resolution record, per the boundary rule).
+Implement §5.4: the signed `revoke` edge as the permanent, prospective,
+descendant-closing dual of A21's `grant` — pure event-derived
+`capability_state_at` shared by decision and gate replay (structural
+precondition in front of caveat evaluation, so pure-evaluator consumers
+like the corpus harness are untouched); verified parent ancestry with
+revokes resolved by capability id across manifests; operator-side
+revoke; closure denials non-escalatable; approvals/exemptions inert
+after closure while pre-revoke parked promotions stay approvable;
+`EVENT_KINDS` gains `revoke`, drops `expiry`; two-sided adversarial
+coverage per testing-theory G8 and a targeted mutation lane. Must land
+before W-3 progresses from candidate generation to standing authority,
+and before live egress or actuation.
 The W-9 verdict baseline is in place (`docs/baselines/w9-2026-07-12/`):
 W-8 verification includes reproducing its vector hash under its
 recorded pins (no verdict may change where no revoke event exists) and

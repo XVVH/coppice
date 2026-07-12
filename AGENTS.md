@@ -4,10 +4,10 @@ Neutral, agent-agnostic state fabric: delegation manifests binding four lineages
 (state, authority, behavior, trace), snapshot-backed undo for owned state, brokered
 capabilities for external effects, human-ratified compilation loops (skills up,
 caveats down). Read `docs/agent-state-fabric-brief.md` (why/what, v0.2) and
-`docs/asf-schema-spec.md` (the constitution, v0.6) before writing any code.
+`docs/asf-schema-spec.md` (the constitution, v0.7) before writing any code.
 The spec wins over this file wherever they disagree. Spec ambiguities found
 while implementing go to `docs/spec-issues.md` (never silently interpret);
-SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6); SI-22 is interpreted (gate replay clock, W-2); SI-23 (actuation vs approval surfaces) and SI-24 (capability early revocation) are OPEN — no actuation-scoped tool may register before SI-23 resolves, and no signed revocation representation may be implemented before SI-24 is ratified. New issues start at SI-25.
+SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6); SI-22 is interpreted (gate replay clock, W-2); SI-24 is resolved (A22/§5.4 in v0.7 — capability early closure; the revocation implementation ships only through W-8's gated matrix, including the W-9 verdict-invariance regression); SI-23 (actuation vs approval surfaces) is OPEN — no actuation-scoped tool may register before SI-23 resolves. New issues start at SI-25.
 
 ## Built — Stages 1–3 (kernel, spine, promotion gate). Current queue: docs/roadmap.md
 

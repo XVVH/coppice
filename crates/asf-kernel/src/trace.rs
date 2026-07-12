@@ -334,6 +334,20 @@ pub fn all_events(conn: &Connection) -> Result<Vec<EventRow>, TraceError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Fetch one event by its global substrate offset for operator inspection.
+pub fn event_at_offset(
+    conn: &Connection,
+    offset: i64,
+) -> Result<Option<EventRow>, TraceError> {
+    conn.query_row(
+        &format!("SELECT {EVENT_COLS} FROM events WHERE offset = ?1"),
+        [offset],
+        row_to_event,
+    )
+    .optional()
+    .map_err(TraceError::from)
+}
+
 fn verify_verified_chain(span: &str, events: &[&VerifiedEvent]) -> Result<(), TraceError> {
     let mut ordered = events.to_vec();
     ordered.sort_by_key(|event| event.seq);

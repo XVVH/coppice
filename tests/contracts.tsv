@@ -41,6 +41,11 @@ TRACE-CHAIN|negative|trace::tests::tamper_after_bypassing_triggers_is_detected
 TRACE-CHAIN|supporting|trace::tests::signed_event_index_mismatch_is_rejected_for_every_materialized_field
 TRACE-CHAIN|supporting|trace::tests::verified_snapshot_head_stays_with_the_rows_it_observed
 
+# Operator ledger inspection: listings expose signed event time and full
+# records; invalid inspection targets fail without creating or changing state.
+LEDGER-UX|positive|ledger_shows_timestamps_and_full_event_detail
+LEDGER-UX|negative|ledger_rejects_uninitialized_home_and_unknown_event_without_creating_state
+
 # W-2 unified gate replay: the decision evaluator re-runs over signed
 # records, clocked at each event's `at` (SI-22 at-the-time semantics).
 GATE-REPLAY|positive|si22_gate_clock_is_the_events_at_not_gate_time

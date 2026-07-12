@@ -121,6 +121,16 @@ fn main() -> Result<()> {
         Some("ledger") => {
             let home = flag(&args, "--home").context("ledger needs --home <dir>")?;
             let mut fabric = Fabric::open_existing(Path::new(&home).join("fabric"))?;
+            if args.iter().any(|arg| arg == "--event") {
+                let offset = flag(&args, "--event")
+                    .context("ledger --event needs an integer substrate offset")?
+                    .parse::<i64>()
+                    .context("ledger --event needs an integer substrate offset")?;
+                let event = trace::event_at_offset(&fabric.conn, offset)?
+                    .with_context(|| format!("ledger event at offset {offset} not found"))?;
+                println!("{}", serde_json::to_string_pretty(&event.raw)?);
+                return Ok(());
+            }
             // Attribute any out-of-band edits first so the accounting below
             // is against a current picture, not a stale one.
             for d in fabric.check_drift()? {
@@ -131,7 +141,7 @@ fn main() -> Result<()> {
             }
             let explanation = fabric.explain()?;
             for l in &explanation.lines {
-                println!("[{:>4}] {:<11} {}", l.offset, l.kind, l.line);
+                println!("[{:>4}] {} {:<11} {}", l.offset, l.at, l.kind, l.line);
             }
             if explanation.unexplained.is_empty() {
                 println!("\nevery live root is explained by the ledger.");
@@ -147,7 +157,7 @@ fn main() -> Result<()> {
         Some("corpus") => corpus::cli(&args[2..]),
         _ => {
             eprintln!(
-                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf revoke --home <dir> <cap:…> [--reason <text>]\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>\n  asf corpus census|replay|ingest|baseline|gate-replay [--corpora <dir>] --out <dir> [--home <dir>] [--limit N]"
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf revoke --home <dir> <cap:…> [--reason <text>]\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir> [--event <offset>]\n  asf stats --home <dir>\n  asf corpus census|replay|ingest|baseline|gate-replay [--corpora <dir>] --out <dir> [--home <dir>] [--limit N]"
             );
             std::process::exit(2);
         }
@@ -345,7 +355,7 @@ fn demo(dir: &Path) -> Result<()> {
     let explanation = fabric.explain()?;
     println!("\nTHE LEDGER:");
     for l in &explanation.lines {
-        println!("  [{:>3}] {:<10} {}", l.offset, l.kind, l.line);
+        println!("  [{:>3}] {} {:<10} {}", l.offset, l.at, l.kind, l.line);
     }
     if !explanation.unexplained.is_empty() {
         bail!("UNEXPLAINED STATE: {:?}", explanation.unexplained);

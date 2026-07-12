@@ -75,8 +75,9 @@ read surface into the exfiltration perimeter.
   (roadmap parked; audit; `AGENTS.md` boundary).
 - **P25** Capabilities have mandatory expiry but no early revocation despite
   F1 calling them revocable. Once a live capability is compromised or no
-  longer wanted, authority survives until its timestamp closes. → SI-24;
-  W-8.
+  longer wanted, authority survives until its timestamp closes. → SI-24
+  resolved (A22, spec v0.7 §5.4); implementation is W-8 — the gap stays
+  open until it lands.
 - **P22** In-flight allowed-but-unrecorded calls held in memory; remote
   effect can land before it is recorded. → **Durable external-effect
   protocol** (roadmap parked); RF-3 (accepted residual).
@@ -93,8 +94,8 @@ default cannot save this class retroactively.
 - **P5** The approval socket's "out-of-band" property is a 0600 Unix socket
   owned by the operator — reachable by granted hands. → SI-23 gap 1.
 - **P25** No operator kill switch can close the actuation capability subtree;
-  expiry is the only implemented stop. → SI-24/W-8, composed with SI-23's
-  unreachable approval surface.
+  expiry is the only implemented stop. → A22 (§5.4) specifies the operation;
+  W-8 implements, composed with SI-23's unreachable approval surface.
 - **P3 / P4** *(NEW gate wiring)* Approval `auth_strength` is hardcoded
   `"local_session"`, **asserted, never authenticated** — no peer-cred check,
   no user-presence proof — on both the daemon socket and the offline
@@ -118,7 +119,7 @@ default cannot save this class retroactively.
 - **P3 / P4 / P5** Self-approvable escalations (above) — an agent with a
   shell/HID connects to the same socket and approves its own request.
 - **P25** A compromised agent retains already-minted authority until expiry;
-  no signed closure exists. → SI-24/W-8.
+  no signed closure exists yet. → A22 (§5.4)/W-8.
 - **P8** Placeholder identity: principal pubkeys `"01"`/`"02"`, one reused
   static intent, behavior hash literal `"sha256:asfd-stage2"`, no M4
   attestation. → audit High (brokered-recorded-as-observed); W-4(a).
@@ -184,7 +185,7 @@ in scope, or when storage leaves that filesystem boundary.
   G-EGRESS).
 - **P25** Early authority closure and incident-response kill switch are absent;
   expiry alone cannot terminate a compromised long-lived capability. →
-  SI-24/W-8.
+  A22 (§5.4)/W-8.
 
 ### G-PUBLISH — before publishing the spec / any cross-implementation artifact  *(relaxes single-implementation)*
 - **P24** JCS numeric constraint (`|n| < 2^53`) not enforced at seal/verify.
@@ -192,7 +193,9 @@ in scope, or when storage leaves that filesystem boundary.
 - **P23** Object `id` type-prefix not covered by the signature (defanged
   locally by full-id lookup + fail-closed field reads). → RF-6 (open).
 - **P25** F1 calls broker-minted capabilities revocable, but the published
-  lifecycle has no early-closure semantics. → SI-24 must resolve before W-6.
+  lifecycle had no early-closure semantics. → resolved at spec level (A22,
+  §5.4, v0.7); remaining G-PUBLISH question is conformance coverage — W-6
+  §5.4 vectors once W-8's implementation exists to extract them from.
 - SI-23 constraints and the brief §8 landscape claim should also be settled
   before publication (both already tracked).
 
@@ -200,7 +203,7 @@ in scope, or when storage leaves that filesystem boundary.
 
 ## The shortcut ledger (backing index)
 
-All 25 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
+All 26 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 1SESS/1HUMAN/1TEN/DEBUG` = the invariant(s) that make each safe now.
 
 ### Tier 1 — items this sweep filed or newly gated
@@ -213,7 +216,7 @@ All 25 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P3 | Approval `auth_strength` hardcoded `local_session`, asserted-not-authenticated (socket) | `proxy.rs:334,339,347,351` | SU COOP | audit prose + **new G-ACTUATION/G-ADVERSARIAL gate** |
 | P4 | Same, offline `asf approve` path (`chan:local`) | `proxy.rs:638-666` | SU COOP | same |
 | P6 | Self-declared tool metadata unverified; no gate on third-party registration | `tools.rs:84-98`, `proxy.rs:48-69` | COOP (first-party only) | **new G-3P-TOOL gate**; W-4 + domain-taxonomy |
-| P25 | F1 calls capabilities revocable, but implementation/spec lifecycle has expiry only and no signed early closure | `asf-schema-spec.md:302`; `evaluate.rs:84-97`, `trace.rs:40-60`, `broker.rs` | COOP LOCAL NOACT DEBUG | **SI-24**; W-8; G-EGRESS/G-ACTUATION/G-ADVERSARIAL/G-PRODUCTION/G-PUBLISH |
+| P25 | F1 calls capabilities revocable; A22 (§5.4, v0.7) now specifies signed early closure, but the implementation still enforces expiry only | `asf-schema-spec.md` §9 F1 + §5.4; `evaluate.rs:84-97`, `trace.rs:40-60`, `broker.rs` | COOP LOCAL NOACT DEBUG | SI-24 → **A22 (v0.7)**; W-8 implements; G-EGRESS/G-ACTUATION/G-ADVERSARIAL/G-PRODUCTION/G-PUBLISH unchanged until it lands |
 | P26 | Corpus-ingest homes: placeholder identities/behavior signed into a real substrate; evidence-quarantined by convention only (second P8 site) | `asf-cli corpus/ingest.rs` (`placeholder_key`, behavior literal) | COOP SU | W-3 mechanical exclusion (G-RATCHET); `agent-trace-corpora-2026-07-11.md` boundaries |
 
 ### Tier 2 — items already tracked (this ledger just indexes and gates them)
@@ -260,3 +263,7 @@ All 25 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
   fresh-eyes review found the corpus harness had taken a P8-class shortcut
   (placeholder identities into a real substrate) without a ledger row —
   the ledger's own same-change rule, applied late.
+- **Follow-up (A22 ratification, 2026-07-12):** SI-24 resolved — spec §5.4
+  now specifies the closure lifecycle P25 flagged as missing. P25 remains
+  an open implementation gap until W-8 lands; every gate listing it is
+  unchanged until then.

@@ -49,7 +49,8 @@ test because their machinery or ratified representation does not exist yet:
 C3 (signed fabric→user messages), C4 (delivery ceilings), C5 (sender binding),
 M3 (Tier-3 `as_of` surfacing), M4 runtime behavior attestation, the taint
 dimensions, StandingRule schema enforcement (k≥3, counterfactuals, domain
-match), and SI-24 early capability revocation. These are absences by
+match), and §5.4 capability closure (SI-24 ratified as A22, 2026-07-12;
+machinery is W-8). These are absences by
 sequencing, not oversight; each activates with its milestone. (M7's
 brokered-authority edge left this list with A21/SI-21:
 mode declaration + grant-event binding, tested in the gate suite.) An untracked
@@ -171,14 +172,29 @@ in-tree vault server. The remaining adversarial MCP corpus is malformed large
 frames, duplicate/out-of-order ids, unsolicited notifications, and downstream
 death at each protocol phase.
 
-**G8. Revocation lifecycle (SI-24).** No early-revocation representation is
-ratified or implemented yet; mandatory timestamp expiry is the only closure
-the evaluator enforces. W-8 activates a dedicated two-sided contract and a
-stable mutation target over the event-derived authority view. Minimum matrix:
-call before revoke succeeds; direct and ancestor revoke deny later calls;
-child-only revoke preserves parent/siblings; revoke is non-retroactive;
-object-row-without-event and wrong-lineage events are inert; same-id re-grant
-and post-revoke attenuation cannot reactivate; approvals cannot resurrect;
+**G8. Revocation lifecycle (SI-24 → A22, spec §5.4).** The event-derived
+closure representation is ratified (v0.7, 2026-07-12); nothing is implemented
+yet — mandatory timestamp expiry remains the only closure the evaluator
+enforces until W-8. W-8 activates a dedicated two-sided contract and a
+stable mutation target over the event-derived authority view
+(`capability_state_at`: a structural precondition in front of caveat
+evaluation, never a caveat dimension, shared verbatim by decision time and
+gate replay). Minimum matrix:
+call before revoke succeeds; direct and ancestor revoke deny later calls —
+including across manifest boundaries (an M2 sub-agent child dies with its
+ancestor's revoke; revokes resolve by capability id, never filtered by the
+evaluating manifest); child-only revoke preserves parent/siblings; revoke is
+non-retroactive and parked promotions of pre-revoke work remain approvable;
+unsigned rows move nothing (the view is event-derived) and a revoke naming
+an id no capability bears affects no other capability, while a
+verified-but-anomalous revoke (wrong `manifest` field, unexpected span)
+still closes its target, loudly — §5.4's doubt-never-widens, two-sided;
+same-id re-grant (including revoked-before-first-grant) and post-revoke
+attenuation cannot reactivate, and the broker refuses to grant a closed id;
+ancestor earliest-grants must be well-ordered;
+approvals/exemptions cannot resurrect and closure denials are
+non-escalatable; a `revoke` event is accepted and an `expiry` event is no
+longer emittable (the kind left §6 with A22);
 and dispatch vs revoke has one signed total order. The external-effect form
 waits for the durable dispatch protocol rather than testing an in-memory
 ticket as if it were a receipt. The W-9 corpus verdict-invariance

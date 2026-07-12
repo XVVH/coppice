@@ -51,7 +51,10 @@ dual of A21's `grant`: pure event-derived `capability_state_at` shared by
 decision and gate replay; verified parent ancestry; operator-side revoke;
 approvals/exemptions inert after closure; two-sided adversarial coverage and
 a targeted mutation lane. Must land before W-3 progresses from candidate
-generation to standing authority, and before live egress or actuation. The
+generation to standing authority, and before live egress or actuation.
+Implementation additionally waits for W-9's verdict baseline: W-8
+verification includes verdict-invariance over revocation-free corpora
+(no verdict may change where no revoke event exists). The
 current local wedge may conservatively strand an in-flight branch at revoke;
 the parked durable external-effect protocol supplies the signed dispatch
 linearization point before any remote effect ships. Production/distributed
@@ -60,6 +63,34 @@ fencing so rollback or a stale partition cannot erase the latest revoke.
 Closes posture gap P25; composes with but does not subsume P10/P15/P20/P21/P22
 or SI-23's P3/P4/P5/P12 cluster. *Provenance: 2026-07-11 revocation design
 review.*
+
+**W-9 — Foreign-trace corpus baseline: census + replay conformance.**
+Lanes 1+2 of `agent-trace-corpora-2026-07-11.md`, runnable while W-8
+awaits SI-24 ratification: one converter (foreign trajectory →
+observed-mode manifest + `register` + `tool_call` events), a Toucan
+slice plus the full MCP tool-schema set. Three artifacts: (a) the
+zero-authorship default census — what fraction of ~13k real tool
+schemas derives domain/reversibility/egress from registered metadata
+vs falls to the conservative floor (the approval-fatigue forecast;
+first empirical input to the domain-taxonomy open problem — input,
+not governance; the signal check for W-3's (caveat, action-class,
+domain) clustering); (b) the verdict baseline — allow/deny/escalate
+per dimension over replayed records — which is W-8's regression
+contract: corpora containing no revoke events MUST verdict identically
+before and after closure semantics, so this baseline lands before
+W-8's implementation; (c) evaluator/gate events-per-second and JCS
+canonicalization throughput at corpus scale — first measured input to
+the scalability analysis and the F2 decision on the W-6 path.
+Unencodable event shapes file as SIs, found before W-6 publishes
+schemas. Boundaries per the survey doc: fixtures/calibration only,
+never founding examples (R1/R6); synthetic sets excluded from rate
+claims; corpora operator-side only (A3); offline, no actuation-scoped
+registration (no SI-23 conflict). Deliberately excluded here:
+containment measurement stays with the R2 family's parked trigger
+(convert AgentDojo/MCPHunt now, measure then), and SWE operation-class
+fixtures wait for W-8's gate work. Machine-heavy, human-light — runs
+alongside W-1 without competing for dogfooding attention. *Provenance:
+2026-07-11 corpus research session; promoted to queued 2026-07-12.*
 
 **W-4 — Attestation + containment, as a pair.** The intent/behavior
 analog of what A21 did for authority. (a) Per-lineage assurance classes
@@ -101,8 +132,7 @@ Owner: operator. *Provenance: 2026-07-10 review.*
 ## Candidates (ideas from the design reviews — not yet committed work)
 
 Recorded so they aren't lost to conversation; promote to queued by
-decision, not by drift. From the 2026-07-10 review sessions except
-where noted:
+decision, not by drift. From the 2026-07-10 review sessions:
 
 - **Taint wall as the security headline** — R2's `taint.egress` is the
   zero-config anti-exfiltration primitive (ADR 0005); productize the
@@ -124,20 +154,6 @@ where noted:
   of human attention; approval compression ratio; time-to-first-ratified-
   rule; % sessions fully silent. Adopt alongside the denial-FP rate when
   W-3 gives them substance.
-- **Foreign-trace corpus lane** — replay public agent-trace corpora
-  through the W-2 evaluator as fixtures: zero-authorship default census
-  over ~13k real MCP tool schemas (approval-fatigue forecast; first
-  empirical input to the domain-taxonomy open problem — input, not
-  governance); conformance fuzzing where unencodable event shapes file
-  as SIs; AgentDojo/MCPHunt containment replay for a public two-sided
-  denial-FP number (taint-wall evidence); SWE trajectories as
-  operation-class/rename fixtures. Corpus-scale replay doubles as the
-  evaluator perf baseline the scalability analysis lacks. Hard boundary:
-  fixtures/calibration only, never founding examples (R1); synthetic
-  sets excluded from rate claims; corpora stay operator-side (A3).
-  Offline, no actuation-scoped registration — no SI-23 conflict. Survey
-  and boundaries: `agent-trace-corpora-2026-07-11.md`. *(Provenance:
-  2026-07-11 corpus research session.)*
 
 ## Parked (trigger-gated — do not start without the trigger)
 

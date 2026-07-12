@@ -1,0 +1,18 @@
+{
+  "tool_server_ambiguous": {
+    "count": 12,
+    "samples": [
+      "2b33f477-0368-512c-b5f8-58e699f07e55: 虚拟币价格查询服务-get_coin_price",
+      "3d024251-1d9b-5ee5-8c90-27da920574a1: 虚拟币价格查询服务-get_coin_price",
+      "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb: 虚拟币价格查询服务-get_coin_price"
+    ]
+  },
+  "unparseable_call_arguments": {
+    "count": 66,
+    "samples": [
+      "cd6aabab-ace0-53cf-84db-0766ab781830: clear-thought-server-scientificmethod: \"{\\\"inquiryId\\\": \\\"flash-sale-500-errors\\\", \\\"stage\\\": \\\"question\\\", \\\"iteration\\\": 1, \\\"nextStageNeeded\\\": true, \\\"ques",
+      "8694a637-351f-5f21-af4b-7a927ce4bd68: clear-thought-server-visualreasoning: \"{\\\"operation\\\": \\\"create\\\", \\\"diagramId\\\": \\\"system-architecture-analysis\\\", \\\"diagramType\\\": \\\"flowchart\\\", \\\"iteratio",
+      "506130cb-7afd-5f42-8b99-d52369ab922f: think-tank-upsert_entities: \"{\\\"entities\\\": [{\\\"name\\\": \\\"Research Phase 1: Literature Collection\\\", \\\"entityType\\\": \\\"Task\\\", \\\"observations\\\": [\\\""
+    ]
+  }
+}

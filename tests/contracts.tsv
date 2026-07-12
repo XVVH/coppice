@@ -52,3 +52,10 @@ APPROVAL|positive|escalation_batch_approval_cycle
 APPROVAL|negative|denied_escalation_does_not_authorize_retry
 C2|positive|approval_racing_retry_preserves_one_bounded_use
 C2|negative|proxied_session_end_to_end
+
+# W-9 foreign-trace corpus harness: conversion fails closed (quarantine
+# leaves NOTHING in the substrate), and the pure replay is the
+# deterministic W-8 verdict baseline (docs/agent-trace-corpora-2026-07-11.md)
+CORPUS-FAIL-CLOSED|positive|corpus_sample_replay_matches_golden_verdicts
+CORPUS-FAIL-CLOSED|negative|corpus_malformed_trajectory_is_quarantined_and_emits_no_events
+CORPUS-FAIL-CLOSED|supporting|corpus_hallucinated_call_denies_action_allow

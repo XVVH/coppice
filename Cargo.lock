@@ -61,8 +61,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "asf-kernel",
+ "hex",
  "rusqlite",
  "serde_json",
+ "sha2",
  "signal-hook",
  "tempfile",
  "time",

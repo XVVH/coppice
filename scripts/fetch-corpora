@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Fetch the W-9 corpus inputs (stdlib only; idempotent; revision-pinned).
+
+Downloads land in ./corpora/ (gitignored — corpora stay operator-side per
+docs/agent-trace-corpora-2026-07-11.md; MCP-Flow declares no license, so
+its files are never committed or redistributed, aggregates only).
+
+  scripts/fetch-corpora toucan   [N_ROWS]   # default 5000 (Kimi-K2/train)
+  scripts/fetch-corpora mcpflow             # all marketplace tool files
+  scripts/fetch-corpora all      [N_ROWS]
+
+Reproducibility: each corpus dir gets a FETCH.json recording the dataset
+revision, parameters, and per-file sha256. Toucan's /rows API always
+serves the latest revision, so the script refuses to extend an existing
+fetch if the upstream revision moved (delete the dir to refetch).
+"""
+
+import concurrent.futures
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.parse
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CORPORA = os.path.join(ROOT, "corpora")
+UA = "asf-w9-corpus-fetch/0.1 (offline research harness)"
+
+TOUCAN = "Agent-Ark/Toucan-1.5M"
+TOUCAN_CONFIG = "Kimi-K2"
+TOUCAN_SPLIT = "train"
+MCPFLOW = "wwh0411/MCP-Flow"
+MARKETPLACES = ["deepnlp", "glama", "mcphub", "mcpso", "pipedream", "smithery"]
+
+
+def get(url, tries=6, timeout=120):
+    # curl rather than urllib: it follows redirects and negotiates
+    # TLS/proxies the way the rest of this environment already does.
+    for attempt in range(tries):
+        r = subprocess.run(
+            ["curl", "-sfL", "--max-time", str(timeout), "-A", UA, url],
+            capture_output=True,
+            check=False,
+        )
+        if r.returncode == 0 and r.stdout:
+            return r.stdout
+        if attempt == tries - 1:
+            raise RuntimeError(f"curl failed ({r.returncode}) for {url.split('?')[0]}")
+        wait = 15 * 2 ** attempt
+        print(f"  retry {attempt + 1} in {wait}s: {url.split('?')[0]} (rc {r.returncode})",
+              flush=True)
+        time.sleep(wait)
+    raise RuntimeError("unreachable")
+
+
+def sha256(data):
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def dataset_sha(dataset):
+    info = json.loads(get(f"https://huggingface.co/api/datasets/{dataset}"))
+    return info["sha"]
+
+
+def load_meta(path):
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+def save_meta(path, meta):
+    with open(path, "w") as f:
+        json.dump(meta, f, indent=1, sort_keys=True)
+        f.write("\n")
+
+
+def fetch_toucan(n_rows):
+    out = os.path.join(CORPORA, "toucan")
+    os.makedirs(out, exist_ok=True)
+    meta_path = os.path.join(out, "FETCH.json")
+    sha = dataset_sha(TOUCAN)
+    meta = load_meta(meta_path) or {
+        "dataset": TOUCAN,
+        "revision": sha,
+        "config": TOUCAN_CONFIG,
+        "split": TOUCAN_SPLIT,
+        "page_size": 100,
+        "files": {},
+    }
+    if meta["revision"] != sha:
+        sys.exit(
+            f"toucan: upstream revision moved ({meta['revision']} -> {sha}); "
+            "delete corpora/toucan to refetch against the new revision"
+        )
+    base = (
+        "https://datasets-server.huggingface.co/rows?dataset="
+        + urllib.parse.quote(TOUCAN, safe="")
+        + f"&config={TOUCAN_CONFIG}&split={TOUCAN_SPLIT}"
+    )
+    for offset in range(0, n_rows, 100):
+        name = f"rows-{offset:06d}.json"
+        path = os.path.join(out, name)
+        if name in meta["files"] and os.path.exists(path):
+            continue
+        length = min(100, n_rows - offset)
+        data = get(f"{base}&offset={offset}&length={length}")
+        # Parse before persisting: a rate-limit HTML page must not be saved.
+        parsed = json.loads(data)
+        if "rows" not in parsed:
+            sys.exit(f"toucan: unexpected response at offset {offset}: {data[:200]}")
+        with open(path, "wb") as f:
+            f.write(data)
+        meta["files"][name] = {"sha256": sha256(data), "rows": len(parsed["rows"])}
+        save_meta(meta_path, meta)
+        print(f"toucan {name}: {len(parsed['rows'])} rows", flush=True)
+        time.sleep(1.5)  # politeness: the rows endpoint rate-limits bursts
+    total = sum(f["rows"] for f in meta["files"].values())
+    print(f"toucan: {total} rows across {len(meta['files'])} files (rev {meta['revision'][:12]})")
+
+
+def fetch_mcpflow():
+    out = os.path.join(CORPORA, "mcp-flow")
+    os.makedirs(out, exist_ok=True)
+    meta_path = os.path.join(out, "FETCH.json")
+    sha = dataset_sha(MCPFLOW)
+    meta = load_meta(meta_path) or {"dataset": MCPFLOW, "revision": sha, "files": {}}
+    if meta["revision"] != sha:
+        sys.exit(
+            f"mcp-flow: upstream revision moved ({meta['revision']} -> {sha}); "
+            "delete corpora/mcp-flow to refetch"
+        )
+
+    todo = []
+    for mp in MARKETPLACES:
+        tree = json.loads(
+            get(
+                f"https://huggingface.co/api/datasets/{MCPFLOW}/tree/"
+                f"{meta['revision']}/function_call/{urllib.parse.quote(mp)}"
+            )
+        )
+        os.makedirs(os.path.join(out, mp), exist_ok=True)
+        for f in tree:
+            if f["type"] != "file" or not f["path"].endswith(".json"):
+                continue
+            rel = f"{mp}/{os.path.basename(f['path'])}"
+            if rel in meta["files"] and os.path.exists(os.path.join(out, rel)):
+                continue
+            todo.append((rel, f["path"]))
+
+    def fetch_one(item):
+        rel, repo_path = item
+        url = (
+            f"https://huggingface.co/datasets/{MCPFLOW}/resolve/"
+            f"{meta['revision']}/{urllib.parse.quote(repo_path)}"
+        )
+        data = get(url)
+        with open(os.path.join(out, rel), "wb") as f:
+            f.write(data)
+        return rel, sha256(data), len(data)
+
+    done = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        for rel, digest, size in ex.map(fetch_one, todo):
+            meta["files"][rel] = {"sha256": digest, "bytes": size}
+            done += 1
+            if done % 50 == 0:
+                save_meta(meta_path, meta)
+                print(f"mcp-flow: {done}/{len(todo)} files")
+    save_meta(meta_path, meta)
+    print(f"mcp-flow: {len(meta['files'])} files total (rev {meta['revision'][:12]})")
+
+
+TESTDATA_FILES = [
+    # The schema-bearing files: function_call/ carries instruction→call
+    # pairs only; tool schemas (parameters) live in the seen-test sets.
+    "deepnlp_seen_test_tool10.json",
+    "glama_seen_test_tool10.json",
+    "mcphub_seen_test_tool10.json",
+    "mcpso_seen_test_tool10.json",
+]
+
+
+def fetch_mcpflow_testdata():
+    out = os.path.join(CORPORA, "mcp-flow-testdata")
+    os.makedirs(out, exist_ok=True)
+    meta_path = os.path.join(out, "FETCH.json")
+    sha = dataset_sha(MCPFLOW)
+    meta = load_meta(meta_path) or {"dataset": MCPFLOW, "revision": sha, "files": {}}
+    if meta["revision"] != sha:
+        sys.exit(
+            f"mcp-flow-testdata: upstream revision moved ({meta['revision']} -> {sha}); "
+            "delete corpora/mcp-flow-testdata to refetch"
+        )
+    for name in TESTDATA_FILES:
+        path = os.path.join(out, name)
+        if name in meta["files"] and os.path.exists(path):
+            continue
+        data = get(
+            f"https://huggingface.co/datasets/{MCPFLOW}/resolve/"
+            f"{meta['revision']}/test_data/{name}",
+            timeout=300,
+        )
+        with open(path, "wb") as f:
+            f.write(data)
+        meta["files"][name] = {"sha256": sha256(data), "bytes": len(data)}
+        save_meta(meta_path, meta)
+        print(f"mcp-flow-testdata {name}: {len(data)} bytes", flush=True)
+
+
+def main():
+    what = sys.argv[1] if len(sys.argv) > 1 else "all"
+    n_rows = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
+    if what in ("toucan", "all"):
+        fetch_toucan(n_rows)
+    if what in ("mcpflow", "all"):
+        fetch_mcpflow()
+    if what in ("mcpflow-testdata", "all"):
+        fetch_mcpflow_testdata()
+
+
+if __name__ == "__main__":
+    main()

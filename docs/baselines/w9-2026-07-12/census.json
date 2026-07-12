@@ -1,0 +1,89 @@
+{
+  "universe": {
+    "tools": 9807,
+    "servers": 1921,
+    "by_source": {
+      "mcp-flow": {
+        "tools": 7640,
+        "servers": 1563,
+        "description_present": 7626,
+        "parameters_present": 7640,
+        "annotations_any": 0,
+        "readOnlyHint": 0,
+        "destructiveHint": 0,
+        "idempotentHint": 0,
+        "openWorldHint": 0,
+        "server_categories_present": 7640,
+        "heuristic_class": {
+          "read": 2909,
+          "write": 4483,
+          "delete": 248
+        }
+      },
+      "toucan": {
+        "tools": 2167,
+        "servers": 358,
+        "description_present": 2103,
+        "parameters_present": 2167,
+        "annotations_any": 0,
+        "readOnlyHint": 0,
+        "destructiveHint": 0,
+        "idempotentHint": 0,
+        "openWorldHint": 0,
+        "server_categories_present": 2167,
+        "heuristic_class": {
+          "read": 1013,
+          "write": 1122,
+          "delete": 32
+        }
+      }
+    }
+  },
+  "zero_authorship_derivability": {
+    "side_effect": {
+      "derivable": 0,
+      "pct": 0.0,
+      "note": "nothing declares locality; §0 floors every tool to external"
+    },
+    "egress": {
+      "derivable": 0,
+      "pct": 0.0,
+      "note": "undeclared egress = egress on external open surfaces (§0)"
+    },
+    "reversibility": {
+      "derivable": 0,
+      "pct": 0.0,
+      "note": "only MCP readOnlyHint/destructiveHint qualify as declared signal, and MCP itself marks them untrusted hints"
+    },
+    "action_class": {
+      "derivable": 0,
+      "pct": 0.0,
+      "note": "same annotation dependence as reversibility"
+    },
+    "domain": {
+      "derivable": 9807,
+      "pct": 100.0,
+      "note": "server-level categories/tags only; taxonomy governance stays open"
+    },
+    "store": {
+      "derivable": 0,
+      "pct": 0.0,
+      "note": "SI-16 store binding has no foreign analogue; harness uses a representational ext:<server>"
+    },
+    "path_args": {
+      "derivable": 0,
+      "pct": 0.0,
+      "note": "no schema names its path-carrying arguments; paths.write can only fail closed on write-shaped foreign calls"
+    }
+  },
+  "conservative_floor": {
+    "irreversible_pct": 100.0,
+    "egress_pct": 100.0,
+    "note": "share of the universe the free defaults treat as irreversible egress absent ratified reclassification"
+  },
+  "heuristic": {
+    "version": "corpus-heuristic-v1",
+    "normative": false,
+    "note": "name/annotation classifier measuring the floor↔classifier gap; never feeds rules"
+  }
+}

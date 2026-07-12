@@ -1,0 +1,44 @@
+{
+ "rows": [
+  {
+   "row": {
+    "uuid": "fixture-0001",
+    "subset_name": "fixture",
+    "question": "search the docs and file a note",
+    "messages": "[{\"role\": \"system\", \"content\": \"fixture\"}, {\"role\": \"user\", \"content\": \"go\"}, {\"role\": \"assistant\", \"content\": \"\", \"function_call\": {\"name\": \"alpha-search-search_docs\", \"arguments\": \"{\\\"q\\\": \\\"x\\\"}\"}}, {\"role\": \"function\", \"content\": \"found 2 docs\"}, {\"role\": \"assistant\", \"content\": \"\", \"function_call\": {\"name\": \"alpha-search-create_note\", \"arguments\": \"{\\\"title\\\": \\\"y\\\"}\"}}, {\"role\": \"function\", \"content\": \"created\"}, {\"role\": \"assistant\", \"content\": \"\", \"function_call\": {\"name\": \"alpha-search-nuke_all\", \"arguments\": \"{}\"}}, {\"role\": \"function\", \"content\": \"error: unknown tool\"}, {\"role\": \"assistant\", \"content\": \"done\"}]",
+    "available_tools": "[{\"type\": \"function\", \"function\": {\"name\": \"alpha-search-search_docs\", \"description\": \"Search documents\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}}, {\"type\": \"function\", \"function\": {\"name\": \"alpha-search-create_note\", \"description\": \"Create a note\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}}, {\"type\": \"function\", \"function\": {\"name\": \"alpha-search-delete_note\", \"description\": \"Delete a note\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}}]",
+    "target_tools": "",
+    "question_quality_assessment": "",
+    "response_quality_assessment": "",
+    "metadata": "{\"mcp_servers\": [{\"server_name\": \"Alpha Search\", \"server_info\": {\"categories\": [\"search\"]}}]}"
+   }
+  },
+  {
+   "row": {
+    "uuid": "fixture-0002",
+    "subset_name": "fixture",
+    "question": "write three files then remove one",
+    "messages": "[{\"role\": \"system\", \"content\": \"fixture\"}, {\"role\": \"user\", \"content\": \"go\"}, {\"role\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"id\": \"t1\", \"type\": \"function\", \"function\": {\"name\": \"beta-files-write_file\", \"arguments\": \"{\\\"path\\\": \\\"a.txt\\\"}\"}}, {\"id\": \"t2\", \"type\": \"function\", \"function\": {\"name\": \"beta-files-write_file\", \"arguments\": \"{\\\"path\\\": \\\"b.txt\\\"}\"}}]}, {\"role\": \"function\", \"content\": \"ok a\"}, {\"role\": \"function\", \"content\": \"ok b\"}, {\"role\": \"assistant\", \"content\": \"\", \"function_call\": {\"name\": \"beta-files-write_file\", \"arguments\": \"{\\\"path\\\": \\\"c.txt\\\"}\"}}, {\"role\": \"function\", \"content\": \"ok c\"}, {\"role\": \"assistant\", \"content\": \"\", \"function_call\": {\"name\": \"beta-files-remove_file\", \"arguments\": \"{\\\"path\\\": \\\"a.txt\\\"}\"}}, {\"role\": \"function\", \"content\": \"removed\"}, {\"role\": \"assistant\", \"content\": \"done\"}]",
+    "available_tools": "[{\"type\": \"function\", \"function\": {\"name\": \"beta-files-write_file\", \"description\": \"Write a file\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}}, {\"type\": \"function\", \"function\": {\"name\": \"beta-files-remove_file\", \"description\": \"Remove a file\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}}]",
+    "target_tools": "",
+    "question_quality_assessment": "",
+    "response_quality_assessment": "",
+    "metadata": "{\"mcp_servers\": [{\"server_name\": \"Beta Files\", \"server_info\": {\"categories\": [\"files\"]}}]}"
+   }
+  },
+  {
+   "row": {
+    "uuid": "fixture-0003",
+    "subset_name": "fixture",
+    "question": "broken row",
+    "messages": "[{\"role\": \"system\", \"content\": \"fixture\"}, {\"role\": \"user\", \"content\": \"go\"}, {\"role\": \"assistant\", \"content\": \"\", \"function_call\": {\"name\": \"gamma-tools-do_thing\", \"arguments\": \"{not json\"}}, {\"role\": \"function\", \"content\": \"never happened\"}]",
+    "available_tools": "[{\"type\": \"function\", \"function\": {\"name\": \"gamma-tools-do_thing\", \"description\": \"Do a thing\", \"parameters\": {\"type\": \"object\", \"properties\": {\"q\": {\"type\": \"string\"}}}}}]",
+    "target_tools": "",
+    "question_quality_assessment": "",
+    "response_quality_assessment": "",
+    "metadata": "{\"mcp_servers\": [{\"server_name\": \"Gamma Tools\", \"server_info\": {\"categories\": []}}]}"
+   }
+  }
+ ],
+ "num_rows_total": 3
+}

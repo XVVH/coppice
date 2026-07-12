@@ -1,0 +1,336 @@
+{
+  "mode": "observed (M7 — no authority declaration)",
+  "trajectories_ingested": 1000,
+  "quarantined_excluded": 78,
+  "manifests": 1000,
+  "tool_calls": 5537,
+  "servers_registered": 158,
+  "event_kinds": {
+    "intent": 1000,
+    "register": 161,
+    "remanifest": 999,
+    "snapshot": 1000,
+    "tool_call": 5537
+  },
+  "events_verified": 8697,
+  "spans_verified": 1001,
+  "ledger_unexplained": 0,
+  "ingest_ms": 2497,
+  "events_per_sec": 3483.0,
+  "verify_ms": 553,
+  "fabric_db_bytes": 32231424,
+  "quarantine": [
+    {
+      "uuid": "cd6aabab-ace0-53cf-84db-0766ab781830",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "8694a637-351f-5f21-af4b-7a927ce4bd68",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "506130cb-7afd-5f42-8b99-d52369ab922f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "e1adb14f-81a1-5592-a016-b099bfa3399f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "fe87d68a-f094-5428-8199-b92460ad3312",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "31fde72c-d5b4-5f42-9008-fdbe996aabd6",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "50f79650-a30b-5b4d-8ddb-2e69f195caf3",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "acb968cf-9754-555a-8733-8c57a94b1fa0",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "5c50dcf0-6b2a-5460-9413-32fd0b686ad2",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "3405328c-2fca-5bed-b5d1-6fa12e3e96a0",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "18725224-aad2-5984-838c-de3fd22e494c",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "07aac170-e67a-57cf-9b0c-a48cdfa09b0f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "14a33488-4901-55a0-9aed-44a992bf06ff",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "2527205a-4bde-51f5-bb40-3dc4c62e1972",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "7cbe540b-8a9e-5544-9b02-b4d5388442fb",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "0fdb8da9-8241-5651-9cce-9669a8916d1b",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "ad350995-ec73-56eb-bda4-eafcd9a119ad",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "634223fc-7946-5dcd-b4de-a573b1c076a4",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "d743cbfa-574c-56bd-b9c3-d4e1fab741bf",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "ba95875e-7746-5bbd-b8fb-a6777ebf974e",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "a34d42ea-a9f7-5833-967b-f9bfa6d45184",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "40a1f55f-27d5-5476-bdfc-db16dddf4f9a",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "e45a187c-7002-50ae-8c5b-6b098796d4f5",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "c2a27a19-ba51-56df-b4e1-4e979080b8c9",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "8b74356c-0b7b-5029-9cb2-43e0d940b5fb",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "131bfb25-3ac4-5555-8ba0-d5292502c731",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "5034725b-4199-583b-8f8c-84eaebdf3538",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "5d4d5aac-bf3f-5c68-a76e-a5476699dd89",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "69433f42-5383-5c60-9eac-f36062c6c373",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "31770a06-7e27-5d29-bf22-25499cc167be",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "e0a5d515-245d-592e-8c52-00bbdd8327f9",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "df3c8693-3a7f-5d9e-a48b-1331e0df6f41",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "f9fe1326-5e81-57d9-9543-7d8d8723dce1",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "b16da5dd-45bf-5d61-a6c5-9d8cde39a857",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "75566ef8-b12e-50a4-aef3-40281023405d",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "2b33f477-0368-512c-b5f8-58e699f07e55",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "dabc7a13-c455-5492-946e-33d73163aebf",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "3d024251-1d9b-5ee5-8c90-27da920574a1",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "61f1e20d-7a8c-5fbf-a087-f6f0ca3e94ba",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "6d251005-9488-5e4a-9f6d-5cf75f5fbaf6",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "c0c6be98-988a-5a68-a184-006917414528",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "56b2b1d9-678f-51f8-ad23-76260bd08120",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "8a6c7050-4c54-56fb-9bde-168091e5d58a",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "2db220f7-31ab-5997-9389-fd7e25bb8326",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "e126cf7b-45da-54b6-afcd-157d77cf86f9",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "44af0e01-7d65-5036-946d-4c8559ed3e6f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "e7162ddc-6f18-5d78-8e72-1300ca53c585",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "2d19c5f7-d022-58ae-82b8-f24c2591585f",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "3d3d7de9-4fab-5fd4-a722-2b2f2a1fac94",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "741f6312-3728-5bf4-ad28-367262b12818",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "504835d3-87aa-5947-84d9-885b4a602a1a",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "bbcb911b-e576-5d3a-9562-32c5ed106baa",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "c4e86849-c793-5fa4-9be1-0b0ab2ef9cc8",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "63a23503-a576-5e5f-aace-6f12e6fe5de1",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "ab82ea0f-9774-5077-97ad-cb9fbaeda364",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "c742ef70-5dad-5111-a01e-bebe201b821b",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "73323d4f-dad6-50d4-8083-ed25d1957dee",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "f000cead-407c-58c4-a4a4-38f0ba831a6c",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "775503e1-4173-56f3-817b-3d797f26de4e",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "8180b43c-bb36-5675-9495-94623492381f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "678fdcc2-247f-539e-a520-eba2089e6e2c",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "7f8b3fba-ac68-582a-9ac7-95bd629990ec",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "8b76aa0c-94ce-5c92-9f86-07a6a48a0eb1",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "a3949c0b-2065-5ed1-a764-cc1162e49b1c",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "c6f418d6-da2b-5622-85be-383b336b71ab",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "1d29ff72-f0c3-59d1-9c7e-145820dcbc87",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "1f62272f-3be7-5c31-a9ca-3ba2a507bfd0",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "aee5ed63-46b1-5305-8dad-e3f76e6de9f3",
+      "reason": "tool_server_ambiguous"
+    },
+    {
+      "uuid": "fb04dcda-a7de-504f-857b-601d7ada068b",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "ceca6279-8f23-5c12-8ad4-7d2b35af8d2c",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "c84f707c-41bd-5297-9ac0-515e3175bff0",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "e4043511-9b6d-50c3-bd25-68e986e9787b",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "c4234329-40b4-5f4d-aaa2-eba7716ad677",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "00b1b2dd-92eb-5edf-a857-b96e3e546a69",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "ccf94268-e5ae-557e-85a4-d862dc69386f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "d0cc094d-9a1c-5138-837a-bfe363a98e0f",
+      "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "f59a5fcc-fb2d-5c6a-84bf-b1bc35f24aff",
+      "reason": "unparseable_call_arguments"
+    }
+  ]
+}

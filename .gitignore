@@ -5,6 +5,10 @@
 # reproducible with `scripts/ci mutation`).
 /mutants.out/
 
+# W-9 corpus downloads (operator-side only; MCP-Flow is unlicensed —
+# never commit or redistribute; see docs/agent-trace-corpora-2026-07-11.md)
+/corpora/
+
 # OS / editor cruft
 .DS_Store
 *.swp

@@ -56,6 +56,10 @@ pub enum BrokerError {
     NoSuchPromotion(i64),
     #[error("promotion {id} has no valid immutable candidate: {detail}")]
     MalformedPromotion { id: i64, detail: String },
+    #[error("capability closed (§5.4): {0}")]
+    CapabilityClosed(String),
+    #[error("invalid revocation: {0}")]
+    InvalidRevocation(String),
 }
 
 /// The broker's decision on a proposed call.
@@ -165,22 +169,72 @@ impl Broker {
         escalatable: Vec<&str>,
         expires_at: &str,
     ) -> Result<String, BrokerError> {
+        self.mint_at(manifest_id, holder, caveats, escalatable, expires_at, &now_rfc3339())
+    }
+
+    /// Mint with an explicit `issued_at` — the timestamp-collision seam
+    /// §5.4's closed-id refusal exists for: an identical body minted at the
+    /// same instant reproduces a prior (possibly revoked) content id, and
+    /// granting a closed id must fail loudly, never silently issue a dead
+    /// token. Tests drive this seam directly.
+    pub fn mint_at(
+        &mut self,
+        manifest_id: &str,
+        holder: &str,
+        caveats: Vec<Value>,
+        escalatable: Vec<&str>,
+        expires_at: &str,
+        issued_at: &str,
+    ) -> Result<String, BrokerError> {
         self.check_m1(manifest_id, &caveats)?;
 
-        let now = now_rfc3339();
         let body = capability::build(
             holder,
             manifest_id,
             None,
-            &now,
+            issued_at,
             expires_at,
             caveats,
             escalatable,
         )?;
         let sealed = canon::seal("cap", body, self.fabric.fabric_sk())?;
-        let id = trace::put_object(&self.fabric.conn, "capability", &sealed, &now)?;
+        let id = sealed
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("sealed object has id")
+            .to_string();
+        self.refuse_closed_id(&id)?;
+        trace::put_object(&self.fabric.conn, "capability", &sealed, issued_at)?;
         self.grant_event(&id, manifest_id, None)?;
         Ok(id)
+    }
+
+    /// §5.4: the broker MUST refuse to grant a closed id — restoration is a
+    /// new mint (new `issued_at` ⇒ new content id), never reactivation.
+    fn refuse_closed_id(&self, id: &str) -> Result<(), BrokerError> {
+        let events = trace::events_of_kinds(&self.fabric.conn, &["revoke"])?;
+        let revokes = a22_revoke_offsets(&events, &self.fabric.fabric_vk());
+        match revokes.get(id) {
+            Some(r) => Err(BrokerError::CapabilityClosed(format!(
+                "{id} was revoked at offset {r}; closure is permanent for the id — mint a new capability"
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// §5.4 decision-time liveness of `cap_id` at the current verified head
+    /// — the same pure view gate replay evaluates at each effect's durable
+    /// authorization offset. Err(reason) when closed or unactivated.
+    fn liveness_at_head(&self, cap_id: &str) -> Result<(), String> {
+        let events = trace::events_of_kinds(&self.fabric.conn, &["grant", "revoke"])
+            .map_err(|e| format!("authority view unavailable: {e} (fail closed)"))?;
+        let vk = self.fabric.fabric_vk();
+        let grants = a22_grant_bindings(&events, &vk);
+        let revokes = a22_revoke_offsets(&events, &vk);
+        let head = trace::head_offset(&self.fabric.conn)
+            .map_err(|e| format!("substrate head unavailable: {e} (fail closed)"))?;
+        let chain = a22_ancestry(&self.fabric.conn, &vk, cap_id)?;
+        a22_state_at(&chain, head + 1, &grants, &revokes)
     }
 
     /// M1: stores reachable through the allowed tools must be present in the
@@ -227,6 +281,11 @@ impl Broker {
     ) -> Result<String, BrokerError> {
         let parent = trace::get_object(&self.fabric.conn, parent_id)?;
         canon::verify(&parent, &self.fabric.fabric_vk())?;
+        // §5.4: a parent closed at the child's grant offset cannot produce
+        // a live child — refused here, and the liveness view derives the
+        // same answer regardless of what rows were injected.
+        self.liveness_at_head(parent_id)
+            .map_err(BrokerError::CapabilityClosed)?;
         self.check_m1(bound_manifest, &caveats)?;
         let now = now_rfc3339();
         let body = capability::build(
@@ -240,9 +299,112 @@ impl Broker {
         )?;
         capability::verify_attenuation(&parent, &Value::Object(body.clone()))?;
         let sealed = canon::seal("cap", body, self.fabric.fabric_sk())?;
-        let id = trace::put_object(&self.fabric.conn, "capability", &sealed, &now)?;
+        let id = sealed
+            .get("id")
+            .and_then(Value::as_str)
+            .expect("sealed object has id")
+            .to_string();
+        self.refuse_closed_id(&id)?;
+        trace::put_object(&self.fabric.conn, "capability", &sealed, &now)?;
         self.grant_event(&id, bound_manifest, Some(parent_id))?;
         Ok(id)
+    }
+
+    /// A22/§5.4: close `cap_id` early. The signed event IS the closure —
+    /// permanent for the id, prospective, descendant-closing through the
+    /// ancestry view (no subtree enumeration happens here). `channel` is
+    /// `Some((chan, auth_strength))` for a human-originated request (any
+    /// registered channel may request — closure only narrows, §3.1
+    /// directionality) and `None` for a broker-mechanical cause, which must
+    /// name one (never `operator_request`). The target must be a
+    /// broker-verified capability: a typo'd kill fails loudly instead of
+    /// poisoning an id. Re-revoking an already-closed id is permitted —
+    /// kill-switch retries are idempotent in effect; the view takes the
+    /// earliest offset.
+    pub fn revoke_capability(
+        &mut self,
+        cap_id: &str,
+        reason: &str,
+        channel: Option<(&str, &str)>,
+    ) -> Result<String, BrokerError> {
+        let cap = trace::get_object(&self.fabric.conn, cap_id).map_err(|e| {
+            BrokerError::InvalidRevocation(format!("target {cap_id} not found: {e}"))
+        })?;
+        canon::verify(&cap, &self.fabric.fabric_vk()).map_err(|e| {
+            BrokerError::InvalidRevocation(format!(
+                "target {cap_id} is not a broker-verified capability: {e}"
+            ))
+        })?;
+        let bound_manifest = cap["bound_manifest"].as_str().ok_or_else(|| {
+            BrokerError::InvalidRevocation(format!("target {cap_id} has no bound_manifest"))
+        })?.to_string();
+        if reason.trim().is_empty() {
+            return Err(BrokerError::InvalidRevocation("reason must be non-empty".into()));
+        }
+        if channel.is_none() && reason == "operator_request" {
+            return Err(BrokerError::InvalidRevocation(
+                "broker-originated revocation must carry a mechanical reason, never operator_request (§5.4)".into(),
+            ));
+        }
+        let (chan, auth) = match channel {
+            Some((c, a)) => (Value::String(c.into()), Value::String(a.into())),
+            None => (Value::Null, Value::Null),
+        };
+        let sk = self.fabric.fabric_sk().clone();
+        let span = self.fabric.substrate_span().to_string();
+        let ev = trace::append(
+            &mut self.fabric.conn,
+            &sk,
+            &span,
+            Some(&bound_manifest),
+            "revoke",
+            json!({
+                "capability": cap_id, "reason": reason,
+                "channel": chan, "auth_strength": auth,
+            }),
+            &now_rfc3339(),
+        )?;
+        Ok(ev.id)
+    }
+
+    /// Derived display view: every stored capability whose ancestry passes
+    /// through `cap_id` — the subtree a revoke of `cap_id` closes. Not
+    /// enforcement (§5.4 cascade is definitional in the liveness view);
+    /// the operator surface shows it so a kill is legible.
+    pub fn capability_descendants(&self, cap_id: &str) -> Result<Vec<String>, BrokerError> {
+        let mut stmt = self
+            .fabric
+            .conn
+            .prepare("SELECT id, raw FROM objects WHERE kind = 'capability'")?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let parent_of: BTreeMap<String, Option<String>> = rows
+            .iter()
+            .map(|(id, raw)| {
+                let parent = serde_json::from_str::<Value>(raw)
+                    .ok()
+                    .and_then(|v| v["parent"].as_str().map(str::to_string));
+                (id.clone(), parent)
+            })
+            .collect();
+        let mut out = Vec::new();
+        for id in parent_of.keys() {
+            let mut cur = Some(id.clone());
+            let mut hops = 0;
+            while let Some(c) = cur {
+                if c == cap_id && id != cap_id {
+                    out.push(id.clone());
+                    break;
+                }
+                hops += 1;
+                if hops > parent_of.len() {
+                    break; // cycle in stored rows: display view stays finite
+                }
+                cur = parent_of.get(&c).cloned().flatten();
+            }
+        }
+        Ok(out)
     }
 
     fn grant_event(
@@ -288,6 +450,17 @@ impl Broker {
                 Some("capability signature invalid (F1)".into()),
                 json!([]),
             );
+        }
+
+        // A22/§5.4 structural precondition: closure and activation at the
+        // current verified head, BEFORE caveat evaluation and before any
+        // escalation could be enqueued — a closed capability's denial is
+        // never escalatable, and exemptions are never consulted (closure
+        // dominates). This is what denies a post-revoke call before any
+        // effect; the gate's re-evaluation at the effect's durable
+        // authorization offset is authoritative for what becomes durable.
+        if let Err(why) = self.liveness_at_head(cap_id) {
+            return self.deny(cap_id, tool, action, vec![], Some(why), json!([]));
         }
 
         // Undeclared actions cannot be called (§4).
@@ -762,7 +935,177 @@ fn m7_verify_grant(
     }
 }
 
+// ---- A22/§5.4 closure: the pure event-derived authority view ------------
+//
+// One reconstruction shared verbatim by decision time (evaluated at the
+// current verified head) and gate replay (evaluated at each effect's
+// durable authorization offset — today the tool_call event itself).
+// Closure is a structural precondition in front of caveat evaluation,
+// never a §5.1 caveat dimension, so pure-evaluator consumers (the corpus
+// harness) are untouched. The a22_* functions are the stable mutation-lane
+// surface, the closure duals of the m7_* activation predicates above.
+
+/// Earliest verified revoke offset per capability id, resolved across the
+/// ENTIRE substrate — never filtered by span or manifest. §5.4 doubt-never-
+/// widens: a signature-verified revoke closes the capability it names even
+/// when its manifest field or span placement is anomalous; rows whose
+/// signature fails verification move nothing (unsigned state is not part
+/// of the view — chain verification catches the tamper at the gate).
+fn a22_revoke_offsets(
+    events: &[trace::EventRow],
+    vk: &ed25519_dalek::VerifyingKey,
+) -> BTreeMap<String, i64> {
+    let mut revokes = BTreeMap::new();
+    for ev in events {
+        if ev.kind == "revoke" && canon::verify(&ev.raw, vk).is_ok() {
+            if let Some(cap) = ev.raw["body"]["capability"].as_str() {
+                revokes.entry(cap.to_string()).or_insert(ev.offset);
+            }
+        }
+    }
+    revokes
+}
+
+/// Earliest verified grant offset per (capability, manifest) binding —
+/// A21's exact-binding activation edge for every link of an ancestry chain
+/// (`m7_grant_offsets` is the per-manifest projection of the same edge).
+/// Activation doubt resolves to not-granted: unverifiable rows activate
+/// nothing, and the binding manifest is read from the SIGNED raw, never
+/// the index column.
+fn a22_grant_bindings(
+    events: &[trace::EventRow],
+    vk: &ed25519_dalek::VerifyingKey,
+) -> BTreeMap<(String, String), i64> {
+    let mut grants = BTreeMap::new();
+    for ev in events {
+        if ev.kind == "grant" && canon::verify(&ev.raw, vk).is_ok() {
+            if let (Some(cap), Some(man)) = (
+                ev.raw["body"]["capability"].as_str(),
+                ev.raw["manifest"].as_str(),
+            ) {
+                grants.entry((cap.to_string(), man.to_string())).or_insert(ev.offset);
+            }
+        }
+    }
+    grants
+}
+
+/// Fetch and signature-verify the attenuation ancestry of `cap_id`, leaf
+/// first, root last — (id, bound_manifest) per hop. Fails closed on a
+/// missing or unverifiable link and on a parent cycle.
+fn a22_ancestry(
+    conn: &rusqlite::Connection,
+    vk: &ed25519_dalek::VerifyingKey,
+    cap_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let mut chain = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut cur = cap_id.to_string();
+    loop {
+        if !seen.insert(cur.clone()) {
+            return Err(format!(
+                "ancestry of {cap_id} contains a cycle at {cur} (fail closed)"
+            ));
+        }
+        let obj = trace::get_object(conn, &cur).map_err(|e| {
+            format!("capability {cur} in ancestry of {cap_id} unavailable: {e} (fail closed)")
+        })?;
+        canon::verify(&obj, vk).map_err(|e| {
+            format!("capability {cur} in ancestry of {cap_id} unverifiable: {e} (fail closed)")
+        })?;
+        let man = obj["bound_manifest"]
+            .as_str()
+            .ok_or_else(|| format!("capability {cur} has no bound_manifest (fail closed)"))?
+            .to_string();
+        let parent = obj["parent"].as_str().map(str::to_string);
+        chain.push((cur.clone(), man));
+        match parent {
+            Some(p) => cur = p,
+            None => return Ok(chain),
+        }
+    }
+}
+
+/// §5.4 liveness of the leaf of `chain` (leaf-first, from [`a22_ancestry`])
+/// for an operation whose durable authorization offset is `o`:
+///
+/// 1. the leaf's exact-binding grant precedes `o` (M7's activation edge);
+/// 2. no verified revoke names ANY link at an offset before `o` — the
+///    quantifier is over all revokes, so closure is permanent per id
+///    (revoked-before-granted is equally dead) and the ancestor clause IS
+///    the descendant cascade;
+/// 4. every link carries its exact-binding grant and earliest grants are
+///    well-ordered along the chain (each ancestor's precedes its child's).
+///
+/// Condition 3 (expiry + ordinary caveats at the SI-22 clock) stays in the
+/// pure evaluator. §5.2 subset semantics stay mint-time-enforced and
+/// F1-signature-protected — not re-derived here.
+fn a22_state_at(
+    chain: &[(String, String)],
+    o: i64,
+    grants: &BTreeMap<(String, String), i64>,
+    revokes: &BTreeMap<String, i64>,
+) -> Result<(), String> {
+    // Closure first: it dominates activation and is checked before any
+    // caveat or exemption is consulted.
+    for (id, _) in chain {
+        if let Some(r) = revokes.get(id) {
+            if *r < o {
+                return Err(format!(
+                    "capability {id} revoked at offset {r} (§5.4; closure is permanent for the id)"
+                ));
+            }
+        }
+    }
+    // Activation: exact-binding grants, well-ordered leaf-ward (walking
+    // leaf → root, grant offsets strictly decrease).
+    let mut child_grant: Option<i64> = None;
+    for (id, man) in chain {
+        let g = grants.get(&(id.clone(), man.clone())).ok_or_else(|| {
+            format!("no verified grant binds {id} to {man} (A21/M7, fail closed)")
+        })?;
+        if let Some(cg) = child_grant {
+            if *g >= cg {
+                return Err(format!(
+                    "ancestry grants out of order: {id} granted at {g}, its child at {cg} (§5.4, fail closed)"
+                ));
+            }
+        }
+        child_grant = Some(*g);
+    }
+    match chain.first() {
+        Some((leaf, man)) => {
+            let g = grants[&(leaf.clone(), man.clone())];
+            if g < o {
+                Ok(())
+            } else {
+                Err(format!(
+                    "operation at offset {o} precedes the grant of {leaf} at {g} (M7 ordering)"
+                ))
+            }
+        }
+        None => Err("empty capability ancestry (fail closed)".into()),
+    }
+}
+
 impl Broker {
+    /// Read-only gate replay: re-verify a manifest's recorded trace against
+    /// its authority exactly as promotion would — spans, M7 activation,
+    /// §5.4 closure at each effect's offset, and full caveat re-evaluation
+    /// — without merging, locking, or mutating anything. The W-8
+    /// gate-replay measurement lane and operator diagnostics drive this.
+    pub fn gate_replay_check(&self, manifest_id: &str) -> Result<Value, BrokerError> {
+        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
+        canon::verify(&man, &self.fabric.fabric_vk())?;
+        let span = man["trace"]["span"]
+            .as_str()
+            .ok_or_else(|| {
+                KernelError::MalformedManifest(manifest_id.into(), "no trace.span".into())
+            })?
+            .to_string();
+        self.gate_trace_check(manifest_id, &span)
+    }
+
     /// Promote a completed branch to trunk (§5.3) — the only mutation in
     /// the system. Order is load-bearing: (1) the recorded trace is
     /// verified against the capabilities that authorized it — a violating
@@ -885,6 +1228,35 @@ impl Broker {
         // Grant activation offsets per capability for THIS manifest, from
         // the verified substrate span (M7 forward edge).
         let grants = m7_grant_offsets(&all_events, substrate_span, manifest_id);
+        // A22/§5.4: the closure view, shared verbatim with decision time.
+        // Revokes resolve by capability id across the whole substrate —
+        // never filtered by the evaluating manifest (an M2 sub-agent child
+        // dies with its ancestor's revoke).
+        let a22_grants = a22_grant_bindings(&all_events, &self.fabric.fabric_vk());
+        let a22_revokes = a22_revoke_offsets(&all_events, &self.fabric.fabric_vk());
+        // §5.4 doubt-never-widens, loud side: a verified revoke whose
+        // manifest field disagrees with its target's bound_manifest still
+        // closes — the inconsistency surfaces here as substrate-integrity
+        // signal, ledger-visible through the promotion event's trace_check.
+        let mut closure_anomalies: Vec<String> = Vec::new();
+        for ev in &all_events {
+            if ev.kind != "revoke" || canon::verify(&ev.raw, &self.fabric.fabric_vk()).is_err() {
+                continue;
+            }
+            let Some(target) = ev.raw["body"]["capability"].as_str() else { continue };
+            if let Ok(obj) = trace::get_object(&self.fabric.conn, target) {
+                let bound = obj["bound_manifest"].as_str();
+                let stamped = ev.raw["manifest"].as_str();
+                if bound.is_some() && stamped != bound {
+                    closure_anomalies.push(format!(
+                        "revoke {} stamps manifest {} but {target} is bound to {} — closure holds (§5.4)",
+                        ev.id,
+                        stamped.unwrap_or("null"),
+                        bound.unwrap_or("?"),
+                    ));
+                }
+            }
+        }
         for ev in &all_events {
             if ev.span != substrate_span
                 || ev.kind != "approval"
@@ -911,6 +1283,9 @@ impl Broker {
         }
 
         let mut caps: BTreeMap<String, Value> = BTreeMap::new();
+        // Verified ancestry per capability (§5.4 condition 4), cached —
+        // chains are short and effects reuse their capability.
+        let mut chains: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
         // Replay ledgers, keyed (cap, caveat-key): budget consumption and
         // remaining signed-approval headroom, rebuilt in event order.
         let mut meters: BTreeMap<(String, String), u64> = BTreeMap::new();
@@ -946,6 +1321,25 @@ impl Broker {
                 }
             };
             m7_verify_grant(brokered, cap_id, &ev.id, ev.offset, &grants).map_err(&violation)?;
+
+            // A22/§5.4: liveness at the effect's durable authorization
+            // offset — its own signed offset, never gate time — so a
+            // revoke never retro-fails honest pre-revoke work (parked
+            // promotions of pre-revoke work stay approvable) and work
+            // recorded after a revoke conservatively strands. Attributed
+            // calls are checked in full regardless of authority mode: the
+            // declaration only ever adds constraints (M7).
+            let chain = match chains.get(cap_id) {
+                Some(c) => c.clone(),
+                None => {
+                    let c = a22_ancestry(&self.fabric.conn, &self.fabric.fabric_vk(), cap_id)
+                        .map_err(&violation)?;
+                    chains.insert(cap_id.into(), c.clone());
+                    c
+                }
+            };
+            a22_state_at(&chain, ev.offset, &a22_grants, &a22_revokes)
+                .map_err(|e| violation(format!("event {}: {e}", ev.id)))?;
 
             let (tool, action) = (
                 body["tool"].as_str().unwrap_or(""),
@@ -1042,6 +1436,7 @@ impl Broker {
         Ok(json!({
             "events": events.len(), "tool_calls": tool_calls,
             "unattributed_tool_calls": unattributed,
+            "closure_anomalies": closure_anomalies,
             "capabilities": caps.keys().collect::<Vec<_>>(), "ok": true,
         }))
     }

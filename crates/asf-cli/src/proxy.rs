@@ -352,6 +352,23 @@ fn dispatch_approval_cmd(b: &mut Broker, req: &Value, channel: &str) -> Value {
             Ok(()) => json!({ "ok": true }),
             Err(e) => json!({ "ok": false, "error": e.to_string() }),
         },
+        // A22/§5.4: early closure. Same operator-owned surface as
+        // approvals — reachable only via the daemon socket or the offline
+        // CLI, never advertised to the agent over MCP (the kill switch
+        // stays off the work channel; SI-23's open question is hardening
+        // exactly this door under actuation). Closure only narrows, so any
+        // registered channel may request it (§3.1 directionality).
+        Some("revoke") => {
+            let cap = req["capability"].as_str().unwrap_or("");
+            let reason = req["reason"].as_str().unwrap_or("operator_request");
+            match b.revoke_capability(cap, reason, Some((channel, "local_session"))) {
+                Ok(event) => {
+                    let subtree = b.capability_descendants(cap).unwrap_or_default();
+                    json!({ "ok": true, "event": event, "closed_descendants": subtree })
+                }
+                Err(e) => json!({ "ok": false, "error": e.to_string() }),
+            }
+        }
         _ => json!({ "ok": false, "error": "unknown cmd" }),
     }
 }
@@ -656,6 +673,31 @@ pub fn approve_cli(home: &Path, cmd: &str, id: Option<i64>, uses: i64) -> Result
         return Ok(());
     }
     // Offline: open the home directly.
+    let fabric = Fabric::open_existing(home.join("fabric"))
+        .with_context(|| format!("no daemon socket and no fabric home under {}", home.display()))?;
+    let channel = trace::meta_get(&fabric.conn, "channel")?
+        .unwrap_or_else(|| "chan:local".to_string());
+    let mut broker = Broker::new(fabric)?;
+    println!("{}", dispatch_approval_cmd(&mut broker, &req, &channel));
+    Ok(())
+}
+
+/// `asf revoke` — the operator side of A22/§5.4 early closure. Same
+/// dual-path shape as `asf approve`: the daemon socket when a proxy is
+/// live, the home directly when not. This surface is operator-native by
+/// construction; it never rides the agent's MCP stream.
+pub fn revoke_cli(home: &Path, cap: &str, reason: &str) -> Result<()> {
+    use std::os::unix::net::UnixStream;
+    let req = json!({ "cmd": "revoke", "capability": cap, "reason": reason });
+    let sock = home.join("approvals.sock");
+    if let Ok(mut stream) = UnixStream::connect(&sock) {
+        writeln!(stream, "{req}")?;
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        println!("{}", line.trim());
+        return Ok(());
+    }
     let fabric = Fabric::open_existing(home.join("fabric"))
         .with_context(|| format!("no daemon socket and no fabric home under {}", home.display()))?;
     let channel = trace::meta_get(&fabric.conn, "channel")?

@@ -1,0 +1,487 @@
+
+*** crates/asf-kernel/src/broker.rs:928:45: replace < with > in m7_verify_grant
+
+*** mutation diff:
+--- crates/asf-kernel/src/broker.rs
++++ replace < with > in m7_verify_grant
+@@ -920,17 +920,17 @@
+     effect_id: &str,
+     effect_offset: i64,
+     grants: &BTreeMap<String, i64>,
+ ) -> Result<(), String> {
+     if !brokered {
+         return Ok(());
+     }
+     match grants.get(cap_id) {
+-        Some(grant_offset) if *grant_offset < effect_offset => Ok(()),
++        Some(grant_offset) if *grant_offset > /* ~ changed by cargo-mutants ~ */ effect_offset => Ok(()),
+         Some(_) => Err(format!(
+             "event {effect_id} precedes the grant of {cap_id} (M7 ordering)"
+         )),
+         None => Err(format!(
+             "event {effect_id}: no verified grant event binds {cap_id} to this manifest (M7)"
+         )),
+     }
+ }
+
+
+*** /opt/homebrew/bin/cargo test --no-run --verbose --package=asf-kernel@0.1.0
+       Fresh cfg-if v1.0.4
+       Fresh version_check v0.9.5
+       Fresh typenum v1.20.1
+       Fresh libc v0.2.186
+       Fresh unicode-ident v1.0.24
+       Fresh getrandom v0.2.17
+       Fresh zerocopy v0.8.53
+       Fresh proc-macro2 v1.0.106
+       Fresh once_cell v1.21.4
+       Fresh rand_core v0.6.4
+       Fresh generic-array v0.14.7
+       Fresh quote v1.0.46
+       Fresh cpufeatures v0.2.17
+       Fresh subtle v2.6.1
+       Fresh crypto-common v0.1.7
+       Fresh syn v2.0.118
+       Fresh semver v1.0.28
+       Fresh shlex v2.0.1
+       Fresh bitflags v2.13.0
+       Fresh find-msvc-tools v0.1.9
+       Fresh getrandom v0.3.4
+       Fresh rustc_version v0.4.1
+       Fresh cc v1.2.66
+       Fresh inout v0.1.4
+       Fresh block-buffer v0.10.4
+       Fresh ppv-lite86 v0.2.21
+       Fresh pkg-config v0.3.33
+       Fresh vcpkg v0.2.15
+       Fresh serde_core v1.0.228
+       Fresh digest v0.10.7
+       Fresh cipher v0.4.4
+       Fresh ahash v0.8.12
+       Fresh rand_core v0.9.5
+       Fresh universal-hash v0.5.1
+       Fresh errno v0.3.14
+       Fresh hashbrown v0.17.1
+       Fresh opaque-debug v0.3.1
+       Fresh autocfg v1.5.1
+       Fresh equivalent v1.0.2
+       Fresh hashbrown v0.14.5
+       Fresh polyval v0.6.2
+       Fresh indexmap v2.14.0
+       Fresh rustix v1.1.4
+       Fresh zmij v1.0.21
+       Fresh getrandom v0.4.3
+       Fresh serde_derive v1.0.228
+       Fresh signature v2.2.0
+       Fresh fastrand v2.4.1
+       Fresh memchr v2.8.3
+       Fresh zeroize v1.9.0
+       Fresh time-core v0.1.9
+       Fresh itoa v1.0.18
+       Fresh num-conv v0.2.2
+       Fresh curve25519-dalek v4.1.3
+       Fresh time-macros v0.2.31
+       Fresh serde_json v1.0.150
+       Fresh serde v1.0.228
+       Fresh ed25519 v2.2.3
+       Fresh libsqlite3-sys v0.30.1
+       Fresh tempfile v3.27.0
+       Fresh ghash v0.5.1
+       Fresh hashlink v0.9.1
+       Fresh ctr v0.9.2
+       Fresh aes v0.8.4
+       Fresh sha2 v0.10.9
+       Fresh rand_chacha v0.3.1
+       Fresh aead v0.5.2
+       Fresh thiserror-impl v2.0.18
+       Fresh wait-timeout v0.2.1
+       Fresh fallible-streaming-iterator v0.1.9
+       Fresh ryu-js v1.0.2
+       Fresh fallible-iterator v0.3.0
+       Fresh same-file v1.0.6
+       Fresh fnv v1.0.7
+       Fresh quick-error v1.2.3
+       Fresh powerfmt v0.2.0
+       Fresh deranged v0.5.8
+       Fresh smallvec v1.15.2
+       Fresh bit-vec v0.8.0
+       Fresh rusty-fork v0.3.1
+       Fresh serde_json_canonicalizer v0.3.2
+       Fresh bit-set v0.8.0
+       Fresh rusqlite v0.32.1
+       Fresh time v0.3.53
+       Fresh walkdir v2.5.0
+       Fresh aes-gcm v0.10.3
+       Fresh rand v0.8.6
+       Fresh ed25519-dalek v2.2.0
+       Fresh thiserror v2.0.18
+       Fresh num-traits v0.2.19
+       Fresh rand_chacha v0.9.0
+       Fresh rand v0.9.4
+       Fresh rand_xorshift v0.4.0
+       Fresh unarray v0.1.4
+       Fresh hex v0.4.3
+       Fresh regex-syntax v0.8.11
+       Fresh proptest v1.11.0
+       Dirty asf-kernel v0.1.0 (/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/crates/asf-kernel): the file `crates/asf-kernel/src/broker.rs` has changed (1783869550.789917012s, 13s after last build at 1783869537.835425996s)
+   Compiling asf-kernel v0.1.0 (/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/crates/asf-kernel)
+     Running `rustc --crate-name asf_kernel --edition=2021 crates/asf-kernel/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=7ae76c6c43dd5a10 -C extra-filename=-77ec972d0cf1cb3f --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name asf_kernel --edition=2021 crates/asf-kernel/src/lib.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=d996cf76fafb9095 -C extra-filename=-6b4ee99c902efbed --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rmeta --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rmeta --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rmeta --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rmeta --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rmeta --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rmeta --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rmeta --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rmeta --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rmeta --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rmeta --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rmeta --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rmeta --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rmeta --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rmeta -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name properties --edition=2021 crates/asf-kernel/tests/properties.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=51ef5bef8f171baa -C extra-filename=-c4baff2d510a75db --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern asf_kernel=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libasf_kernel-6b4ee99c902efbed.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name broker --edition=2021 crates/asf-kernel/tests/broker.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=9c3a3fcb2501bbd2 -C extra-filename=-1c6c7326cb19efbd --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern asf_kernel=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libasf_kernel-6b4ee99c902efbed.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name gate --edition=2021 crates/asf-kernel/tests/gate.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=9eba7fa5e649b179 -C extra-filename=-5ad836deb2b7dd15 --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern asf_kernel=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libasf_kernel-6b4ee99c902efbed.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name interleavings --edition=2021 crates/asf-kernel/tests/interleavings.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=eec9f46c27dd91f9 -C extra-filename=-b95821a9f9cc2812 --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern asf_kernel=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libasf_kernel-6b4ee99c902efbed.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name e2e --edition=2021 crates/asf-kernel/tests/e2e.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=8c25af6846970c88 -C extra-filename=-ade0b15a2920b122 --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern asf_kernel=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libasf_kernel-6b4ee99c902efbed.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+     Running `rustc --crate-name model --edition=2021 crates/asf-kernel/tests/model.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 -C split-debuginfo=unpacked --test --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=4fd2f4c7ee088c5a -C extra-filename=-e78c215d668b0392 --out-dir /private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps -C incremental=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/incremental -L dependency=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps --extern aes_gcm=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libaes_gcm-4167b71e7a605534.rlib --extern asf_kernel=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libasf_kernel-6b4ee99c902efbed.rlib --extern ed25519_dalek=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libed25519_dalek-bf9d72956fe232c3.rlib --extern hex=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libhex-fcaa95037010217e.rlib --extern libc=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/liblibc-9355001431d4a353.rlib --extern proptest=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libproptest-e2abbf1fb7643c93.rlib --extern rand=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librand-18aa65906fe494f4.rlib --extern rusqlite=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/librusqlite-3c840610eb8e776f.rlib --extern serde=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde-5b3a279b89afa8cc.rlib --extern serde_json=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json-e791274cdb7ee07e.rlib --extern serde_json_canonicalizer=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libserde_json_canonicalizer-ba16c910a968ab9f.rlib --extern sha2=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libsha2-2ab63f5a9d356c6b.rlib --extern tempfile=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtempfile-0341ea129c745f0d.rlib --extern thiserror=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libthiserror-7d989b0530529cae.rlib --extern time=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libtime-812de375fa4c47da.rlib --extern walkdir=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libwalkdir-792c1d7487e4522b.rlib --extern zeroize=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/libzeroize-dfd42f4cfaf2ac15.rlib -L native=/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/build/libsqlite3-sys-0cfaf4b0a8d77b97/out`
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.75s
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/asf_kernel-77ec972d0cf1cb3f`
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/broker-1c6c7326cb19efbd`
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/e2e-ade0b15a2920b122`
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/gate-5ad836deb2b7dd15`
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/interleavings-b95821a9f9cc2812`
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/model-e78c215d668b0392`
+  Executable `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/properties-c4baff2d510a75db`
+
+*** result: Success
+
+*** /opt/homebrew/bin/cargo test --verbose --package=asf-kernel@0.1.0
+       Fresh cfg-if v1.0.4
+       Fresh version_check v0.9.5
+       Fresh typenum v1.20.1
+       Fresh unicode-ident v1.0.24
+       Fresh once_cell v1.21.4
+       Fresh subtle v2.6.1
+       Fresh libc v0.2.186
+       Fresh find-msvc-tools v0.1.9
+       Fresh bitflags v2.13.0
+       Fresh shlex v2.0.1
+       Fresh getrandom v0.2.17
+       Fresh zerocopy v0.8.53
+       Fresh proc-macro2 v1.0.106
+       Fresh cpufeatures v0.2.17
+       Fresh semver v1.0.28
+       Fresh cc v1.2.66
+       Fresh getrandom v0.3.4
+       Fresh pkg-config v0.3.33
+       Fresh generic-array v0.14.7
+       Fresh rand_core v0.6.4
+       Fresh quote v1.0.46
+       Fresh rustc_version v0.4.1
+       Fresh ppv-lite86 v0.2.21
+       Fresh vcpkg v0.2.15
+       Fresh ahash v0.8.12
+       Fresh serde_core v1.0.228
+       Fresh crypto-common v0.1.7
+       Fresh syn v2.0.118
+       Fresh block-buffer v0.10.4
+       Fresh inout v0.1.4
+       Fresh rand_core v0.9.5
+       Fresh errno v0.3.14
+       Fresh digest v0.10.7
+       Fresh cipher v0.4.4
+       Fresh universal-hash v0.5.1
+       Fresh equivalent v1.0.2
+       Fresh autocfg v1.5.1
+       Fresh opaque-debug v0.3.1
+       Fresh hashbrown v0.17.1
+       Fresh getrandom v0.4.3
+       Fresh polyval v0.6.2
+       Fresh indexmap v2.14.0
+       Fresh serde_derive v1.0.228
+       Fresh rustix v1.1.4
+       Fresh zmij v1.0.21
+       Fresh hashbrown v0.14.5
+       Fresh itoa v1.0.18
+       Fresh num-conv v0.2.2
+       Fresh memchr v2.8.3
+       Fresh zeroize v1.9.0
+       Fresh time-core v0.1.9
+       Fresh fastrand v2.4.1
+       Fresh signature v2.2.0
+       Fresh libsqlite3-sys v0.30.1
+       Fresh serde v1.0.228
+       Fresh hashlink v0.9.1
+       Fresh serde_json v1.0.150
+       Fresh ed25519 v2.2.3
+       Fresh curve25519-dalek v4.1.3
+       Fresh tempfile v3.27.0
+       Fresh time-macros v0.2.31
+       Fresh ghash v0.5.1
+       Fresh sha2 v0.10.9
+       Fresh ctr v0.9.2
+       Fresh aes v0.8.4
+       Fresh thiserror-impl v2.0.18
+       Fresh aead v0.5.2
+       Fresh rand_chacha v0.3.1
+       Fresh wait-timeout v0.2.1
+       Fresh fallible-streaming-iterator v0.1.9
+       Fresh deranged v0.5.8
+       Fresh ryu-js v1.0.2
+       Fresh fnv v1.0.7
+       Fresh powerfmt v0.2.0
+       Fresh same-file v1.0.6
+       Fresh quick-error v1.2.3
+       Fresh smallvec v1.15.2
+       Fresh bit-vec v0.8.0
+       Fresh fallible-iterator v0.3.0
+       Fresh walkdir v2.5.0
+       Fresh aes-gcm v0.10.3
+       Fresh serde_json_canonicalizer v0.3.2
+       Fresh rand v0.8.6
+       Fresh time v0.3.53
+       Fresh rusty-fork v0.3.1
+       Fresh ed25519-dalek v2.2.0
+       Fresh thiserror v2.0.18
+       Fresh num-traits v0.2.19
+       Fresh bit-set v0.8.0
+       Fresh rusqlite v0.32.1
+       Fresh rand_xorshift v0.4.0
+       Fresh rand v0.9.4
+       Fresh rand_chacha v0.9.0
+       Fresh hex v0.4.3
+       Fresh unarray v0.1.4
+       Fresh regex-syntax v0.8.11
+       Fresh proptest v1.11.0
+       Fresh asf-kernel v0.1.0 (/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/crates/asf-kernel)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/asf_kernel-77ec972d0cf1cb3f`
+
+running 65 tests
+test capability::tests::expiry_is_mandatory ... ok
+test capability::tests::glob_cover_is_conservative ... ok
+test capability::tests::glob_semantics ... ok
+test canon::tests::jcs_rfc8785_shapes ... ok
+test capability::tests::child_expiry_is_compared_as_an_instant ... ok
+test canon::tests::unknown_fields_are_hashed ... ok
+test capability::tests::attenuation_identity_is_legal ... ok
+test canon::tests::id_excludes_id_and_sig_and_is_stable ... ok
+test canon::tests::unknown_fields_survive_reserialize ... ok
+test canon::tests::verify_roundtrip_and_tamper_detection ... ok
+test capability::tests::unknown_dimension_cannot_be_attenuation_verified ... ok
+test capability::tests::valid_attenuation_narrows_everything ... ok
+test capability::tests::widening_attempts_all_rejected ... ok
+test evaluate::tests::approval_exemption_flips_the_check ... ok
+test evaluate::tests::clean_call_allows_with_full_check_record ... ok
+test evaluate::tests::budget_exhaustion_escalates_when_escalatable_else_denies ... ok
+test evaluate::tests::out_of_scope_path_denies ... ok
+test evaluate::tests::irreversible_action_blocked_by_reversibility_max ... ok
+test evaluate::tests::external_reach_requires_live_only_for_external_calls ... ok
+test evaluate::tests::structural_gates_deny_outright ... ok
+test evaluate::tests::time_caveat_no_longer_fails_open_at_subsecond_boundary ... ok
+test evaluate::tests::unlisted_action_denies ... ok
+test evaluate::tests::unknown_dimension_fails_closed_and_never_escalates ... ok
+test evaluate::tests::unparseable_time_bound_fails_closed ... ok
+test evaluate::tests::unsupported_budget_window_fails_closed ... ok
+test evaluate::tests::write_with_no_extractable_paths_fails_closed ... ok
+test promote::tests::default_policy_gates_destructive_classes ... ok
+test promote::tests::ambiguous_duplicate_content_stays_add_delete ... ok
+test promote::tests::conflicts_trunk_wins_and_branch_version_recorded ... ok
+test promote::tests::identical_changes_do_not_conflict ... ok
+test promote::tests::non_conflicting_changes_from_both_sides_land ... ok
+test promote::tests::rename_never_renders_as_mass_deletion ... ok
+test promote::tests::rename_vs_move_distinction ... ok
+test snapshot::tests::crash_during_fs_apply_helper ... ok
+test keys::tests::dek_wrap_roundtrip_and_shred_semantics ... ok
+test keys::tests::concurrent_first_open_converges_on_one_key ... ok
+test keys::tests::keystore_and_new_key_permissions_are_private ... ok
+test payload::tests::roundtrip_and_idempotent_put ... ok
+test payload::tests::shred_makes_normal_resolution_unreadable_and_keeps_structure ... ok
+test keys::tests::keys_persist_across_opens ... ok
+test payload::tests::row_substitution_cannot_change_what_a_hash_resolves_to ... ok
+test snapshot::tests::cas_get_rehashes_content_before_returning_it ... ok
+test snapshot::tests::prepare_failure_leaves_live_store_untouched ... ok
+test snapshot::tests::materialization_rejects_paths_outside_destination ... ok
+test snapshot::tests::symlinks_rejected ... ok
+test tools::tests::conservative_defaults_applied_at_registration ... ok
+test snapshot::tests::fs_restore_prunes_emptied_directories ... ok
+test tools::tests::registration_requires_class_and_store ... ok
+test snapshot::tests::git_dir_is_outside_the_store_boundary ... ok
+test tools::tests::object_row_without_registration_event_is_inert ... ok
+test snapshot::tests::sqlite_capture_restore_roundtrip ... ok
+test tools::tests::stores_derivation_for_m1 ... ok
+test snapshot::tests::fs_restore_roundtrip_including_deletions_and_additions ... ok
+test tools::tests::tampered_registered_tool_is_inert ... ok
+test snapshot::tests::interrupted_in_place_apply_is_idempotently_recoverable ... ok
+test snapshot::tests::fs_capture_is_content_addressed_and_stable ... ok
+test trace::tests::unknown_kind_rejected ... ok
+test trace::tests::tamper_after_bypassing_triggers_is_detected ... ok
+test tools::tests::undeclared_actions_cannot_be_called ... ok
+test trace::tests::revoke_kind_accepted_and_expiry_kind_removed ... ok
+test trace::tests::append_only_enforced_by_triggers ... ok
+test snapshot::tests::fs_restore_leaves_unchanged_files_untouched ... ok
+test trace::tests::deleting_a_middle_event_breaks_the_chain ... ok
+test trace::tests::chain_links_and_offsets_are_global ... ok
+test snapshot::tests::hard_exit_mid_apply_reopens_and_converges ... ok
+
+test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/broker-1c6c7326cb19efbd`
+
+running 19 tests
+test attenuation_through_broker ... ok
+test a22_post_revoke_attenuation_is_refused ... ok
+test credentials_injected_never_traced ... ok
+test a22_revocation_api_refuses_bad_targets_and_bad_provenance ... ok
+test a22_broker_refuses_to_grant_a_closed_id ... ok
+test a22_revoked_capability_denies_structurally_and_never_escalates ... ok
+test attenuation_rechecks_m1_for_the_child_manifest ... ok
+test a22_exemptions_cannot_resurrect_closed_capability ... ok
+test allowed_call_full_cycle_with_checks_in_ledger ... ok
+test a22_child_revoke_preserves_parent_and_siblings ... ok
+test forged_capability_is_dead ... ok
+test m1_mint_rejects_uncovered_store ... ok
+test expired_capability_denies_structurally ... ok
+test undeclared_action_uncallable ... ok
+test unknown_dimension_denies_at_broker ... ok
+test out_of_scope_paths_and_reversibility_denied ... ok
+test m2_capability_dies_with_its_manifest ... ok
+test exemption_survives_a_denied_call ... ok
+test escalation_batch_approval_cycle ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.97s
+
+     Running `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/e2e-ade0b15a2920b122`
+
+running 5 tests
+test m5_behavior_change_forces_remanifest ... ok
+test conservative_default_reversibility_is_irreversible ... ok
+test revert_is_all_or_nothing ... ok
+test m8_revert_attributes_divergence_before_erasing_it ... ok
+test e2e_kernel_round_trip ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running `/private/var/folders/g6/__vy_fks659b1ql1zw6wtnkh0000gn/T/cargo-mutants-Coppice-51kAtY.tmp/target/debug/deps/gate-5ad836deb2b7dd15`
+
+running 35 tests
+test a22_non_grant_event_cannot_activate_capability_in_observed_mode ... ok
+test a22_ancestor_grants_must_be_well_ordered ... FAILED
+test a22_parked_promotion_of_pre_revoke_work_remains_approvable ... FAILED
+test a22_pre_revoke_work_promotes_after_revoke ... FAILED
+test a22_revoked_before_first_grant_is_dead ... FAILED
+test a22_inflight_ticket_recorded_after_revoke_strands_branch ... FAILED
+test a22_child_revoke_leaves_parent_promotable ... FAILED
+test a22_anomalous_manifest_revoke_still_closes_loudly ... FAILED
+test a22_effect_recorded_after_revoke_fails_gate ... FAILED
+test a22_ancestor_revoke_closes_cross_manifest_child ... FAILED
+test a22_same_id_regrant_cannot_reactivate ... FAILED
+test gate_rejects_branch_state_with_no_signed_tool_call_attestation ... ok
+test a22_unsigned_revocation_row_moves_nothing ... FAILED
+test gate_fails_closed_on_unresolvable_capability_attribution ... ok
+test gate_rejects_call_attributed_to_another_manifests_capability ... ok
+test gate_blocks_run_that_exceeded_its_token ... ok
+test gate_catches_time_violation_the_decision_evaluator_missed ... ok
+test destructive_ops_park_then_apply_on_approval ... ok
+test clean_additive_run_auto_promotes ... ok
+test concurrent_human_and_agent_edits_merge ... ok
+test m7_brokered_end_to_end_gates_clean ... FAILED
+test m7_grant_after_effect_does_not_retroactively_authorize ... ok
+test m7_grant_for_other_manifest_cannot_activate_capability ... ok
+test m7_capability_without_grant_is_inert ... ok
+test gate_rejects_undeclared_action_in_trace ... ok
+test m7_non_grant_event_cannot_activate_capability ... ok
+test m7_observed_manifest_tolerates_unattributed_calls ... ok
+test m7_brokered_manifest_rejects_unattributed_calls ... FAILED
+test m7_brokered_run_with_two_grants_gates_clean ... FAILED
+test gate_uses_signed_approval_binding_not_mutable_escalation_rows ... ok
+test promotion_survives_revert ... ok
+test sqlite_branch_change_promotes_whole_store ... ok
+test sqlite_both_changed_is_conflict_trunk_wins ... ok
+test reorganization_parks_but_renders_as_moves ... ok
+test si22_gate_clock_is_the_events_at_not_gate_time ... ok
+
+failures:
+
+---- a22_ancestor_grants_must_be_well_ordered stdout ----
+
+thread 'a22_ancestor_grants_must_be_well_ordered' (9147476) panicked at crates/asf-kernel/tests/gate.rs:318:13:
+event evt:44981bd0008188ffd6c160f9374bcdc0715a73dc77c4000bdb546f4352098f05 precedes the grant of cap:87b20c1e1c0c08c4b84f7cef8ee638d7610573291fc59e81cc929e1f2220f252 (M7 ordering)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a22_parked_promotion_of_pre_revoke_work_remains_approvable stdout ----
+
+thread 'a22_parked_promotion_of_pre_revoke_work_remains_approvable' (9147483) panicked at crates/asf-kernel/tests/gate.rs:1457:75:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:a6b24531acfa6b88b9694157a861c444f91e12f6773d0b57fe345aa50872e3d1 precedes the grant of cap:ff4c214c3a653de3a26b6d365e43a90008cda02974fab39dbdd8533219620ecc (M7 ordering)")
+
+---- a22_pre_revoke_work_promotes_after_revoke stdout ----
+
+thread 'a22_pre_revoke_work_promotes_after_revoke' (9147484) panicked at crates/asf-kernel/tests/gate.rs:1173:58:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:6eb155b9c397a91188cc52b0d667670b611260f3bd76557d0787a2eee314858a precedes the grant of cap:cefa2d4f21990ec44c7923eb66ea8bad2421dbd60aa1f9ff5710ff50419a9fa0 (M7 ordering)")
+
+---- a22_revoked_before_first_grant_is_dead stdout ----
+
+thread 'a22_revoked_before_first_grant_is_dead' (9147485) panicked at crates/asf-kernel/tests/gate.rs:318:13:
+event evt:66018862101ca39c9ec598c7fe79e56870e62d2f055b3b12b1be0e5bfa5b8c28 precedes the grant of cap:fdf8462e7616740c15ef5e28fc63165a5353b8090b1a54f287ff3d94cf3c1861 (M7 ordering)
+
+---- a22_inflight_ticket_recorded_after_revoke_strands_branch stdout ----
+
+thread 'a22_inflight_ticket_recorded_after_revoke_strands_branch' (9147481) panicked at crates/asf-kernel/tests/gate.rs:318:13:
+event evt:df704007c1f64834bcf83abf2c856bfbf81161818c0d477e9516742209d45d99 precedes the grant of cap:4db0e97bf914cded62e1901be335d95ccf353e0078cfdcb60f4d87bde24c413c (M7 ordering)
+
+---- a22_child_revoke_leaves_parent_promotable stdout ----
+
+thread 'a22_child_revoke_leaves_parent_promotable' (9147479) panicked at crates/asf-kernel/tests/gate.rs:1295:59:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:1fe13a6f4d4a7ef63a04529824087b29a20d7b0afa714d6f31f282c54a694348 precedes the grant of cap:48291498f6ea273d1aa2b75fe2b9ed578feb6a15a4340fd96e918cd24bec94a5 (M7 ordering)")
+
+---- a22_anomalous_manifest_revoke_still_closes_loudly stdout ----
+
+thread 'a22_anomalous_manifest_revoke_still_closes_loudly' (9147478) panicked at crates/asf-kernel/tests/gate.rs:1381:59:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:62287b84f1d33c6098ab77f6b5a421ad2986d60dd1cabfb8c5e09e059044ba4a precedes the grant of cap:6f68e0e74ba9243071ea960449e703c702e269ebe61a1bf22d421104632725cb (M7 ordering)")
+
+---- a22_effect_recorded_after_revoke_fails_gate stdout ----
+
+thread 'a22_effect_recorded_after_revoke_fails_gate' (9147480) panicked at crates/asf-kernel/tests/gate.rs:318:13:
+event evt:f9cb874f2cb9419bbdb6418b3a0e306829814dd7f0f050f3a6a256bce1a25f81 precedes the grant of cap:a6685ffd27ff58109cbc9abe8529f01f2785d668f1b4dd02470d466640b1ef85 (M7 ordering)
+
+---- a22_ancestor_revoke_closes_cross_manifest_child stdout ----
+
+thread 'a22_ancestor_revoke_closes_cross_manifest_child' (9147477) panicked at crates/asf-kernel/tests/gate.rs:1275:13:
+event evt:0b1b2aafd09d1c671697ac2bdccc4e761f042b941dd23dce92bb873f895c40a6 precedes the grant of cap:dce408e4392cadd5f7c4a83b35e09a858a73e129f3472163e2363647b02f4ff8 (M7 ordering)
+
+---- a22_same_id_regrant_cannot_reactivate stdout ----
+
+thread 'a22_same_id_regrant_cannot_reactivate' (9147492) panicked at crates/asf-kernel/tests/gate.rs:318:13:
+event evt:3d928367b9bd390437388011762e16f02348cfdd60f1520fc91f5933a37bcba3 precedes the grant of cap:b6383ff6af8d4443b9eab6cfd21be8ec3d15b17539b9523bb1af57a79afbc8e1 (M7 ordering)
+
+---- a22_unsigned_revocation_row_moves_nothing stdout ----
+
+thread 'a22_unsigned_revocation_row_moves_nothing' (9147493) panicked at crates/asf-kernel/tests/gate.rs:1342:59:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:1d9e513994b9857c7c2d8c05b9d357e7ef84f3f80c3c5139ea7e97505a4561c1 precedes the grant of cap:2993e55d29485d941b2b7f79bc40b93320109b7fa5ea92cf798fe6ec592b2114 (M7 ordering)")
+
+---- m7_brokered_end_to_end_gates_clean stdout ----
+
+thread 'm7_brokered_end_to_end_gates_clean' (9147508) panicked at crates/asf-kernel/tests/gate.rs:837:59:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:ede8349b3e89bcfef0d72629b79fa0fbd3568e58ea3de723bf4efec3dde37f37 precedes the grant of cap:f32a8b1a03efeb774f0f59b7a2e7c6f9f44c726e7636f2ff714a66bfaac58134 (M7 ordering)")
+
+---- m7_brokered_manifest_rejects_unattributed_calls stdout ----
+
+thread 'm7_brokered_manifest_rejects_unattributed_calls' (9147510) panicked at crates/asf-kernel/tests/gate.rs:755:13:
+event evt:1d671079c2a5a47418df7f5999a6d998a72676c6a920d055b953fa4ad0ff1789 precedes the grant of cap:633575979c838ecd49dd562d2f0a12172d6423f679f5403f8116f6232fb36cd8 (M7 ordering)
+
+---- m7_brokered_run_with_two_grants_gates_clean stdout ----
+
+thread 'm7_brokered_run_with_two_grants_gates_clean' (9147511) panicked at crates/asf-kernel/tests/gate.rs:1018:59:
+called `Result::unwrap()` on an `Err` value: GateTraceViolation("event evt:2df2e95010b0359cb155f846f7265550dca261fc35427958e7a4e7fc8465a873 precedes the grant of cap:4d45c3e7cffe8e2da04da4905d31929468aa1455794b3873818cd0060fcee499 (M7 ordering)")
+
+
+failures:
+    a22_ancestor_grants_must_be_well_ordered
+    a22_ancestor_revoke_closes_cross_manifest_child
+    a22_anomalous_manifest_revoke_still_closes_loudly
+    a22_child_revoke_leaves_parent_promotable
+    a22_effect_recorded_after_revoke_fails_gate
+    a22_inflight_ticket_recorded_after_revoke_strands_branch
+    a22_parked_promotion_of_pre_revoke_work_remains_approvable
+    a22_pre_revoke_work_promotes_after_revoke
+    a22_revoked_before_first_grant_is_dead
+    a22_same_id_regrant_cannot_reactivate
+    a22_unsigned_revocation_row_moves_nothing
+    m7_brokered_end_to_end_gates_clean
+    m7_brokered_manifest_rejects_unattributed_calls
+    m7_brokered_run_with_two_grants_gates_clean
+
+test result: FAILED. 21 passed; 14 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.77s
+
+error: test failed, to rerun pass `-p asf-kernel --test gate`
+
+*** result: Failure(101)

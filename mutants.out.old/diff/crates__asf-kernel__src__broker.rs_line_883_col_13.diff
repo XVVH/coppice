@@ -1,0 +1,21 @@
+--- crates/asf-kernel/src/broker.rs
++++ replace && with || in m7_grant_offsets
+@@ -875,17 +875,17 @@
+     events: &[trace::EventRow],
+     substrate_span: &str,
+     manifest_id: &str,
+ ) -> BTreeMap<String, i64> {
+     let mut grants = BTreeMap::new();
+     for ev in events {
+         if ev.span == substrate_span
+             && ev.kind == "grant"
+-            && ev.manifest.as_deref() == Some(manifest_id)
++            || /* ~ changed by cargo-mutants ~ */ ev.manifest.as_deref() == Some(manifest_id)
+         {
+             if let Some(cap) = ev.raw["body"]["capability"].as_str() {
+                 grants.entry(cap.to_string()).or_insert(ev.offset);
+             }
+         }
+     }
+     grants
+ }

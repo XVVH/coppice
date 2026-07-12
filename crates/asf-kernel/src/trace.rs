@@ -37,6 +37,9 @@ pub enum TraceError {
 /// Spec §6 event kinds, plus Stage-1 extensions flagged as SI-11:
 /// `register` (principal/channel/tool object registration) and
 /// `intent` (intent capture — the substrate countersign of SI-10).
+/// A22 (§5.4): `revoke` is the signed early-closure dual of `grant`; the
+/// never-emitted `expiry` kind left the spec in the same amendment —
+/// `expires_at` in the signed object is the sole time closure.
 pub const EVENT_KINDS: &[&str] = &[
     "tool_call",
     "verdict",
@@ -46,7 +49,7 @@ pub const EVENT_KINDS: &[&str] = &[
     "revert",
     "compensation",
     "grant",
-    "expiry",
+    "revoke",
     "snapshot",
     "drift",
     "shred",
@@ -233,6 +236,22 @@ pub fn all_events(conn: &Connection) -> Result<Vec<EventRow>, TraceError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Events of the given kinds in offset order — the cheap fetch for the
+/// A22/§5.4 authority view at decision time. The gate feeds the same view
+/// builders from `all_events` over verified spans; pre-filtering by kind
+/// yields identical maps because the builders filter by kind anyway.
+pub fn events_of_kinds(
+    conn: &Connection,
+    kinds: &[&str],
+) -> Result<Vec<EventRow>, TraceError> {
+    let ph = kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {EVENT_COLS} FROM events WHERE kind IN ({ph}) ORDER BY offset"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(kinds.iter()), row_to_event)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Verify a span's chain end-to-end: seq contiguity from 0, prev-linkage,
 /// id recomputation from raw bytes, and signature by the emitting component.
 /// Returns the number of verified events.
@@ -376,6 +395,37 @@ mod tests {
             append(&mut conn, &sk, &s, None, "made_up", serde_json::json!({}), "t"),
             Err(TraceError::UnknownKind(_))
         ));
+    }
+
+    #[test]
+    fn revoke_kind_accepted_and_expiry_kind_removed() {
+        // A22 (§5.4): the closure edge is emittable; the never-emitted
+        // `expiry` kind left §6 in the same amendment and an attempt to
+        // emit one must fail without landing on any chain.
+        let (mut conn, sk) = setup();
+        let s = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &s,
+            Some("man:x"),
+            "revoke",
+            serde_json::json!({
+                "capability": "cap:x", "reason": "operator_request",
+                "channel": "chan:y", "auth_strength": "local_session"
+            }),
+            "t",
+        )
+        .unwrap();
+        assert!(matches!(
+            append(&mut conn, &sk, &s, None, "expiry", serde_json::json!({}), "t"),
+            Err(TraceError::UnknownKind(_))
+        ));
+        // The failed append left no residue: exactly the one revoke event.
+        let evs = events_in_span(&conn, &s).unwrap();
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].kind, "revoke");
+        assert_eq!(verify_span(&conn, &sk.verifying_key(), &s).unwrap(), 1);
     }
 
     #[test]

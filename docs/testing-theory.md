@@ -48,10 +48,10 @@ canonical `scripts/ci test` lane runs both after the Rust test targets.
 test because their machinery or ratified representation does not exist yet:
 C3 (signed fabric→user messages), C4 (delivery ceilings), C5 (sender binding),
 M3 (Tier-3 `as_of` surfacing), M4 runtime behavior attestation, the taint
-dimensions, StandingRule schema enforcement (k≥3, counterfactuals, domain
-match), and §5.4 capability closure (SI-24 ratified as A22, 2026-07-12;
-machinery is W-8). These are absences by
-sequencing, not oversight; each activates with its milestone. (M7's
+dimensions, and StandingRule schema enforcement (k≥3, counterfactuals,
+domain match). These are absences by
+sequencing, not oversight; each activates with its milestone. (§5.4
+capability closure left this list with W-8: the A22 contract below.) (M7's
 brokered-authority edge left this list with A21/SI-21:
 mode declaration + grant-event binding, tested in the gate suite.) An untracked
 untested invariant is how "the spec is the source of truth" quietly stops
@@ -80,6 +80,7 @@ failure — with review and mutation testing.
 | M6 cheap/frequent manifests | exercised throughout multi-boundary tests; guidance rather than a binary predicate | exercised |
 | M7 authority mode + grant binding (A21) | `m7_brokered_manifest_rejects_unattributed_calls`, `m7_brokered_end_to_end_gates_clean` (grant-before-effect ordering), `m7_observed_manifest_tolerates_unattributed_calls`; the proxy suite now runs declared-brokered end-to-end | covered |
 | M8 attribution completeness | e2e, gate, proxy timing tests, generated state-machine histories | covered for current consumers |
+| §5.4/A22 capability closure | the A22 contract (19 tests): decision-time closure in tests/broker.rs, gate liveness-at-offset matrix in tests/gate.rs, socket kill switch in proxy_smoke; targeted `a22_*` mutation lane | covered |
 | C1 authority provenance | intent and escalation/approval integration tests | covered for current channels |
 | C2 agent outside approval path | real proxy/socket topology plus invented in-band method rejection | covered |
 | C3–C5 | channel/delivery machinery absent | future milestone |
@@ -156,9 +157,27 @@ A21/M7 has its own stable targeted mutation surface:
 `m7_grant_offsets`, `m7_effect_capability`, and `m7_verify_grant`. The mutation
 lane names those functions rather than source lines, so refactoring cannot
 silently move the authority-binding predicates outside the scheduled check.
-It catches all 21 viable mutations. The single excluded `<` to `<=` mutation
-is equivalent because substrate offsets are globally unique: a grant and its
-effect cannot occupy the same offset.
+It catches all 20 viable mutations. Two exclusions, both documented in
+`scripts/ci`: the `<` to `<=` mutation is equivalent because substrate
+offsets are globally unique (a grant and its effect cannot occupy the same
+offset), and — since W-8 — the ordering-guard→true mutation is masked by
+the a22 leaf-activation check running on the same gate path: under honest
+emission the two layers are equivalent (grants land only on the substrate
+span; both views take earliest), the redundancy is deliberate defense in
+depth, and the ordering property is killed independently in the a22 lane.
+
+A22/§5.4 closure has the parallel lane over the `a22_*` predicates
+(`a22_revoke_offsets|grant_bindings|ancestry|state_at`). Its first run
+did its job: 35/38 caught, with the three misses triaged as two
+equivalent `<`→`<=` mutants in `a22_state_at` (the m7 argument again —
+offsets are globally unique, and decision time evaluates at head+1,
+which no existing event occupies; excluded with `-E` and documented in
+`scripts/ci`) and one REAL gap — `&&`→`||` in `a22_grant_bindings`
+survived because brokered-mode tests mask the a22 activation path behind
+the m7 check. The killer
+(`a22_non_grant_event_cannot_activate_capability_in_observed_mode`)
+pins the observed-mode path where a22 is the only activation check; the
+repeat run catches all 36 viable mutants.
 
 **G6. Soak / growth.** Scheduled CI runs release mode with deeper generated
 case counts. A true thousands-of-events/files run remains: ledger size, WAL
@@ -172,14 +191,15 @@ in-tree vault server. The remaining adversarial MCP corpus is malformed large
 frames, duplicate/out-of-order ids, unsolicited notifications, and downstream
 death at each protocol phase.
 
-**G8. Revocation lifecycle (SI-24 → A22, spec §5.4).** The event-derived
-closure representation is ratified (v0.7, 2026-07-12); nothing is implemented
-yet — mandatory timestamp expiry remains the only closure the evaluator
-enforces until W-8. W-8 activates a dedicated two-sided contract and a
-stable mutation target over the event-derived authority view
-(`capability_state_at`: a structural precondition in front of caveat
-evaluation, never a caveat dimension, shared verbatim by decision time and
-gate replay). Minimum matrix:
+**G8. Revocation lifecycle (SI-24 → A22, spec §5.4) — CLOSED by W-8.** The
+event-derived closure view is implemented as the `a22_*` predicate family
+in broker.rs (`a22_revoke_offsets`/`a22_grant_bindings`/`a22_ancestry`/
+`a22_state_at` — the spec's `capability_state_at`, decomposed): a
+structural precondition in front of caveat evaluation, never a caveat
+dimension, shared verbatim by decision time (at the current head) and gate
+replay (at each effect's own offset). The A22 two-sided contract (19
+tests) covers the full matrix below; the scheduled `a22_*` mutation lane
+guards the predicates. Matrix, all landed:
 call before revoke succeeds; direct and ancestor revoke deny later calls —
 including across manifest boundaries (an M2 sub-agent child dies with its
 ancestor's revoke; revokes resolve by capability id, never filtered by the

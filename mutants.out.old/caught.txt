@@ -1,0 +1,20 @@
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::new()
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::from_iter([("xyzzy".into(), 0)])
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::from_iter([(String::new(), 1)])
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::from_iter([("xyzzy".into(), 1)])
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::from_iter([("xyzzy".into(), -1)])
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::from_iter([(String::new(), 0)])
+crates/asf-kernel/src/broker.rs:879:5: replace m7_grant_offsets -> BTreeMap<String, i64> with BTreeMap::from_iter([(String::new(), -1)])
+crates/asf-kernel/src/broker.rs:883:13: replace && with || in m7_grant_offsets
+crates/asf-kernel/src/broker.rs:882:13: replace && with || in m7_grant_offsets
+crates/asf-kernel/src/broker.rs:881:20: replace == with != in m7_grant_offsets
+crates/asf-kernel/src/broker.rs:882:24: replace == with != in m7_grant_offsets
+crates/asf-kernel/src/broker.rs:883:39: replace == with != in m7_grant_offsets
+crates/asf-kernel/src/broker.rs:902:5: replace m7_effect_capability -> Result<Option<&'a str>, String> with Ok(None)
+crates/asf-kernel/src/broker.rs:902:5: replace m7_effect_capability -> Result<Option<&'a str>, String> with Ok(Some(""))
+crates/asf-kernel/src/broker.rs:902:5: replace m7_effect_capability -> Result<Option<&'a str>, String> with Ok(Some("xyzzy"))
+crates/asf-kernel/src/broker.rs:924:5: replace m7_verify_grant -> Result<(), String> with Ok(())
+crates/asf-kernel/src/broker.rs:924:8: delete ! in m7_verify_grant
+crates/asf-kernel/src/broker.rs:928:31: replace match guard *grant_offset < effect_offset with false in m7_verify_grant
+crates/asf-kernel/src/broker.rs:928:45: replace < with == in m7_verify_grant
+crates/asf-kernel/src/broker.rs:928:45: replace < with > in m7_verify_grant

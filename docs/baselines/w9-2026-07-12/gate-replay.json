@@ -1,0 +1,9 @@
+{
+  "manifests": 1000,
+  "tool_calls_replayed": 5514,
+  "span_events_replayed": 7513,
+  "wall_ms": 128217,
+  "manifests_per_sec": 8,
+  "calls_per_sec": 43,
+  "note": "read-only gate replay per manifest over the full substrate; cost scales with total substrate size per manifest (the measurement exists to watch exactly that)"
+}

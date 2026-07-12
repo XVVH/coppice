@@ -1,0 +1,1 @@
+crates/asf-kernel/src/broker.rs:928:31: replace match guard *grant_offset < effect_offset with true in m7_verify_grant

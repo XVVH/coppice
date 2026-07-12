@@ -1055,3 +1055,58 @@ fn proxied_session_end_to_end() {
         .unwrap();
     assert_eq!(n, 21, "20 budgeted writes + 1 exempted write");
 }
+
+/// A22/§5.4 end-to-end kill switch over the real C2 surface: an operator
+/// revocation through the daemon's approval socket closes the session
+/// capability mid-run — the next agent call dies at the broker — while the
+/// work completed before the revoke still promotes (non-retroactivity).
+/// The revoke rides the same operator-owned socket as approvals and is
+/// never advertised over MCP.
+#[test]
+fn revoke_via_socket_kills_authority_mid_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+
+    let mut proxy = Proxy::start(&home, &vault);
+    init_session(&mut proxy);
+    let r = proxy.call_tool("note.write", json!({ "path": "pre.md", "content": "before\n" }));
+    assert_eq!(r["isError"], false, "{r}");
+
+    // The session capability, from the fabric home (operator side).
+    let cap: String = rusqlite::Connection::open(home.join("fabric/fabric.db"))
+        .unwrap()
+        .query_row(
+            "SELECT id FROM objects WHERE kind = 'capability' ORDER BY rowid LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+
+    let reply = approve_via_socket(
+        &home,
+        json!({ "cmd": "revoke", "capability": cap, "reason": "compromise" }),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+
+    // The kill switch bites before any effect: structural denial, and the
+    // denial is not an escalation the agent could satisfy.
+    let after = proxy.call_tool("note.write", json!({ "path": "post.md", "content": "after\n" }));
+    assert_eq!(after["isError"], true, "post-revoke call must die: {after}");
+    assert!(
+        after["content"][0]["text"]
+            .as_str()
+            .is_some_and(|t| t.contains("revoked")),
+        "denial names the closure: {after}"
+    );
+
+    // Pre-revoke work still promotes at session end; the post-revoke call
+    // never landed anywhere.
+    proxy.finish();
+    assert_eq!(
+        std::fs::read_to_string(vault.join("pre.md")).unwrap(),
+        "before\n"
+    );
+    assert!(!vault.join("post.md").exists());
+}

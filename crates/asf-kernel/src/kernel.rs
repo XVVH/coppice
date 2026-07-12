@@ -943,6 +943,20 @@ impl Fabric {
                         .map(|p| format!(" (attenuated from {p})"))
                         .unwrap_or_default()
                 ),
+                // A22 (§5.4): the signed early-closure edge — permanent for
+                // the id, descendant-closing through the ancestry view.
+                "revoke" => format!(
+                    "REVOKED capability {} ({}){}",
+                    body["capability"].as_str().unwrap_or("?"),
+                    body["reason"].as_str().unwrap_or("?"),
+                    body["channel"]
+                        .as_str()
+                        .map(|c| format!(
+                            " via {c} ({})",
+                            body["auth_strength"].as_str().unwrap_or("?")
+                        ))
+                        .unwrap_or_else(|| " by broker (mechanical)".into())
+                ),
                 "verdict" => format!(
                     "DENY {}.{} — {}",
                     body["tool"].as_str().unwrap_or("?"),

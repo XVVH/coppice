@@ -1,0 +1,21 @@
+--- crates/asf-kernel/src/broker.rs
++++ replace match guard *grant_offset < effect_offset with false in m7_verify_grant
+@@ -920,17 +920,17 @@
+     effect_id: &str,
+     effect_offset: i64,
+     grants: &BTreeMap<String, i64>,
+ ) -> Result<(), String> {
+     if !brokered {
+         return Ok(());
+     }
+     match grants.get(cap_id) {
+-        Some(grant_offset) if *grant_offset < effect_offset => Ok(()),
++        Some(grant_offset) if false /* ~ changed by cargo-mutants ~ */ => Ok(()),
+         Some(_) => Err(format!(
+             "event {effect_id} precedes the grant of {cap_id} (M7 ordering)"
+         )),
+         None => Err(format!(
+             "event {effect_id}: no verified grant event binds {cap_id} to this manifest (M7)"
+         )),
+     }
+ }

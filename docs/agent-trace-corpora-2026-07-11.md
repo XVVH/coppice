@@ -1,9 +1,10 @@
 # Agent-trace corpora as ASF fixtures — survey and boundaries (2026-07-11)
 
 > Research note backing **W-9 — foreign-trace corpus baseline**
-> (candidate 2026-07-11; promoted to queued 2026-07-12). Lanes 1+2 are
-> W-9's scope; lane 3 measurement stays with the R2 trigger and lane 4
-> with W-8's gate work.
+> (candidate 2026-07-11; queued and DONE 2026-07-12, PR #29/#30 —
+> baseline: `docs/baselines/w9-2026-07-12/`). Lanes 1+2 were W-9's
+> scope; lane 3 measurement stays with the R2 trigger, lane 4 and the
+> gate-replay throughput measurement with W-8's gate work.
 > Every dataset fact below was verified against primary
 > sources (HF dataset cards via API, GitHub repos, papers) on
 > 2026-07-11; flags mark what could not be verified. This note records
@@ -14,10 +15,14 @@
 Public agent-trace corpora can exercise the **classifier surface and
 the evaluator** — schema expressiveness, zero-authorship defaults,
 containment vocabulary, operation classes — at a diversity dogfooding
-cannot reach. Corpus-scale replay additionally provides the evaluator
-performance baseline `scalability-analysis-2026-07-10.md` currently
-reasons about abstractly: measured events/sec through evaluator + gate
-before optimization pressure exists, regressions visible after.
+cannot reach. Corpus-scale replay additionally provides the
+performance baselines `scalability-analysis-2026-07-10.md` currently
+reasons about abstractly — decision-time evaluator throughput and
+end-to-end substrate ingest — before optimization pressure exists,
+regressions visible after. (Promotion-gate replay throughput is NOT
+part of W-9's measurement: the ingest lane is observed-mode and never
+branches or promotes; that measurement lands with W-8's gate work,
+where the closure semantics it must exercise live.)
 
 They **cannot** validate the ratification loop, and must not feed it:
 R1 requires k ≥ 3 founding examples, domain-matched (R6), from the
@@ -37,8 +42,10 @@ does not exist publicly.
 ## The four lanes
 
 1. **Zero-authorship default census** (spec §2 extensibility, §5.1).
-   Run ~13k real MCP tool schemas (MCP-Flow breadth + Toucan's 2k
-   executed tools) through registration: what fraction derives a
+   Run the real MCP tool-schema universe (measured: 9,795 after
+   identity guards — MCP-Flow's four seen-test sets + Toucan's executed
+   tools; the unseen sets can extend it on demand) through registration
+   derivation: what fraction derives a
    domain / reversibility class / egress flag from registered metadata
    alone, and what fraction falls to the conservative floor
    (irreversible + egress + fail-closed)? That percentage is the
@@ -50,7 +57,9 @@ does not exist publicly.
    replay through the decision-time evaluator under default probation
    caveats. Every event shape the schema cannot encode files as an SI
    (never silently interpreted). This lane is also the perf-baseline
-   lane: corpus-scale replay through evaluator + gate.
+   lane: corpus-scale replay through the decision-time evaluator plus
+   end-to-end substrate ingest (gate-replay throughput deferred to
+   W-8's gate work).
 3. **Containment replay** (taint-wall evidence). AgentDojo / InjecAgent
    injection cases and MCPHunt canary-propagation traces through
    broker policy. Two-sided, same discipline as the contracts

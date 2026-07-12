@@ -4,8 +4,10 @@
 > milestones, demos. It never restates findings: spec ambiguities live in
 > `spec-issues.md` (SI-n), implementation defects in `review-findings.md`
 > (RF-n), test gaps in `testing-theory.md` (G-n), dogfooding cases in
-> `dogfooding-rubric.md` (DF-\*). A work item that spawns one of those
-> links it; the detailed truth lives there.
+> `dogfooding-rubric.md` (DF-\*), posture shortcuts in
+> `posture-assumptions.md` (P-n), measured baselines in
+> `docs/baselines/`. A work item that spawns one of those links it; the
+> detailed truth lives there.
 >
 > **Discipline:** a priority agreed in conversation that is not filed here
 > before the session ends is considered lost — file first, build second
@@ -28,11 +30,6 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-**W-2 — Unified evaluator at the gate.** Done — see the done log. The
-mutation-lane stretch goal was subsumed: gate dimension logic now IS
-`evaluate.rs`, which the scheduled mutation lane already covers, and the
-parallel A21/M7 lane covers the grant-binding helpers.
-
 ## Queued (ordered)
 
 **W-3 — Start the accretion counters: dumb clerk + TrustRecords.**
@@ -52,9 +49,10 @@ decision and gate replay; verified parent ancestry; operator-side revoke;
 approvals/exemptions inert after closure; two-sided adversarial coverage and
 a targeted mutation lane. Must land before W-3 progresses from candidate
 generation to standing authority, and before live egress or actuation.
-Implementation additionally waits for W-9's verdict baseline: W-8
-verification includes verdict-invariance over revocation-free corpora
-(no verdict may change where no revoke event exists). The
+The W-9 verdict baseline is in place (`docs/baselines/w9-2026-07-12/`):
+W-8 verification includes reproducing its vector hash under its
+recorded pins (no verdict may change where no revoke event exists) and
+lands the gate-replay corpus-throughput measurement W-9 deferred. The
 current local wedge may conservatively strand an in-flight branch at revoke;
 the parked durable external-effect protocol supplies the signed dispatch
 linearization point before any remote effect ships. Production/distributed
@@ -171,23 +169,22 @@ decision, not by drift. From the 2026-07-10 review sessions:
 ## Done (recent — full history is git)
 
 - **W-9 — foreign-trace corpus baseline** — `asf corpus` harness
-  (census/replay/ingest over Toucan-1.5M + MCP-Flow; fail-closed
-  quarantine; CORPUS-FAIL-CLOSED contract pair). First pinned baseline:
-  `docs/baselines/w9-2026-07-12/` — 9,807-tool census (zero MCP
-  annotations anywhere; the conservative floor claims 100% of the real
-  universe; domain the only derivable field), deterministic verdict
-  vector over 23,536 calls ×4 cells (floor cells deny 100%; the W-8
-  invariance hash), evaluator ~316k evals/s and substrate ingest ~3.5k
-  events/s (scalability + F2 input), zero spec-level encodability gaps
-  (no new SIs). Deferred pieces keep their triggers: containment
-  measurement with R2, SWE op-class fixtures with W-8's gate work, ADP
-  breadth on demand. (PR #29, 2026-07-12)
+  (census/replay/ingest; fail-closed quarantine; CORPUS-FAIL-CLOSED
+  contracts) and the pinned baseline at `docs/baselines/w9-2026-07-12/`
+  — findings, numbers, and the W-8 regression contract live THERE, per
+  the boundary rule. v1 PR #29; v2 corrections + hardening from the
+  2026-07-12 fresh-eyes review PR #30 (which also filed P26/G-RATCHET).
+  Deferred with named triggers: gate-replay throughput → W-8; containment
+  measurement → R2; SWE op-class fixtures → W-8 gate work; ADP breadth on
+  demand. (PR #29/#30, 2026-07-12)
 - **W-2 — unified evaluator at the gate** — the gate replays every signed
   tool_call through the decision-time evaluator (all seven dimensions, not
   four; context from the registered action; meters/exemptions from signed
   events; clock = the event's `at` per SI-22, interpreted). Ships with the
   two-sided contract registry, the four m7 grant-activation adversarial
-  cases, and the targeted A21/M7 mutation lane (PR #20, 2026-07-10).
+  cases, and the targeted A21/M7 mutation lane; the mutation-lane stretch
+  goal was subsumed — gate dimension logic IS `evaluate.rs`, which the
+  scheduled lane already covers (PR #20, 2026-07-10).
 - **A21/SI-21** — authority binds by declaration + grant event; spec v0.6;
   adversarial gate coverage; RF-13 filed (PR #18, 2026-07-10).
 - **Invariant-driven verification hardening** from the security audit

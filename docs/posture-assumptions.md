@@ -123,6 +123,18 @@ default cannot save this class retroactively.
   static intent, behavior hash literal `"sha256:asfd-stage2"`, no M4
   attestation. → audit High (brokered-recorded-as-observed); W-4(a).
 
+### G-RATCHET — before ledger events compile into standing authority (W-3)  *(no invariant relaxed — the substrate becomes policy-bearing)*
+- **P26** Corpus-ingest homes (`asf corpus ingest`) sign placeholder
+  principals and a placeholder behavior bundle into a REAL substrate —
+  P8's class, second site. Nothing mechanical distinguishes a corpus
+  home from a policy-bearing one; evidence quarantine is convention
+  only (R1/R6 boundaries in `agent-trace-corpora-2026-07-11.md`,
+  operator-side dirs, fresh-home guard). Safe while no clerk exists;
+  the moment W-3 clusters approval events into rule candidates, a
+  mechanical exclusion is required (corpus-home marker, or the clerk
+  refuses substrates whose principals carry placeholder keys). →
+  W-3; CORPUS-FAIL-CLOSED covers conversion, not home identity.
+
 ### G-2HUMAN — before a second human in one coherence group  *(relaxes 1HUMAN)*
 - **P18** Out-of-span drift is attributed to the one human by default
   (`human_local`); `tool_known` / `unattributed` deferred. → multi-actor
@@ -202,6 +214,7 @@ All 25 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P4 | Same, offline `asf approve` path (`chan:local`) | `proxy.rs:638-666` | SU COOP | same |
 | P6 | Self-declared tool metadata unverified; no gate on third-party registration | `tools.rs:84-98`, `proxy.rs:48-69` | COOP (first-party only) | **new G-3P-TOOL gate**; W-4 + domain-taxonomy |
 | P25 | F1 calls capabilities revocable, but implementation/spec lifecycle has expiry only and no signed early closure | `asf-schema-spec.md:302`; `evaluate.rs:84-97`, `trace.rs:40-60`, `broker.rs` | COOP LOCAL NOACT DEBUG | **SI-24**; W-8; G-EGRESS/G-ACTUATION/G-ADVERSARIAL/G-PRODUCTION/G-PUBLISH |
+| P26 | Corpus-ingest homes: placeholder identities/behavior signed into a real substrate; evidence-quarantined by convention only (second P8 site) | `asf-cli corpus/ingest.rs` (`placeholder_key`, behavior literal) | COOP SU | W-3 mechanical exclusion (G-RATCHET); `agent-trace-corpora-2026-07-11.md` boundaries |
 
 ### Tier 2 — items already tracked (this ledger just indexes and gates them)
 
@@ -243,3 +256,7 @@ All 25 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
   under-tracked; the value there is the order-of-operations, not new findings.
 - **Follow-up (SI-24, 2026-07-11):** added P25 when the revocation design
   review found that F1's "revocable" claim had no early-closure mechanism.
+- **Follow-up (W-9 review, 2026-07-12):** added P26 + G-RATCHET when the
+  fresh-eyes review found the corpus harness had taken a P8-class shortcut
+  (placeholder identities into a real substrate) without a ledger row —
+  the ledger's own same-change rule, applied late.

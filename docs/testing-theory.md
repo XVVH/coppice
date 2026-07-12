@@ -181,7 +181,12 @@ object-row-without-event and wrong-lineage events are inert; same-id re-grant
 and post-revoke attenuation cannot reactivate; approvals cannot resurrect;
 and dispatch vs revoke has one signed total order. The external-effect form
 waits for the durable dispatch protocol rather than testing an in-memory
-ticket as if it were a receipt.
+ticket as if it were a receipt. The W-9 corpus verdict-invariance
+regression belongs to this matrix too: replaying the pinned corpus
+baseline (`docs/baselines/w9-2026-07-12/`) under its recorded pins must
+reproduce its verdict-vector hash — revocation-free corpora may not
+change a single verdict — with the fixture-scale twin enforced in CI as
+a pinned constant (`crates/asf-cli/tests/corpus.rs`).
 
 ## Automation lanes
 

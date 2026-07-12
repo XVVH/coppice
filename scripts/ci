@@ -111,6 +111,30 @@ run_mutation() {
         -j 4 \
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
+
+    heading "RF-16 signed-event/index-boundary mutation tests"
+    # A22 predicates consume VerifiedEvent only. This lane guards the caller
+    # boundary that proves every materialized selector agrees with signed raw;
+    # without it, predicate-only mutation evidence overclaims event derivation.
+    cargo mutants \
+        -f crates/asf-kernel/src/trace.rs \
+        -F 'verified_event_from_row' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+
+    heading "W-11 verified-event consumer mutation tests"
+    # Guard the three independent-review fixes beyond construction:
+    # one-statement observed head, signed-seq branch tip, and exact
+    # fabric-lifetime placement for live tool registration.
+    cargo mutants \
+        -f crates/asf-kernel/src/trace.rs \
+        -f crates/asf-kernel/src/broker.rs \
+        -f crates/asf-kernel/src/tools.rs \
+        -F '(w11_observed_head|w11_span_events_in_signed_sequence|w11_final_tool_call|w11_live_tool_registration)' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
 }
 
 usage() {

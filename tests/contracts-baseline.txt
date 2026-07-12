@@ -92,7 +92,6 @@ snapshot::tests::sqlite_capture_restore_roundtrip
 snapshot::tests::symlinks_rejected
 sqlite_both_changed_is_conflict_trunk_wins
 sqlite_branch_change_promotes_whole_store
-tools::tests::conservative_defaults_applied_at_registration
 tools::tests::object_row_without_registration_event_is_inert
 tools::tests::registration_requires_class_and_store
 tools::tests::stores_derivation_for_m1

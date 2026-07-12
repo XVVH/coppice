@@ -212,8 +212,8 @@ impl Broker {
     /// §5.4: the broker MUST refuse to grant a closed id — restoration is a
     /// new mint (new `issued_at` ⇒ new content id), never reactivation.
     fn refuse_closed_id(&self, id: &str) -> Result<(), BrokerError> {
-        let events = trace::events_of_kinds(&self.fabric.conn, &["revoke"])?;
-        let revokes = a22_revoke_offsets(&events, &self.fabric.fabric_vk());
+        let events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let revokes = a22_revoke_offsets(&events);
         match revokes.get(id) {
             Some(r) => Err(BrokerError::CapabilityClosed(format!(
                 "{id} was revoked at offset {r}; closure is permanent for the id — mint a new capability"
@@ -222,19 +222,18 @@ impl Broker {
         }
     }
 
-    /// §5.4 decision-time liveness of `cap_id` at the current verified head
-    /// — the same pure view gate replay evaluates at each effect's durable
-    /// authorization offset. Err(reason) when closed or unactivated.
+    /// §5.4 decision-time liveness of `cap_id` at the retained-row head
+    /// observed with the verified event set in one statement snapshot.
+    /// Offset authenticity/freshness remain SI-25. Err(reason) when closed
+    /// or unactivated.
     fn liveness_at_head(&self, cap_id: &str) -> Result<(), String> {
-        let events = trace::events_of_kinds(&self.fabric.conn, &["grant", "revoke"])
-            .map_err(|e| format!("authority view unavailable: {e} (fail closed)"))?;
         let vk = self.fabric.fabric_vk();
-        let grants = a22_grant_bindings(&events, &vk, self.fabric.substrate_span());
-        let revokes = a22_revoke_offsets(&events, &vk);
-        let head = trace::head_offset(&self.fabric.conn)
-            .map_err(|e| format!("substrate head unavailable: {e} (fail closed)"))?;
+        let snapshot = trace::verified_event_snapshot(&self.fabric.conn, &vk)
+            .map_err(|e| format!("authority view unavailable: {e} (fail closed)"))?;
+        let grants = a22_grant_bindings(&snapshot.events, self.fabric.substrate_span());
+        let revokes = a22_revoke_offsets(&snapshot.events);
         let chain = a22_ancestry(&self.fabric.conn, &vk, cap_id)?;
-        a22_state_at(&chain, head + 1, &grants, &revokes)
+        a22_state_at(&chain, snapshot.head + 1, &grants, &revokes)
     }
 
     /// M1: stores reachable through the allowed tools must be present in the
@@ -868,11 +867,36 @@ struct MergePlan {
     conflicts: Vec<Conflict>,
 }
 
+/// Consumers within one verified span use that span's signed sequence, never
+/// the unsigned cross-span substrate offset (RF-16/SI-25).
+fn w11_span_events_in_signed_sequence<'a>(
+    events: &'a [trace::VerifiedEvent],
+    span: &str,
+) -> Vec<&'a trace::VerifiedEvent> {
+    let mut ordered = events
+        .iter()
+        .filter(|event| event.span == span)
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|event| event.seq);
+    ordered
+}
+
+/// Final call is the last tool call in the authenticated span sequence.
+fn w11_final_tool_call<'a>(
+    events: &'a [trace::VerifiedEvent],
+    span: &str,
+) -> Option<&'a trace::VerifiedEvent> {
+    w11_span_events_in_signed_sequence(events, span)
+        .into_iter()
+        .rev()
+        .find(|event| event.kind == "tool_call")
+}
+
 /// A21/M7 activation view: the earliest verified grant offset for each
 /// capability bound to this manifest. Kept as a small pure helper so the
 /// authority-binding predicates have a stable mutation-testing target.
 fn m7_grant_offsets(
-    events: &[trace::EventRow],
+    events: &[trace::VerifiedEvent],
     substrate_span: &str,
     manifest_id: &str,
 ) -> BTreeMap<String, i64> {
@@ -948,16 +972,13 @@ fn m7_verify_grant(
 /// Earliest verified revoke offset per capability id, resolved across the
 /// ENTIRE substrate — never filtered by span or manifest. §5.4 doubt-never-
 /// widens: a signature-verified revoke closes the capability it names even
-/// when its manifest field or span placement is anomalous; rows whose
-/// signature fails verification move nothing (unsigned state is not part
-/// of the view — chain verification catches the tamper at the gate).
-fn a22_revoke_offsets(
-    events: &[trace::EventRow],
-    vk: &ed25519_dalek::VerifyingKey,
-) -> BTreeMap<String, i64> {
+/// when its manifest field or span placement is anomalous. `VerifiedEvent`
+/// proves signed-raw/index agreement before this pure view runs; wholly
+/// unsigned rows never enter it.
+fn a22_revoke_offsets(events: &[trace::VerifiedEvent]) -> BTreeMap<String, i64> {
     let mut revokes = BTreeMap::new();
     for ev in events {
-        if ev.kind == "revoke" && canon::verify(&ev.raw, vk).is_ok() {
+        if ev.kind == "revoke" {
             if let Some(cap) = ev.raw["body"]["capability"].as_str() {
                 revokes.entry(cap.to_string()).or_insert(ev.offset);
             }
@@ -977,22 +998,28 @@ fn a22_revoke_offsets(
 /// authority). The deliberate asymmetry with [`a22_revoke_offsets`]:
 /// closure tolerates placement anomalies (doubt narrows), activation
 /// demands exact form.
+type A22GrantBindings = BTreeMap<(String, String, Option<String>), i64>;
+
 fn a22_grant_bindings(
-    events: &[trace::EventRow],
-    vk: &ed25519_dalek::VerifyingKey,
+    events: &[trace::VerifiedEvent],
     substrate_span: &str,
-) -> BTreeMap<(String, String), i64> {
+) -> A22GrantBindings {
     let mut grants = BTreeMap::new();
     for ev in events {
-        if ev.kind == "grant"
-            && ev.raw["span"].as_str() == Some(substrate_span)
-            && canon::verify(&ev.raw, vk).is_ok()
-        {
-            if let (Some(cap), Some(man)) = (
+        if ev.kind == "grant" && ev.span == substrate_span {
+            let parent = match ev.raw["body"].get("parent") {
+                Some(Value::Null) => Some(None),
+                Some(Value::String(parent)) => Some(Some(parent.clone())),
+                _ => None,
+            };
+            if let (Some(cap), Some(man), Some(parent)) = (
                 ev.raw["body"]["capability"].as_str(),
-                ev.raw["manifest"].as_str(),
+                ev.manifest.as_deref(),
+                parent,
             ) {
-                grants.entry((cap.to_string(), man.to_string())).or_insert(ev.offset);
+                grants
+                    .entry((cap.to_string(), man.to_string(), parent))
+                    .or_insert(ev.offset);
             }
         }
     }
@@ -1052,7 +1079,7 @@ fn a22_ancestry(
 fn a22_state_at(
     chain: &[(String, String)],
     o: i64,
-    grants: &BTreeMap<(String, String), i64>,
+    grants: &A22GrantBindings,
     revokes: &BTreeMap<String, i64>,
 ) -> Result<(), String> {
     // Closure first: it dominates activation and is checked before any
@@ -1067,12 +1094,22 @@ fn a22_state_at(
         }
     }
     // Activation: exact-binding grants, well-ordered leaf-ward (walking
-    // leaf → root, grant offsets strictly decrease).
+    // leaf → root, grant offsets strictly decrease). Each signed grant's
+    // parent must exactly match the signed capability ancestry (§6).
     let mut child_grant: Option<i64> = None;
-    for (id, man) in chain {
-        let g = grants.get(&(id.clone(), man.clone())).ok_or_else(|| {
-            format!("no verified grant binds {id} to {man} (A21/M7, fail closed)")
-        })?;
+    let mut leaf_grant: Option<i64> = None;
+    for (index, (id, man)) in chain.iter().enumerate() {
+        let expected_parent = chain.get(index + 1).map(|(parent, _)| parent.clone());
+        let g = grants
+            .get(&(id.clone(), man.clone(), expected_parent.clone()))
+            .ok_or_else(|| {
+                format!(
+                    "no verified grant binds {id} to {man} with parent {expected_parent:?} (A21/M7, fail closed)"
+                )
+            })?;
+        if index == 0 {
+            leaf_grant = Some(*g);
+        }
         if let Some(cg) = child_grant {
             if *g >= cg {
                 return Err(format!(
@@ -1083,8 +1120,8 @@ fn a22_state_at(
         child_grant = Some(*g);
     }
     match chain.first() {
-        Some((leaf, man)) => {
-            let g = grants[&(leaf.clone(), man.clone())];
+        Some((leaf, _)) => {
+            let g = leaf_grant.expect("non-empty chain set leaf grant");
             if g < o {
                 Ok(())
             } else {
@@ -1215,7 +1252,6 @@ impl Broker {
     /// anything becomes durable.
     fn gate_trace_check(&self, manifest_id: &str, span: &str) -> Result<Value, BrokerError> {
         trace::verify_span(&self.fabric.conn, &self.fabric.fabric_vk(), span)?;
-        let events = trace::events_in_span(&self.fabric.conn, span)?;
 
         // A21/M7: the manifest's declared authority mode. Brokered fails
         // closed below — every effect capability-attributed, and its grant
@@ -1233,7 +1269,11 @@ impl Broker {
         let substrate_span = self.fabric.substrate_span();
         trace::verify_span(&self.fabric.conn, &self.fabric.fabric_vk(), substrate_span)?;
         let mut approved: BTreeMap<(String, String), i64> = BTreeMap::new();
-        let all_events = trace::all_events(&self.fabric.conn)?;
+        // RF-16: authority never consumes EventRow selectors directly. The
+        // global scan ignores wholly unsigned rows, but any signature-valid
+        // row whose selectors disagree fails the gate before a merge.
+        let all_events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let events = w11_span_events_in_signed_sequence(&all_events, span);
         // Grant activation offsets per capability for THIS manifest, from
         // the verified substrate span (M7 forward edge).
         let grants = m7_grant_offsets(&all_events, substrate_span, manifest_id);
@@ -1242,9 +1282,8 @@ impl Broker {
         // never filtered by the evaluating manifest (an M2 sub-agent child
         // dies with its ancestor's revoke); grants activate only from the
         // fabric-lifetime span (activation demands exact form).
-        let a22_grants =
-            a22_grant_bindings(&all_events, &self.fabric.fabric_vk(), substrate_span);
-        let a22_revokes = a22_revoke_offsets(&all_events, &self.fabric.fabric_vk());
+        let a22_grants = a22_grant_bindings(&all_events, substrate_span);
+        let a22_revokes = a22_revoke_offsets(&all_events);
         // §5.4 doubt-never-widens, loud side: a verified revoke with an
         // anomalous body or placement still closes — but every
         // inconsistency surfaces here as substrate-integrity signal,
@@ -1256,7 +1295,7 @@ impl Broker {
         // the operator should hear about.
         let mut closure_anomalies: Vec<String> = Vec::new();
         for ev in &all_events {
-            if ev.kind != "revoke" || canon::verify(&ev.raw, &self.fabric.fabric_vk()).is_err() {
+            if ev.kind != "revoke" {
                 continue;
             }
             let body = &ev.raw["body"];
@@ -1267,11 +1306,11 @@ impl Broker {
                 ));
                 continue;
             };
-            if ev.raw["span"].as_str() != Some(substrate_span) {
+            if ev.span != substrate_span {
                 closure_anomalies.push(format!(
                     "revoke {} of {target} emitted on span {} instead of the fabric-lifetime span — closure holds (§5.4)",
                     ev.id,
-                    ev.raw["span"].as_str().unwrap_or("?"),
+                    ev.span,
                 ));
             }
             if let Ok(obj) = trace::get_object(&self.fabric.conn, target) {
@@ -1369,7 +1408,7 @@ impl Broker {
             m7_verify_grant(brokered, cap_id, &ev.id, ev.offset, &grants).map_err(&violation)?;
 
             // A22/§5.4: liveness at the effect's durable authorization
-            // offset — its own signed offset, never gate time — so a
+            // row offset — unsigned pending SI-25, and never gate time — so a
             // revoke never retro-fails honest pre-revoke work (parked
             // promotions of pre-revoke work stay approvable) and work
             // recorded after a revoke conservatively strands. Attributed
@@ -1597,8 +1636,8 @@ impl Broker {
         span: &str,
         plan: &MergePlan,
     ) -> Result<Value, BrokerError> {
-        let events = trace::events_in_span(&self.fabric.conn, span)?;
-        let last_call = events.iter().rev().find(|e| e.kind == "tool_call");
+        let events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let last_call = w11_final_tool_call(&events, span);
         let mut roots = BTreeMap::new();
         for store in &plan.stores {
             let expected = match last_call {

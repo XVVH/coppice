@@ -412,6 +412,71 @@ fn gate_rejects_branch_state_with_no_signed_tool_call_attestation() {
 }
 
 #[test]
+fn w11_unsigned_offset_cannot_select_older_signed_branch_tip() {
+    let mut w = setup();
+    agent_write(&mut w, "inbox/first.md", "first signed state");
+    agent_write(&mut w, "inbox/second.md", "final signed state");
+
+    // Restore the materialized branch to the first call's state while leaving
+    // both signed calls intact.
+    fs::remove_file(w.branch["fs:vault"].join("inbox/second.md")).unwrap();
+
+    let calls = trace::all_events(&w.broker.fabric.conn)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "tool_call" && event.manifest.as_deref() == Some(&w.manifest))
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[0].seq < calls[1].seq);
+
+    // A storage attacker swaps only the unsigned global offsets. Signed raw,
+    // including the span-local seq/prev chain, remains unchanged.
+    w.broker
+        .fabric
+        .conn
+        .execute_batch("DROP TRIGGER events_append_only_u")
+        .unwrap();
+    let temporary = -calls[0].offset;
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE events SET offset = ?1 WHERE id = ?2",
+            rusqlite::params![temporary, calls[0].id],
+        )
+        .unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE events SET offset = ?1 WHERE id = ?2",
+            rusqlite::params![calls[0].offset, calls[1].id],
+        )
+        .unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE events SET offset = ?1 WHERE id = ?2",
+            rusqlite::params![calls[1].offset, calls[0].id],
+        )
+        .unwrap();
+
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch) {
+        Err(BrokerError::GateTraceViolation(message)) => {
+            assert!(message.contains("untraced branch divergence"), "{message}");
+        }
+        other => panic!("unsigned offset reorder selected an older signed branch tip: {other:?}"),
+    }
+    assert!(
+        !w.vault.join("inbox/first.md").exists()
+            && !w.vault.join("inbox/second.md").exists(),
+        "no stale or final branch state may reach trunk after offset reordering"
+    );
+}
+
+#[test]
 fn gate_uses_signed_approval_binding_not_mutable_escalation_rows() {
     let mut w = setup();
     let mut tight = caveats();
@@ -779,7 +844,12 @@ fn m7_grant_after_effect_does_not_retroactively_authorize() {
     let cap = store_ungranted_capability(&mut w);
     record_claimed_write(&mut w, &cap, "inbox/late-grant.md");
     let manifest = w.manifest.clone();
-    append_substrate_event(&mut w, &manifest, "grant", json!({"capability": cap}));
+    append_substrate_event(
+        &mut w,
+        &manifest,
+        "grant",
+        json!({"capability": cap, "parent": null}),
+    );
 
     assert_m7_rejected_without_promotion(&mut w, "precedes the grant", "inbox/late-grant.md");
 }
@@ -812,7 +882,7 @@ fn m7_grant_for_other_manifest_cannot_activate_capability() {
         &mut w,
         "man:another-lineage",
         "grant",
-        json!({"capability": cap}),
+        json!({"capability": cap, "parent": null}),
     );
     record_claimed_write(&mut w, &cap, "inbox/wrong-manifest.md");
 
@@ -1501,6 +1571,53 @@ fn a22_ancestor_grants_must_be_well_ordered() {
         json!({ "capability": parent, "parent": null }),
     );
     assert_m7_rejected_without_promotion(&mut w, "out of order", "inbox/orphan.md");
+}
+
+#[test]
+fn a22_malformed_grant_parent_cannot_activate_capability() {
+    for case in ["missing", "null", "wrong"] {
+        let mut w = setup();
+        let parent = store_ungranted_capability(&mut w);
+        let man = w.manifest.clone();
+        append_substrate_event(
+            &mut w,
+            &man,
+            "grant",
+            json!({ "capability": parent, "parent": null }),
+        );
+        let child = store_capability_row(&mut w, Some(&parent), "2026-07-10T00:00:01Z");
+        let body = match case {
+            "missing" => json!({ "capability": child }),
+            "null" => json!({ "capability": child, "parent": null }),
+            "wrong" => json!({ "capability": child, "parent": "cap:wrong-parent" }),
+            _ => unreachable!(),
+        };
+        append_substrate_event(&mut w, &man, "grant", body);
+
+        let protected = w.branch["fs:vault"].join(format!("inbox/{case}-parent.md"));
+        let decision = w
+            .broker
+            .propose_call(
+                &child,
+                "tool:vault@1.0",
+                "note.write",
+                &json!({"path": format!("inbox/{case}-parent.md"), "content": "x"}),
+            )
+            .unwrap();
+        if matches!(&decision, Decision::Allowed { .. }) {
+            fs::write(&protected, "dispatched").unwrap();
+        }
+        assert!(
+            !protected.exists(),
+            "{case} grant parent activated a child with inconsistent signed ancestry"
+        );
+        match decision {
+            Decision::Denied { structural: Some(reason), .. } => {
+                assert!(reason.contains("no verified grant binds"), "{reason}");
+            }
+            other => panic!("malformed signed grant parent must fail closed: {other:?}"),
+        }
+    }
 }
 
 #[test]

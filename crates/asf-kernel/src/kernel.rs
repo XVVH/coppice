@@ -17,7 +17,7 @@ use crate::now_rfc3339;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Map, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum KernelError {
@@ -33,6 +33,8 @@ pub enum KernelError {
     Canon(#[from] canon::CanonError),
     #[error("sqlite: {0}")]
     Db(#[from] rusqlite::Error),
+    #[error("fabric is not initialized at {home}: expected database {database}")]
+    NotInitialized { home: PathBuf, database: PathBuf },
     #[error("no active manifest — call step_boundary first")]
     NoActiveManifest,
     #[error("unknown store {0}")]
@@ -166,7 +168,30 @@ impl Fabric {
     /// at first open. Errors if the home was never initialized.
     pub fn open_existing(dir: impl AsRef<Path>) -> Result<Self, KernelError> {
         let dir = dir.as_ref();
-        let conn = Connection::open(dir.join("fabric.db"))?;
+        let database = dir.join("fabric.db");
+        match std::fs::metadata(&database) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                return Err(KernelError::NotInitialized {
+                    home: dir.to_path_buf(),
+                    database,
+                });
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                return Err(KernelError::NotInitialized {
+                    home: dir.to_path_buf(),
+                    database,
+                });
+            }
+            Err(source) => {
+                return Err(snapshot::SnapError::Io {
+                    path: database,
+                    source,
+                }
+                .into());
+            }
+        }
+        let conn = Connection::open(database)?;
         let raw = trace::meta_get(&conn, "stores")?
             .ok_or_else(|| KernelError::UnknownStore("no stores recorded in this home".into()))?;
         drop(conn);
@@ -1013,6 +1038,7 @@ impl Fabric {
             };
             lines.push(LedgerLine {
                 offset: ev.offset,
+                at: ev.at.clone(),
                 span: ev.span.clone(),
                 kind: ev.kind.clone(),
                 line,
@@ -1074,6 +1100,7 @@ fn short(hash: &str) -> String {
 #[derive(Debug)]
 pub struct LedgerLine {
     pub offset: i64,
+    pub at: String,
     pub span: String,
     pub kind: String,
     pub line: String,

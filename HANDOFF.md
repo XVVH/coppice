@@ -1,4 +1,10 @@
-# HANDOFF — paste this to open the first Claude Code session
+# HANDOFF — HISTORICAL bootstrap prompt (2026-07-08, spec v0.3 era)
+
+> **Do not paste this into a session.** It opened the FIRST implementation
+> session and is kept for provenance only. Everything below is superseded:
+> the kernel, broker, trace substrate, and promotion gate are built (spec
+> is at v0.6, stages 1–3 shipped, dogfooding underway). Current truth:
+> `CLAUDE.md`, then `docs/roadmap.md` for what is in flight.
 
 We're starting implementation of the Agent State Fabric. Read CLAUDE.md, then
 docs/asf-schema-spec.md in full, then skim docs/agent-state-fabric-brief.md

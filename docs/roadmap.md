@@ -45,6 +45,22 @@ approvals to cluster — but not far after; this is where authority stops
 evaporating at session end. *Provenance: 2026-07-10 review (highest-
 confidence convergent recommendation: ratchet before judge).*
 
+**W-8 — Capability closure + revocation.** Blocked on SI-24 ratification.
+Implement the signed `revoke` edge as the permanent, descendant-cascading
+dual of A21's `grant`: pure event-derived `capability_state_at` shared by
+decision and gate replay; verified parent ancestry; operator-side revoke;
+approvals/exemptions inert after closure; two-sided adversarial coverage and
+a targeted mutation lane. Must land before W-3 progresses from candidate
+generation to standing authority, and before live egress or actuation. The
+current local wedge may conservatively strand an in-flight branch at revoke;
+the parked durable external-effect protocol supplies the signed dispatch
+linearization point before any remote effect ships. Production/distributed
+claims additionally require RF-13 trace-head anchoring and P21 cross-host
+fencing so rollback or a stale partition cannot erase the latest revoke.
+Closes posture gap P25; composes with but does not subsume P10/P15/P20/P21/P22
+or SI-23's P3/P4/P5/P12 cluster. *Provenance: 2026-07-11 revocation design
+review.*
+
 **W-4 — Attestation + containment, as a pair.** The intent/behavior
 analog of what A21 did for authority. (a) Per-lineage assurance classes
 generalizing M7's observed/brokered split — the proxy today records a

@@ -48,9 +48,10 @@ canonical `scripts/ci test` lane runs both after the Rust test targets.
 test because their machinery or ratified representation does not exist yet:
 C3 (signed fabric→user messages), C4 (delivery ceilings), C5 (sender binding),
 M3 (Tier-3 `as_of` surfacing), M4 runtime behavior attestation, the taint
-dimensions, and StandingRule schema enforcement (k≥3, counterfactuals, domain
-match). These are absences by sequencing, not oversight; each activates with
-its milestone. (M7's brokered-authority edge left this list with A21/SI-21:
+dimensions, StandingRule schema enforcement (k≥3, counterfactuals, domain
+match), and SI-24 early capability revocation. These are absences by
+sequencing, not oversight; each activates with its milestone. (M7's
+brokered-authority edge left this list with A21/SI-21:
 mode declaration + grant-event binding, tested in the gate suite.) An untracked
 untested invariant is how "the spec is the source of truth" quietly stops
 being true.
@@ -169,6 +170,18 @@ substitute a barrier-controlled downstream instead of relying only on the
 in-tree vault server. The remaining adversarial MCP corpus is malformed large
 frames, duplicate/out-of-order ids, unsolicited notifications, and downstream
 death at each protocol phase.
+
+**G8. Revocation lifecycle (SI-24).** No early-revocation representation is
+ratified or implemented yet; mandatory timestamp expiry is the only closure
+the evaluator enforces. W-8 activates a dedicated two-sided contract and a
+stable mutation target over the event-derived authority view. Minimum matrix:
+call before revoke succeeds; direct and ancestor revoke deny later calls;
+child-only revoke preserves parent/siblings; revoke is non-retroactive;
+object-row-without-event and wrong-lineage events are inert; same-id re-grant
+and post-revoke attenuation cannot reactivate; approvals cannot resurrect;
+and dispatch vs revoke has one signed total order. The external-effect form
+waits for the durable dispatch protocol rather than testing an in-memory
+ticket as if it were a receipt.
 
 ## Automation lanes
 

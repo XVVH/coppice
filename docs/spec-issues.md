@@ -7,7 +7,8 @@
 > as the amendment provenance record; per-entry statuses below are
 > historical. New issues found under v0.4 start at **SI-20** (resolved in
 > v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; under v0.6, SI-22
-> is interpreted (W-2) and SI-23 is open; new issues start at **SI-24**.
+> is interpreted (W-2), while SI-23 and SI-24 are open; new issues start
+> at **SI-25**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -17,6 +18,201 @@ Settled decisions (F1, F4, fail-open) are not re-litigated here.
 Status legend: **open** = needs a spec amendment or an explicit "fine as
 interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
+
+---
+
+## SI-24 — capabilities are called revocable but have no early-closure semantics (§5, §6, §9 F1) — open
+
+Surfaced while separating key destruction from authority revocation
+(2026-07-11). F1 calls broker-minted capabilities "central, revocable,
+meterable," but the normative machinery supplies only:
+
+- mandatory `expires_at` (mechanically enforced);
+- attenuation into a narrower child (which leaves the parent live);
+- a signed `grant` event as the activation edge (A21/M7); and
+- an `expiry` event kind with no body or enforcement semantics.
+
+There is no early-revocation event, no rule for descendant capabilities,
+no authority for requesting revocation, and no answer for calls authorized
+before revocation but recorded afterward. The implementation matches the
+gap: it enforces timestamps and grant-before-effect, but carries no revoke
+API/state/replay, never emits `expiry`, and leaves approved exemptions and
+in-memory allowed-call tickets usable independently of later authority
+changes.
+
+This cannot be silently interpreted in code. It adds a signed event kind,
+changes M7's definition of "live capability," and becomes a consumer of the
+same substrate ordering whose integrity RF-13 already gates before
+publication/production.
+
+### Candidate resolution — activation and closure are event-derived
+
+Add `revoke` to §6. A capability object remains immutable; current validity is
+a materialized view of signed objects plus the verified substrate prefix.
+
+```json
+{
+  "kind": "revoke",
+  "manifest": "man:…",
+  "body": {
+    "capability": "cap:…",
+    "reason": "operator_request | compromise | behavior_change | tool_disabled",
+    "cascade": "descendants",
+    "source": "human | broker",
+    "channel": "chan:… | null",
+    "auth_strength": "… | null"
+  }
+}
+```
+
+The event belongs to the fabric-lifetime span with `manifest` equal to the
+target capability's `bound_manifest`, mirroring `grant`. Human-originated
+revocations carry registered `channel` + `auth_strength` per C1; because
+revocation only narrows authority, any registered human channel may request
+it under §3.1's directionality rule. The broker may emit an emergency
+revocation for a mechanically established structural cause, with `source`
+and `reason` ledger-visible. The agent/holder has no authority to forge a
+human revocation through its work channel; voluntary surrender can be added
+later as a separately attributed broker request if it proves useful.
+
+The event offset is the effective point — no backdating field. For an
+operation durably authorized at substrate offset `O`, capability `C` is live
+iff:
+
+1. a verified grant of `C` exists at `G < O` for the bound manifest;
+2. neither `C` nor any ancestor in its verified attenuation chain has a
+   verified revoke event at `R < O`;
+3. `C.expires_at` and every ordinary caveat admit the operation at its
+   signed event time; and
+4. the object, grant, parent chain, and closure events verify fail-closed.
+
+Revocation is prospective: effects durably authorized before `R` remain
+historically valid. It is permanent for that capability id; a later `grant`
+cannot reactivate the same id. Restoration means minting a new capability
+(an `issued_at` strictly later than the revoked capability's, therefore a new
+content id) and emitting a new grant.
+
+Revoking any capability closes its entire descendant subtree; revoking a
+child leaves its parent and siblings live. The signed `parent` field plus
+grant body already carry the required lineage, but gate replay must begin
+verifying that ancestry rather than treating only the leaf as sufficient.
+Mint/attenuation must apply the same view at the new grant's offset: a closed
+parent cannot produce a live child, even if an object row and grant event are
+injected afterward.
+
+`expires_at` remains the load-bearing automatic closure. An `expiry` event,
+if retained, is an optional observation `{capability, expired_at}` for
+querying/UX; it cannot extend, shorten, or reactivate the signed timestamp and
+is not required for enforcement. Early operator/security closure is always a
+`revoke` event so provenance and intent are not conflated with time passing.
+
+### Consequences for current broker state
+
+- Revocation dominates approvals, exemptions, meters, and caveats: none can
+  resurrect closed authority. Pending escalations become visible-but-inert
+  (a later resolution is historical evidence, never authority); unused
+  exemptions need not be destructively deleted because replay ignores them.
+- Calls not yet durably authorized are denied. Completed effects are not
+  undone — owned state uses revert, external effects use compensation, and
+  irreversible effects remain honestly reported.
+- Today `propose_call → in-memory ticket → downstream effect → tool_call`
+  has no durable pre-effect authorization record. In the current local-only
+  wedge, a result recorded after revocation may conservatively fail promotion.
+  Before the first live external effect, the parked durable-effect protocol
+  must supply the real linearization point:
+  `effect_intent → authority reservation → dispatch → effect receipt`.
+  Revocation blocks calls before signed dispatch; it cannot recall a dispatch
+  that already crossed the external boundary.
+- `on_broker_outage` may never treat unknown or stale revocation state as
+  proof that a capability is live. Any future fail-open path therefore needs
+  a verified authority snapshot plus a signed revocation/trace high-water
+  mark and a bounded freshness policy; destructive, actuation, and live-egress
+  authority should remain non-invertibly fail-closed when freshness is
+  unknown.
+- Tail truncation or restoration of an old `fabric.db` can otherwise erase
+  the latest revoke and resurrect authority. RF-13 trace-head anchoring and
+  restore rollback detection are production/distribution prerequisites for
+  revocation, not merely audit polish.
+
+### Posture-ledger crosswalk
+
+W-8 directly closes **P25**, the docs↔implementation gap this review added to
+`posture-assumptions.md`: F1 says revocable while runtime authority has only
+expiry. It does not absorb the neighboring posture gaps:
+
+- **P22** supplies the durable dispatch boundary for live external effects;
+  SI-24 defines which side of that boundary revocation governs but W-8 alone
+  does not make in-flight effects durable.
+- **P10** still owns broker-outage behavior; SI-24 constrains it by forbidding
+  stale/unknown revocation state from proving liveness.
+- **P15 / RF-13** still own signed cross-span ordering, tail anchoring, and
+  rollback detection; revocation makes their absence an authority-resurrection
+  risk rather than fixing them.
+- **P20** still owns per-session context and same-home concurrency. W-8 must
+  serialize dispatch vs revoke independently of mutable home-global session
+  pointers.
+- **P21** still owns cross-host fencing. Distributed brokers need a shared
+  revocation high-water mark and may not dispatch from a stale partition.
+- **P3 / P4 / P5 / P12** still own proof-of-human and actuation-safe approval
+  surfaces under SI-23. Revocation supplies the kill-switch operation, not an
+  unreachable/authenticated surface on which to invoke it.
+- **P6 / P8** may trigger tool- or behavior-driven revocation once their own
+  attestation/containment work exists; revocation does not verify tool metadata
+  or behavior identity.
+
+### Adjacent lifecycles — reserve the rule, do not overload the event
+
+The shared constitutional rule is temporal: authority-bearing objects are
+immutable, and activation/closure are signed, prospective, historically
+non-destructive transitions evaluated at the operation's authorization
+offset. Target-specific lifecycles still need distinct semantics:
+
+- **StandingRules / StandingIntents (W-3):** archival stops future minting or
+  scheduled runs; invalidating already-minted capabilities requires explicit
+  capability revocations. TrustRecords remain evidence — disputable or
+  supersedable, never erased as if they had granted authority.
+- **Behavior pins / containment (W-4):** a pin miss may suspend a rule or
+  trigger capability revocation, but those are separate declared effects;
+  "behavior changed" must not silently mean both.
+- **Actuation (SI-23):** C7's no-lockout path depends on this mechanism; the
+  operator kill switch must revoke actuation subtrees through a surface the
+  agent cannot actuate.
+- **Principals, channels, tools, and signing keys:** later disable/rotation
+  events must preserve signatures that were valid before closure while
+  denying new authority afterward. Tool replay uses the registration state
+  valid at dispatch, not today's mutable view.
+- **Credentials:** capability revocation stops broker injection; issuer-side
+  token invalidation/rotation is a separate external effect with its own
+  receipt.
+- **Payload keys:** `shred` destroys information access; it is not authority
+  revocation. **Revert**, **compensate**, **supersede**, **expire**, and
+  **revoke** likewise remain distinct verbs.
+- **DelegationEnvelope / conformance (W-6):** portable authority includes
+  relevant grant, revoke/expiry, ancestry, and a signed `valid_as_of` trace
+  head. A grant-only envelope proves authority once existed, not that it
+  remained live.
+
+### Implementation and ratification gate
+
+W-8 carries implementation after ratification: one pure
+`capability_state_at(capability, authorization_offset)` reconstruction used
+by both decision time and gate replay; `Broker::revoke_capability`; an
+operator-side `asf revoke`; descendant and ancestry verification; inert
+approval/exemption handling; and a stable targeted mutation surface.
+
+Required two-sided evidence includes: before-revoke success; direct and
+ancestor after-revoke denial; child-only isolation; no retroactive
+invalidation; row-without-event inertness; wrong-manifest/wrong-capability
+events inert; post-revoke attenuation denial; same-id re-grant denial;
+exemption non-resurrection; and a serialized dispatch-vs-revoke race. W-8
+must land before W-3 progresses from candidate generation to standing
+authority, and before any live-egress or actuation capability ships. The
+durable dispatch phase remains trigger-gated
+on the first real external effect, but the spec reserves its ordering now.
+
+**Ratification call:** accept the event-derived, permanent, descendant-
+cascading candidate; choose a different early-closure representation; or
+explicitly retract F1's "revocable" claim and rely on short expiry alone.
 
 ---
 

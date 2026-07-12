@@ -78,6 +78,18 @@ compiled test inventory and rejects growth of `tests/contracts-baseline.txt`.
 Changes to enforcement logic MUST also extend or exercise a stable targeted
 mutation lane, or state in the PR why mutation testing cannot apply.
 
+Cross-layer conformance (G9, founded by the PR #33 review — the lanes above
+verify only what is written): spec-implementing changes MUST carry a
+conformance sweep in the PR — every normative sentence in the touched spec
+sections mapped to a named enforcing line plus a negative test, or an
+explicit SI/G/P filing for why not. Deliberately asymmetric principles are
+verified edge-by-edge and dimension-by-dimension, never by structural
+analogy with a sibling code path. Operator-facing commands test their
+process-level contract (exit status), not just reply bodies. Evidence
+claims in PRs and summaries are scoped to what each lane measures.
+Authority-surface PRs merge only after independent-context review; the
+author's own fresh-eyes pass does not satisfy this.
+
 ## Context
 
 Design rationale lives in the originating design session (every schema

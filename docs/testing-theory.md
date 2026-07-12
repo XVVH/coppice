@@ -235,6 +235,48 @@ reproduce its verdict-vector hash — revocation-free corpora may not
 change a single verdict — with the fixture-scale twin enforced in CI as
 a pinned constant (`crates/asf-cli/tests/corpus.rs`).
 
+**G9. Cross-layer conformance (founded by the PR #33 review).** Three
+pre-merge findings on W-8 shared one root class: a normative spec sentence
+with no enforcing line anywhere (§6 records grants on the fabric-lifetime
+span; the a22 view accepted any span), a documented promise with
+half-implemented observability (anomaly loudness named two kinds, the scan
+surfaced one), and an operator contract below the spec's ontology
+(`asf revoke` exited 0 on failure). Every existing lane verifies what is
+WRITTEN — contracts attack enumerated invariants, mutation testing mutates
+only code that exists, baselines pin recorded behavior — so none can flag
+an unwritten condition or an untested layer, and the author's own review
+replays the interpretive move that created the gap instead of challenging
+it. Standing counters, mandatory for spec-implementing changes (the MUST
+form lives in AGENTS.md):
+- *Conformance sweep, inverse coverage:* test-file coverage maps point
+  test → invariant; before merge, sweep the other direction — every
+  normative sentence in the spec sections the change touches gets a named
+  enforcing line plus a negative test in the PR, or an explicit SI/G/P
+  filing for why it is not yet enforceable. Silence is the failure mode.
+- *Asymmetric principles get the full matrix:* when a rule is
+  deliberately two-sided (doubt-never-widens: closure tolerates placement
+  anomalies, activation demands exact form), enumerate edge × anomaly
+  dimension (kind, span, manifest, provenance, …) and demand a
+  cell-by-cell verdict and test. A property enforced implicitly by one
+  code path's shape does not transfer to a parallel path — state it as a
+  property or lose it (the m7 span filter did not transfer to a22).
+- *Operator binaries are contract surfaces:* every operator-facing
+  command carries at least one test asserting its process-level contract
+  — exit status, not just the reply body (G7's fidelity discipline,
+  extended above the wire). Founding example:
+  `revoke_cli_exit_status_reflects_outcome`; `asf approve` inherited the
+  same fix, having carried the same defect since Stage 2.
+- *Independent-context review before merge* for authority-surface
+  changes: same-context review — even a deliberate fresh-eyes pass —
+  reliably catches internal inconsistencies and reliably misses
+  cross-layer conformance. Three independent-review cycles each produced
+  real findings (W-9 v1→v2 in PR #30, the #31 docs sweep, the #33 W-8
+  review): k ≥ 3, the project's own founding-example bar, so this is now
+  a rule rather than a habit.
+- *Evidence claims scope to their lane:* "36/36 mutants caught" certifies
+  the written predicates, not the design; a PR summary states what each
+  green lane measures and claims nothing wider.
+
 ## Automation lanes
 
 | Lane | Purpose |

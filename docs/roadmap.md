@@ -104,6 +104,12 @@ decision, not by drift. From the 2026-07-10 review sessions:
   of human attention; approval compression ratio; time-to-first-ratified-
   rule; % sessions fully silent. Adopt alongside the denial-FP rate when
   W-3 gives them substance.
+- **Machine-checkable conformance annotations** — mechanize G9's sweep:
+  normative spec sentences carry stable ids, `tests/contracts.tsv` rows
+  reference them, `scripts/ci` fails on unreferenced normative ids in
+  sections a change touches. Natural W-6 companion (the published
+  conformance surface needs the same sentence ids for its vectors). From
+  the PR #33 review cycle (2026-07-12).
 
 ## Parked (trigger-gated — do not start without the trigger)
 

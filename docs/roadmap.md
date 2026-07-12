@@ -101,7 +101,8 @@ Owner: operator. *Provenance: 2026-07-10 review.*
 ## Candidates (ideas from the design reviews — not yet committed work)
 
 Recorded so they aren't lost to conversation; promote to queued by
-decision, not by drift. From the 2026-07-10 review sessions:
+decision, not by drift. From the 2026-07-10 review sessions except
+where noted:
 
 - **Taint wall as the security headline** — R2's `taint.egress` is the
   zero-config anti-exfiltration primitive (ADR 0005); productize the
@@ -123,6 +124,20 @@ decision, not by drift. From the 2026-07-10 review sessions:
   of human attention; approval compression ratio; time-to-first-ratified-
   rule; % sessions fully silent. Adopt alongside the denial-FP rate when
   W-3 gives them substance.
+- **Foreign-trace corpus lane** — replay public agent-trace corpora
+  through the W-2 evaluator as fixtures: zero-authorship default census
+  over ~13k real MCP tool schemas (approval-fatigue forecast; first
+  empirical input to the domain-taxonomy open problem — input, not
+  governance); conformance fuzzing where unencodable event shapes file
+  as SIs; AgentDojo/MCPHunt containment replay for a public two-sided
+  denial-FP number (taint-wall evidence); SWE trajectories as
+  operation-class/rename fixtures. Corpus-scale replay doubles as the
+  evaluator perf baseline the scalability analysis lacks. Hard boundary:
+  fixtures/calibration only, never founding examples (R1); synthetic
+  sets excluded from rate claims; corpora stay operator-side (A3).
+  Offline, no actuation-scoped registration — no SI-23 conflict. Survey
+  and boundaries: `agent-trace-corpora-2026-07-11.md`. *(Provenance:
+  2026-07-11 corpus research session.)*
 
 ## Parked (trigger-gated — do not start without the trigger)
 

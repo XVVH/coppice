@@ -1,7 +1,10 @@
 # Agent-trace corpora as ASF fixtures — survey and boundaries (2026-07-11)
 
-> Research note backing the **foreign-trace corpus lane** roadmap
-> candidate. Every dataset fact below was verified against primary
+> Research note backing **W-9 — foreign-trace corpus baseline**
+> (candidate 2026-07-11; promoted to queued 2026-07-12). Lanes 1+2 are
+> W-9's scope; lane 3 measurement stays with the R2 trigger and lane 4
+> with W-8's gate work.
+> Every dataset fact below was verified against primary
 > sources (HF dataset cards via API, GitHub repos, papers) on
 > 2026-07-11; flags mark what could not be verified. This note records
 > findings; the roadmap orders work.

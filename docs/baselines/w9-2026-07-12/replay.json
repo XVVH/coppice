@@ -2,57 +2,59 @@
   "format": "w9-verdict-vector-v1",
   "heuristic": "corpus-heuristic-v1",
   "base_time": "2026-01-01T00:00:00Z",
-  "cap_expires_at": "2026-01-01T02:00:00Z",
-  "trajectories": 4922,
-  "quarantined": 78,
+  "cap_expires_at": "2027-01-01T00:00:00Z",
+  "corpus_revision": "0df3cf37f2abefb380370cfb02eabea2a35ae782",
+  "row_limit": null,
+  "trajectories": 4916,
+  "quarantined": 84,
   "no_call_rows": 0,
-  "calls": 23536,
-  "unregistered_calls": 1263,
-  "evaluations": 94144,
-  "wall_ms": 298,
-  "evals_per_sec": 315919.0,
-  "verdict_vector_sha256": "c65b80d81b4c0d276db4252c58948b2c054b5bd020e3ff8d091faf610fb63c8f",
-  "vector_lines": 94144,
+  "calls": 23479,
+  "unregistered_calls": 1246,
+  "evaluations": 88932,
+  "wall_ms": 462,
+  "evals_per_sec": 192494.0,
+  "verdict_vector_sha256": "885d783528a0735c8615ee230645d8b0bb3cddd76e9cf7cfd143f07573f0e367",
+  "vector_lines": 93916,
   "cells": {
     "floor-t0": {
       "allow": 0,
-      "deny": 23536,
+      "deny": 23479,
       "escalate": 0,
       "failed_dims": {
-        "action.allow": 1263,
-        "external_reach": 23536,
-        "paths.write": 23536,
-        "reversibility.max": 23536
+        "external_reach": 22233,
+        "paths.write": 22233,
+        "reversibility.max": 22233,
+        "structural:undeclared_action": 1246
       }
     },
     "floor-t1": {
       "allow": 0,
-      "deny": 23536,
+      "deny": 23479,
       "escalate": 0,
       "failed_dims": {
-        "action.allow": 1263,
-        "reversibility.max": 23536
+        "reversibility.max": 22233,
+        "structural:undeclared_action": 1246
       }
     },
     "heuristic-t0": {
       "allow": 0,
-      "deny": 23536,
+      "deny": 23479,
       "escalate": 0,
       "failed_dims": {
-        "action.allow": 1263,
-        "external_reach": 23536,
-        "paths.write": 10322,
-        "reversibility.max": 199
+        "external_reach": 22233,
+        "paths.write": 9742,
+        "reversibility.max": 51,
+        "structural:undeclared_action": 1246
       }
     },
     "heuristic-t1": {
-      "allow": 22216,
-      "deny": 1314,
+      "allow": 22176,
+      "deny": 1297,
       "escalate": 6,
       "failed_dims": {
-        "action.allow": 1263,
         "budget.count:write": 6,
-        "reversibility.max": 199
+        "reversibility.max": 51,
+        "structural:undeclared_action": 1246
       }
     }
   },
@@ -65,10 +67,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max",
-        "external_reach",
-        "paths.write"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -79,10 +78,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max",
-        "external_reach",
-        "paths.write"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -470,10 +466,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max",
-        "external_reach",
-        "paths.write"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -484,10 +477,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max",
-        "external_reach",
-        "paths.write"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -498,10 +488,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max",
-        "external_reach",
-        "paths.write"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -720,8 +707,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -732,8 +718,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1063,8 +1048,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1075,8 +1059,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1087,8 +1070,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "reversibility.max"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1275,8 +1257,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "external_reach"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1287,8 +1268,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "external_reach"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1633,8 +1613,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "external_reach"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1645,8 +1624,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "external_reach"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1657,8 +1635,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow",
-        "external_reach"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1845,7 +1822,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -1856,7 +1833,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -2128,7 +2105,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -2139,7 +2116,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -2150,7 +2127,7 @@
       "unregistered": true,
       "outcome": "deny",
       "failed": [
-        "action.allow"
+        "structural:undeclared_action"
       ]
     },
     {
@@ -2304,6 +2281,10 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "774640e2-405c-5993-b032-c24824824858",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "8694a637-351f-5f21-af4b-7a927ce4bd68",
       "reason": "unparseable_call_arguments"
     },
@@ -2320,12 +2301,20 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "7e3aebdc-0b20-562e-a4ab-45273a1a958d",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "31fde72c-d5b4-5f42-9008-fdbe996aabd6",
       "reason": "unparseable_call_arguments"
     },
     {
       "uuid": "50f79650-a30b-5b4d-8ddb-2e69f195caf3",
       "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "be50a227-5bca-5427-8999-8100a481b5f5",
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "acb968cf-9754-555a-8733-8c57a94b1fa0",
@@ -2364,6 +2353,10 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "ac6bad39-0817-53d8-b92f-727b590fc95b",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "ad350995-ec73-56eb-bda4-eafcd9a119ad",
       "reason": "unparseable_call_arguments"
     },
@@ -2384,8 +2377,16 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "9f608bb8-5fb6-58f3-a8f3-9e345a7604bb",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "40a1f55f-27d5-5476-bdfc-db16dddf4f9a",
       "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "1f1fbd44-4e27-5922-91c8-c527c4e8d77d",
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "e45a187c-7002-50ae-8c5b-6b098796d4f5",
@@ -2441,7 +2442,7 @@
     },
     {
       "uuid": "2b33f477-0368-512c-b5f8-58e699f07e55",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "dabc7a13-c455-5492-946e-33d73163aebf",
@@ -2449,19 +2450,19 @@
     },
     {
       "uuid": "3d024251-1d9b-5ee5-8c90-27da920574a1",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "61f1e20d-7a8c-5fbf-a087-f6f0ca3e94ba",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "6d251005-9488-5e4a-9f6d-5cf75f5fbaf6",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "c0c6be98-988a-5a68-a184-006917414528",
@@ -2469,11 +2470,11 @@
     },
     {
       "uuid": "56b2b1d9-678f-51f8-ad23-76260bd08120",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "8a6c7050-4c54-56fb-9bde-168091e5d58a",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "2db220f7-31ab-5997-9389-fd7e25bb8326",
@@ -2493,7 +2494,7 @@
     },
     {
       "uuid": "2d19c5f7-d022-58ae-82b8-f24c2591585f",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "3d3d7de9-4fab-5fd4-a722-2b2f2a1fac94",
@@ -2505,7 +2506,7 @@
     },
     {
       "uuid": "504835d3-87aa-5947-84d9-885b4a602a1a",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "bbcb911b-e576-5d3a-9562-32c5ed106baa",
@@ -2513,11 +2514,11 @@
     },
     {
       "uuid": "c4e86849-c793-5fa4-9be1-0b0ab2ef9cc8",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "63a23503-a576-5e5f-aace-6f12e6fe5de1",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "ab82ea0f-9774-5077-97ad-cb9fbaeda364",
@@ -2573,7 +2574,7 @@
     },
     {
       "uuid": "aee5ed63-46b1-5305-8dad-e3f76e6de9f3",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "fb04dcda-a7de-504f-857b-601d7ada068b",
@@ -2613,12 +2614,12 @@
     }
   ],
   "gaps": {
-    "tool_server_ambiguous": {
-      "count": 12,
+    "server_name_not_sluggable": {
+      "count": 18,
       "samples": [
-        "2b33f477-0368-512c-b5f8-58e699f07e55: 虚拟币价格查询服务-get_coin_price",
-        "3d024251-1d9b-5ee5-8c90-27da920574a1: 虚拟币价格查询服务-get_coin_price",
-        "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb: 虚拟币价格查询服务-get_coin_price"
+        "774640e2-405c-5993-b032-c24824824858: 虚拟币价格查询服务",
+        "7e3aebdc-0b20-562e-a4ab-45273a1a958d: 虚拟币价格查询服务",
+        "be50a227-5bca-5427-8999-8100a481b5f5: 虚拟币价格查询服务"
       ]
     },
     "unparseable_call_arguments": {

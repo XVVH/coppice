@@ -1,7 +1,8 @@
 {
   "universe": {
-    "tools": 9807,
-    "servers": 1921,
+    "tools": 9795,
+    "servers_by_source_sum": 1920,
+    "servers_note": "per-source counts only; mcp-flow server identity is best-effort name-prefix recovery (an UPPER BOUND — underscore-less tool names become their own 'server', and this subset-derived count exceeds upstream's declared 1,166 total); cross-source dedup is not attempted",
     "by_source": {
       "mcp-flow": {
         "tools": 7640,
@@ -13,27 +14,29 @@
         "destructiveHint": 0,
         "idempotentHint": 0,
         "openWorldHint": 0,
-        "server_categories_present": 7640,
+        "declared_categories_present": 0,
+        "provenance_tag_present": 7640,
         "heuristic_class": {
-          "read": 2909,
-          "write": 4483,
-          "delete": 248
+          "read": 1915,
+          "write": 5538,
+          "delete": 187
         }
       },
       "toucan": {
-        "tools": 2167,
-        "servers": 358,
-        "description_present": 2103,
-        "parameters_present": 2167,
+        "tools": 2155,
+        "servers": 357,
+        "description_present": 2091,
+        "parameters_present": 2155,
         "annotations_any": 0,
         "readOnlyHint": 0,
         "destructiveHint": 0,
         "idempotentHint": 0,
         "openWorldHint": 0,
-        "server_categories_present": 2167,
+        "declared_categories_present": 2155,
+        "provenance_tag_present": 0,
         "heuristic_class": {
-          "read": 1013,
-          "write": 1122,
+          "read": 1003,
+          "write": 1120,
           "delete": 32
         }
       }
@@ -53,17 +56,17 @@
     "reversibility": {
       "derivable": 0,
       "pct": 0.0,
-      "note": "only MCP readOnlyHint/destructiveHint qualify as declared signal, and MCP itself marks them untrusted hints"
+      "note": "tools carrying readOnlyHint or destructiveHint (set membership, not a key sum); MCP itself marks these untrusted hints"
     },
     "action_class": {
       "derivable": 0,
       "pct": 0.0,
-      "note": "same annotation dependence as reversibility"
+      "note": "same reversibility-shaped hints; idempotent/openWorld-only annotations classify nothing"
     },
     "domain": {
-      "derivable": 9807,
-      "pct": 100.0,
-      "note": "server-level categories/tags only; taxonomy governance stays open"
+      "derivable": 2155,
+      "pct": 22.0,
+      "note": "corpus-DECLARED server categories only (Toucan crawler labels — third-party, not §4 self-declared registration metadata); harness provenance tags count as nothing; taxonomy governance stays open"
     },
     "store": {
       "derivable": 0,
@@ -85,5 +88,11 @@
     "version": "corpus-heuristic-v1",
     "normative": false,
     "note": "name/annotation classifier measuring the floor↔classifier gap; never feeds rules"
+  },
+  "inputs": {
+    "toucan_revision": "0df3cf37f2abefb380370cfb02eabea2a35ae782",
+    "mcpflow_revision": "c7e3f6b85949d844a6cebddd627e13eb3bd6d4ca",
+    "toucan_rows_parsed": 5000,
+    "mcpflow_files_scanned": 4
   }
 }

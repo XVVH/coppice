@@ -35,7 +35,9 @@ pub fn cli(args: &[String]) -> Result<()> {
         .map(PathBuf::from)
         .context("corpus needs --out <dir>")?;
     std::fs::create_dir_all(&out)?;
-    let limit = flag(args, "--limit").and_then(|v| v.parse::<usize>().ok());
+    // Limits parse strictly: in a tool whose contract is "same inputs →
+    // same hash", a typo must error, never silently widen the run.
+    let limit = parse_limit(args, "--limit")?;
 
     match sub {
         "census" => run_census(&corpora, &out),
@@ -50,9 +52,7 @@ pub fn cli(args: &[String]) -> Result<()> {
             let home = flag(args, "--home")
                 .map(PathBuf::from)
                 .context("corpus baseline needs --home <dir>")?;
-            let ingest_limit = flag(args, "--ingest-limit")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(500);
+            let ingest_limit = parse_limit(args, "--ingest-limit")?.unwrap_or(500);
             run_census(&corpora, &out)?;
             run_replay(&corpora, &out, limit, false)?;
             run_ingest(&corpora, &out, &home, ingest_limit)
@@ -81,7 +81,13 @@ fn run_census(corpora: &Path, out: &Path) -> Result<()> {
     let mut gaps = parsed.gaps.clone();
     gaps.merge(flow.gaps.clone());
 
-    let census = census::run(&universe);
+    let mut census = census::run(&universe);
+    census["inputs"] = json!({
+        "toucan_revision": parsed.revision,
+        "mcpflow_revision": flow.revision,
+        "toucan_rows_parsed": parsed.trajectories.len() + parsed.quarantined.len(),
+        "mcpflow_files_scanned": flow.files_scanned,
+    });
     let gaps_json = gaps.to_json();
     write_json(&out.join("census.json"), &census)?;
     write_json(&out.join("gaps.json"), &gaps_json)?;
@@ -102,8 +108,8 @@ fn run_replay(corpora: &Path, out: &Path, limit: Option<usize>, vector: bool) ->
         bail!("no replayable trajectories under {}", corpora.display());
     }
     let vector_path = out.join("verdict-vector.txt");
-    let result = replay::run(&parsed, vector.then_some(vector_path.as_path()));
-    let mut report = replay::report_json(&result, &parsed);
+    let result = replay::run(&parsed, vector.then_some(vector_path.as_path()))?;
+    let mut report = replay::report_json(&result, &parsed, limit);
     report["quarantine"] = json!(parsed
         .quarantined
         .iter()
@@ -204,4 +210,14 @@ fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter()
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1).cloned())
+}
+
+fn parse_limit(args: &[String], name: &str) -> Result<Option<usize>> {
+    match flag(args, name) {
+        None => Ok(None),
+        Some(v) => v
+            .parse::<usize>()
+            .map(Some)
+            .map_err(|_| anyhow::anyhow!("{name} must be a plain integer, got '{v}'")),
+    }
 }

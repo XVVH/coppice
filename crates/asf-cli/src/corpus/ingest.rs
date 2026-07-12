@@ -15,10 +15,9 @@
 
 use super::derive::{self, Mode};
 use super::model::ParseOutcome;
-use super::replay::{tool_ref, Tier};
+use super::replay::tool_ref;
 use anyhow::{bail, Context, Result};
 use asf_kernel::broker::Broker;
-use asf_kernel::evaluate::checks_json;
 use asf_kernel::kernel::Fabric;
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
 use serde_json::{json, Value};
@@ -26,6 +25,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 pub fn run(parsed: &ParseOutcome, home: &Path, limit: usize) -> Result<Value> {
+    // Tool refs are immutable once registered (§4): a second ingest into
+    // the same home would create duplicate live registrations, which
+    // lookup treats as a broken state. Refuse anything but a fresh home.
+    if home.join("fabric").join("fabric.db").exists() {
+        bail!(
+            "refusing to ingest into existing fabric home {} — immutable tool refs would \
+             double-register; use a fresh --home",
+            home.display()
+        );
+    }
     let scratch = home.join("scratch");
     std::fs::create_dir_all(&scratch)?;
     let stores = vec![StoreSpec {
@@ -114,9 +123,12 @@ pub fn run(parsed: &ParseOutcome, home: &Path, limit: usize) -> Result<Value> {
             .step_boundary(&human, &agent, &intent, behavior.clone())?;
         manifests += 1;
 
-        // floor×t0 checks ride along in the §6 tool_call body so the gate
-        // replay path sees realistic check records on foreign events.
-        let cell = replay_checks_for(traj);
+        // floor×t0 checks ride along in the §6 tool_call body (advisory
+        // annotations on an observed-mode record of effects that already
+        // happened upstream). Computed by the SAME per-call helper the
+        // replay lane uses — recorded checks cannot drift from the
+        // verdict vector.
+        let cell = super::replay::floor_t0_verdicts(traj);
         for (idx, call) in traj.calls.iter().enumerate() {
             let schema = traj.tools.iter().find(|t| t.name == call.tool_name);
             let d = derive::derive(schema, &call.tool_name, Mode::Floor);
@@ -129,7 +141,7 @@ pub fn run(parsed: &ParseOutcome, home: &Path, limit: usize) -> Result<Value> {
                 &args,
                 result.as_bytes(),
                 json!({ "action_class": d.class, "paths": Value::Null, "corpus_call": idx }),
-                cell[idx].clone(),
+                cell[idx].checks.clone(),
                 Some(d.reversibility),
             )?;
             tool_calls += 1;
@@ -184,66 +196,6 @@ pub fn run(parsed: &ParseOutcome, home: &Path, limit: usize) -> Result<Value> {
         "verify_ms": verify_ms,
         "fabric_db_bytes": db_bytes,
     }))
-}
-
-/// Recompute the floor×t0 evaluation per call so the recorded checks
-/// match the deterministic replay cell exactly (same capability shape,
-/// same derived context, in-memory meters).
-fn replay_checks_for(traj: &super::model::Trajectory) -> Vec<Value> {
-    use asf_kernel::evaluate::{evaluate, CallCtx, Outcome};
-    let man_id = format!("man:corpus-{}", traj.uuid);
-    let cap_id = format!("cap:corpus-{}-t0", traj.uuid);
-    let tool_refs: Vec<Value> = traj
-        .servers()
-        .iter()
-        .map(|s| Value::String(tool_ref(s)))
-        .collect();
-    let actions: Vec<Value> = traj
-        .tools
-        .iter()
-        .map(|t| Value::String(t.name.clone()))
-        .collect();
-    let cap = super::replay::cap_json(Tier::T0, &cap_id, &man_id, &tool_refs, &actions);
-    let mut meters: BTreeMap<String, u64> = BTreeMap::new();
-    let mut out = Vec::new();
-    for (idx, call) in traj.calls.iter().enumerate() {
-        let schema = traj.tools.iter().find(|t| t.name == call.tool_name);
-        let d = derive::derive(schema, &call.tool_name, Mode::Floor);
-        let tref = tool_ref(schema.map(|t| t.server.as_str()).unwrap_or("unknown"));
-        let write_paths = if matches!(d.class, "write" | "delete" | "move") {
-            Some(Vec::new())
-        } else {
-            None
-        };
-        let now = super::replay::ts(idx as i64);
-        let ctx = CallCtx {
-            tool: &tref,
-            action: &call.tool_name,
-            reversibility: d.reversibility,
-            side_effect: d.side_effect,
-            action_class: d.class,
-            write_paths,
-            now: &now,
-            current_manifest: &man_id,
-        };
-        let eval = evaluate(
-            &cap,
-            &ctx,
-            &mut |key| meters.get(key).copied().unwrap_or(0),
-            &mut |_| None,
-        );
-        if matches!(eval.outcome, Outcome::Allow) {
-            for c in &eval.checks {
-                if c.caveat.starts_with("budget.count:")
-                    && c.meter.get("applies") != Some(&Value::Bool(false))
-                {
-                    *meters.entry(c.caveat.clone()).or_insert(0) += 1;
-                }
-            }
-        }
-        out.push(checks_json(&eval.checks));
-    }
-    out
 }
 
 fn placeholder_key(b: u8) -> String {

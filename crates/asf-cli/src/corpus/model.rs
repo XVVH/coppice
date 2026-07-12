@@ -21,8 +21,14 @@ pub struct ToolSchema {
     /// MCP ToolAnnotations if the source preserved them (readOnlyHint,
     /// destructiveHint, idempotentHint, openWorldHint).
     pub annotations: Option<Value>,
-    /// Server-level categories/tags where the source carries them.
+    /// Server-level categories/tags THE CORPUS DECLARES (third-party
+    /// labels, e.g. Toucan's crawler-assigned server categories). Never
+    /// harness-injected — provenance goes in `provenance`, and only
+    /// this field may count as domain-shaped signal in the census.
     pub categories: Vec<String>,
+    /// Where the harness got the schema (e.g. mcp-flow marketplace
+    /// file). Bookkeeping only; counts as NOTHING in derivability.
+    pub provenance: Option<String>,
     pub source: &'static str,
 }
 
@@ -114,6 +120,34 @@ pub struct ParseOutcome {
     pub gaps: GapLedger,
     /// Rows that parsed cleanly but proposed no tool call at all.
     pub no_call_rows: u64,
+    /// Upstream dataset revision from FETCH.json, when present (absent
+    /// for fixtures). Recorded into reports so a baseline names its
+    /// inputs from the machine manifest, never by hand.
+    pub revision: Option<String>,
+}
+
+/// Verify a consumed corpus file against the fetch manifest, when one
+/// exists. FETCH.json present + file unlisted or hash-mismatched = hard
+/// error: the reproducibility chain is enforced at load, not decorative.
+/// No manifest (committed fixtures) = nothing to verify.
+pub fn verify_against_manifest(
+    manifest: Option<&serde_json::Value>,
+    file_name: &str,
+    bytes: &str,
+) -> anyhow::Result<()> {
+    let Some(m) = manifest else { return Ok(()) };
+    let recorded = m["files"][file_name]["sha256"].as_str();
+    let Some(recorded) = recorded else {
+        anyhow::bail!("{file_name} is not listed in FETCH.json (partial or foreign file)")
+    };
+    use sha2::{Digest, Sha256};
+    let actual = format!("sha256:{}", hex::encode(Sha256::digest(bytes.as_bytes())));
+    if actual != recorded {
+        anyhow::bail!(
+            "{file_name} does not match FETCH.json ({actual} != {recorded}); refetch or delete"
+        );
+    }
+    Ok(())
 }
 
 /// Slug used for server ids and tool refs: lowercase alnum runs joined

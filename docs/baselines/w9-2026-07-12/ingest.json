@@ -1,28 +1,32 @@
 {
   "mode": "observed (M7 — no authority declaration)",
   "trajectories_ingested": 1000,
-  "quarantined_excluded": 78,
+  "quarantined_excluded": 84,
   "manifests": 1000,
-  "tool_calls": 5537,
-  "servers_registered": 158,
+  "tool_calls": 5514,
+  "servers_registered": 157,
   "event_kinds": {
     "intent": 1000,
-    "register": 161,
+    "register": 160,
     "remanifest": 999,
     "snapshot": 1000,
-    "tool_call": 5537
+    "tool_call": 5514
   },
-  "events_verified": 8697,
+  "events_verified": 8673,
   "spans_verified": 1001,
   "ledger_unexplained": 0,
-  "ingest_ms": 2497,
-  "events_per_sec": 3483.0,
-  "verify_ms": 553,
-  "fabric_db_bytes": 32231424,
+  "ingest_ms": 2392,
+  "events_per_sec": 3626.0,
+  "verify_ms": 556,
+  "fabric_db_bytes": 32305152,
   "quarantine": [
     {
       "uuid": "cd6aabab-ace0-53cf-84db-0766ab781830",
       "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "774640e2-405c-5993-b032-c24824824858",
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "8694a637-351f-5f21-af4b-7a927ce4bd68",
@@ -41,12 +45,20 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "7e3aebdc-0b20-562e-a4ab-45273a1a958d",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "31fde72c-d5b4-5f42-9008-fdbe996aabd6",
       "reason": "unparseable_call_arguments"
     },
     {
       "uuid": "50f79650-a30b-5b4d-8ddb-2e69f195caf3",
       "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "be50a227-5bca-5427-8999-8100a481b5f5",
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "acb968cf-9754-555a-8733-8c57a94b1fa0",
@@ -85,6 +97,10 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "ac6bad39-0817-53d8-b92f-727b590fc95b",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "ad350995-ec73-56eb-bda4-eafcd9a119ad",
       "reason": "unparseable_call_arguments"
     },
@@ -105,8 +121,16 @@
       "reason": "unparseable_call_arguments"
     },
     {
+      "uuid": "9f608bb8-5fb6-58f3-a8f3-9e345a7604bb",
+      "reason": "server_name_not_sluggable"
+    },
+    {
       "uuid": "40a1f55f-27d5-5476-bdfc-db16dddf4f9a",
       "reason": "unparseable_call_arguments"
+    },
+    {
+      "uuid": "1f1fbd44-4e27-5922-91c8-c527c4e8d77d",
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "e45a187c-7002-50ae-8c5b-6b098796d4f5",
@@ -162,7 +186,7 @@
     },
     {
       "uuid": "2b33f477-0368-512c-b5f8-58e699f07e55",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "dabc7a13-c455-5492-946e-33d73163aebf",
@@ -170,19 +194,19 @@
     },
     {
       "uuid": "3d024251-1d9b-5ee5-8c90-27da920574a1",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "61f1e20d-7a8c-5fbf-a087-f6f0ca3e94ba",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "6d251005-9488-5e4a-9f6d-5cf75f5fbaf6",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "c0c6be98-988a-5a68-a184-006917414528",
@@ -190,11 +214,11 @@
     },
     {
       "uuid": "56b2b1d9-678f-51f8-ad23-76260bd08120",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "8a6c7050-4c54-56fb-9bde-168091e5d58a",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "2db220f7-31ab-5997-9389-fd7e25bb8326",
@@ -214,7 +238,7 @@
     },
     {
       "uuid": "2d19c5f7-d022-58ae-82b8-f24c2591585f",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "3d3d7de9-4fab-5fd4-a722-2b2f2a1fac94",
@@ -226,7 +250,7 @@
     },
     {
       "uuid": "504835d3-87aa-5947-84d9-885b4a602a1a",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "bbcb911b-e576-5d3a-9562-32c5ed106baa",
@@ -234,11 +258,11 @@
     },
     {
       "uuid": "c4e86849-c793-5fa4-9be1-0b0ab2ef9cc8",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "63a23503-a576-5e5f-aace-6f12e6fe5de1",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "ab82ea0f-9774-5077-97ad-cb9fbaeda364",
@@ -294,7 +318,7 @@
     },
     {
       "uuid": "aee5ed63-46b1-5305-8dad-e3f76e6de9f3",
-      "reason": "tool_server_ambiguous"
+      "reason": "server_name_not_sluggable"
     },
     {
       "uuid": "fb04dcda-a7de-504f-857b-601d7ada068b",

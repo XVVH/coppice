@@ -1,10 +1,10 @@
 {
-  "tool_server_ambiguous": {
-    "count": 12,
+  "server_name_not_sluggable": {
+    "count": 18,
     "samples": [
-      "2b33f477-0368-512c-b5f8-58e699f07e55: 虚拟币价格查询服务-get_coin_price",
-      "3d024251-1d9b-5ee5-8c90-27da920574a1: 虚拟币价格查询服务-get_coin_price",
-      "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb: 虚拟币价格查询服务-get_coin_price"
+      "774640e2-405c-5993-b032-c24824824858: 虚拟币价格查询服务",
+      "7e3aebdc-0b20-562e-a4ab-45273a1a958d: 虚拟币价格查询服务",
+      "be50a227-5bca-5427-8999-8100a481b5f5: 虚拟币价格查询服务"
     ]
   },
   "unparseable_call_arguments": {

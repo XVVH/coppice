@@ -13,7 +13,7 @@
 //! name prefix (`<server>_<tool>`), so mcp-flow server attribution is
 //! best-effort and the census README says so. Dedup key: (server, name).
 
-use super::model::{slug, GapLedger, ToolSchema};
+use super::model::{slug, verify_against_manifest, GapLedger, ToolSchema};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,6 +22,7 @@ pub struct McpFlowUniverse {
     pub tools: Vec<ToolSchema>,
     pub files_scanned: u64,
     pub gaps: GapLedger,
+    pub revision: Option<String>,
 }
 
 pub fn load_dir(corpora_dir: &Path) -> McpFlowUniverse {
@@ -29,6 +30,13 @@ pub fn load_dir(corpora_dir: &Path) -> McpFlowUniverse {
     let mut tools: BTreeMap<(String, String), ToolSchema> = BTreeMap::new();
     let mut gaps = GapLedger::default();
     let mut files_scanned = 0;
+    let manifest: Option<Value> = std::fs::read_to_string(dir.join("FETCH.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    let revision = manifest
+        .as_ref()
+        .and_then(|m| m["revision"].as_str())
+        .map(str::to_string);
 
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .map(|rd| {
@@ -56,6 +64,11 @@ pub fn load_dir(corpora_dir: &Path) -> McpFlowUniverse {
             gaps.add("mcpflow_unreadable_file", f.display().to_string());
             continue;
         };
+        let fname = f.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if let Err(e) = verify_against_manifest(manifest.as_ref(), fname, &text) {
+            gaps.add("mcpflow_manifest_mismatch", format!("{fname}: {e}"));
+            continue; // census is aggregate-only; skip, never trust
+        }
         let Ok(items) = serde_json::from_str::<Value>(&text) else {
             gaps.add("mcpflow_unparseable_file", f.display().to_string());
             continue;
@@ -89,7 +102,11 @@ pub fn load_dir(corpora_dir: &Path) -> McpFlowUniverse {
                         description: func["description"].as_str().map(str::to_string),
                         parameters: func.get("parameters").filter(|p| !p.is_null()).cloned(),
                         annotations: extract_annotations(entry, func),
-                        categories: vec![format!("marketplace:{marketplace}")],
+                        // MCP-Flow declares NO category metadata; the
+                        // marketplace is harness bookkeeping and must
+                        // never count as domain signal in the census.
+                        categories: Vec::new(),
+                        provenance: Some(format!("marketplace:{marketplace}")),
                         source: "mcp-flow",
                     });
             }
@@ -100,6 +117,7 @@ pub fn load_dir(corpora_dir: &Path) -> McpFlowUniverse {
         tools: tools.into_values().collect(),
         files_scanned,
         gaps,
+        revision,
     }
 }
 

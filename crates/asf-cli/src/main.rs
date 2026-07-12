@@ -11,6 +11,7 @@
 //!   proxy left stranded (RF-9); explicit ids for pre-marker branches
 
 mod broker_demo;
+mod corpus;
 mod mcp;
 mod proxy;
 mod vault_server;
@@ -131,9 +132,10 @@ fn main() -> Result<()> {
             let home = flag(&args, "--home").context("stats needs --home <dir>")?;
             stats(Path::new(&home))
         }
+        Some("corpus") => corpus::cli(&args[2..]),
         _ => {
             eprintln!(
-                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>"
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>\n  asf corpus census|replay|ingest|baseline --corpora <dir> --out <dir> [--home <dir>] [--limit N]"
             );
             std::process::exit(2);
         }

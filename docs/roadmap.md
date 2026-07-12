@@ -64,34 +64,6 @@ Closes posture gap P25; composes with but does not subsume P10/P15/P20/P21/P22
 or SI-23's P3/P4/P5/P12 cluster. *Provenance: 2026-07-11 revocation design
 review.*
 
-**W-9 — Foreign-trace corpus baseline: census + replay conformance.**
-Lanes 1+2 of `agent-trace-corpora-2026-07-11.md`, runnable while W-8
-awaits SI-24 ratification: one converter (foreign trajectory →
-observed-mode manifest + `register` + `tool_call` events), a Toucan
-slice plus the full MCP tool-schema set. Three artifacts: (a) the
-zero-authorship default census — what fraction of ~13k real tool
-schemas derives domain/reversibility/egress from registered metadata
-vs falls to the conservative floor (the approval-fatigue forecast;
-first empirical input to the domain-taxonomy open problem — input,
-not governance; the signal check for W-3's (caveat, action-class,
-domain) clustering); (b) the verdict baseline — allow/deny/escalate
-per dimension over replayed records — which is W-8's regression
-contract: corpora containing no revoke events MUST verdict identically
-before and after closure semantics, so this baseline lands before
-W-8's implementation; (c) evaluator/gate events-per-second and JCS
-canonicalization throughput at corpus scale — first measured input to
-the scalability analysis and the F2 decision on the W-6 path.
-Unencodable event shapes file as SIs, found before W-6 publishes
-schemas. Boundaries per the survey doc: fixtures/calibration only,
-never founding examples (R1/R6); synthetic sets excluded from rate
-claims; corpora operator-side only (A3); offline, no actuation-scoped
-registration (no SI-23 conflict). Deliberately excluded here:
-containment measurement stays with the R2 family's parked trigger
-(convert AgentDojo/MCPHunt now, measure then), and SWE operation-class
-fixtures wait for W-8's gate work. Machine-heavy, human-light — runs
-alongside W-1 without competing for dogfooding attention. *Provenance:
-2026-07-11 corpus research session; promoted to queued 2026-07-12.*
-
 **W-4 — Attestation + containment, as a pair.** The intent/behavior
 analog of what A21 did for authority. (a) Per-lineage assurance classes
 generalizing M7's observed/brokered split — the proxy today records a
@@ -198,6 +170,18 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-9 — foreign-trace corpus baseline** — `asf corpus` harness
+  (census/replay/ingest over Toucan-1.5M + MCP-Flow; fail-closed
+  quarantine; CORPUS-FAIL-CLOSED contract pair). First pinned baseline:
+  `docs/baselines/w9-2026-07-12/` — 9,807-tool census (zero MCP
+  annotations anywhere; the conservative floor claims 100% of the real
+  universe; domain the only derivable field), deterministic verdict
+  vector over 23,536 calls ×4 cells (floor cells deny 100%; the W-8
+  invariance hash), evaluator ~316k evals/s and substrate ingest ~3.5k
+  events/s (scalability + F2 input), zero spec-level encodability gaps
+  (no new SIs). Deferred pieces keep their triggers: containment
+  measurement with R2, SWE op-class fixtures with W-8's gate work, ADP
+  breadth on demand. (PR #29, 2026-07-12)
 - **W-2 — unified evaluator at the gate** — the gate replays every signed
   tool_call through the decision-time evaluator (all seven dimensions, not
   four; context from the registered action; meters/exemptions from signed

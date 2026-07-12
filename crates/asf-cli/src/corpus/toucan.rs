@@ -9,13 +9,17 @@
 //! whole trajectory with a named gap kind. Recurring kinds are SI
 //! candidates; nothing here interprets silently.
 
-use super::model::{slug, Call, GapLedger, ParseOutcome, ToolSchema, Trajectory};
+use super::model::{
+    slug, verify_against_manifest, Call, GapLedger, ParseOutcome, ToolSchema, Trajectory,
+};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::Path;
 
 /// Load every `toucan/rows-*.json` under `corpora_dir`, in filename
-/// order, normalizing at most `limit` rows (None = all).
+/// order, normalizing at most `limit` rows (None = all). When a
+/// FETCH.json manifest is present every consumed file is hash-verified
+/// against it (fail closed on tamper/truncation).
 pub fn load_dir(corpora_dir: &Path, limit: Option<usize>) -> Result<ParseOutcome> {
     let dir = corpora_dir.join("toucan");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
@@ -28,12 +32,24 @@ pub fn load_dir(corpora_dir: &Path, limit: Option<usize>) -> Result<ParseOutcome
         })
         .collect();
     files.sort();
+    let manifest: Option<Value> = std::fs::read_to_string(dir.join("FETCH.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
 
-    let mut out = ParseOutcome::default();
+    let mut out = ParseOutcome {
+        revision: manifest
+            .as_ref()
+            .and_then(|m| m["revision"].as_str())
+            .map(str::to_string),
+        ..Default::default()
+    };
     let mut seen = 0usize;
     'files: for f in files {
         let text = std::fs::read_to_string(&f)
             .with_context(|| format!("reading {}", f.display()))?;
+        let name = f.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        verify_against_manifest(manifest.as_ref(), name, &text)
+            .with_context(|| format!("integrity check failed for {}", f.display()))?;
         let parsed: Value =
             serde_json::from_str(&text).with_context(|| format!("parsing {}", f.display()))?;
         for row in parsed["rows"].as_array().into_iter().flatten() {
@@ -98,11 +114,35 @@ fn normalize(row: &Value, uuid: &str, gaps: &mut GapLedger) -> Result<Trajectory
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or(Value::Null);
     let mut servers: Vec<(String, Vec<String>)> = Vec::new();
+    let mut server_names: Vec<(String, String)> = Vec::new(); // (slug, original)
     for s in metadata["mcp_servers"].as_array().into_iter().flatten() {
         let name = s["server_name"]
             .as_str()
             .or_else(|| s["server_info"]["name"].as_str())
             .unwrap_or("unknown-server");
+        let sl = slug(name);
+        // Slug identity guards: an unsluggable name (e.g. CJK-only) or
+        // two distinct names collapsing to one slug would silently merge
+        // server identities — the exact guess the mapping forbids.
+        if sl.is_empty() {
+            return Err(refuse(
+                gaps,
+                "server_name_not_sluggable",
+                format!("{uuid}: {name}"),
+            ));
+        }
+        match server_names.iter().find(|(s2, _)| *s2 == sl) {
+            Some((_, orig)) if orig == name => continue, // duplicate listing
+            Some((_, orig)) => {
+                return Err(refuse(
+                    gaps,
+                    "server_slug_collision",
+                    format!("{uuid}: '{orig}' vs '{name}' -> {sl}"),
+                ))
+            }
+            None => {}
+        }
+        server_names.push((sl.clone(), name.to_string()));
         let cats = s["server_info"]["categories"]
             .as_array()
             .into_iter()
@@ -110,7 +150,7 @@ fn normalize(row: &Value, uuid: &str, gaps: &mut GapLedger) -> Result<Trajectory
             .filter_map(Value::as_str)
             .map(str::to_string)
             .collect();
-        servers.push((slug(name), cats));
+        servers.push((sl, cats));
     }
     if servers.is_empty() {
         return Err(refuse(gaps, "no_server_metadata", uuid.to_string()));
@@ -150,6 +190,7 @@ fn normalize(row: &Value, uuid: &str, gaps: &mut GapLedger) -> Result<Trajectory
             parameters: f.get("parameters").filter(|p| !p.is_null()).cloned(),
             annotations: extract_annotations(t, f),
             categories: server.1,
+            provenance: None,
             source: "toucan",
         });
     }
@@ -221,11 +262,38 @@ fn normalize(row: &Value, uuid: &str, gaps: &mut GapLedger) -> Result<Trajectory
             }
             Some("function") | Some("tool") => {
                 // Results attach to the oldest unresulted call (Toucan
-                // emits them in proposal order). A result with no pending
-                // call means the linkage is not expressible → refuse.
+                // emits them in proposal order), and where the corpus
+                // carries a `name` on the result it MUST corroborate the
+                // pairing — a mismatch means the order assumption is
+                // wrong for this row, so refuse rather than mis-attach.
                 match unresulted.first().copied() {
                     Some(idx) => {
-                        calls[idx].result = m["content"].as_str().map(str::to_string);
+                        if let Some(rname) = m["name"].as_str() {
+                            if rname != calls[idx].tool_name {
+                                return Err(refuse(
+                                    gaps,
+                                    "result_name_mismatch",
+                                    format!(
+                                        "{uuid}: result '{rname}' vs pending '{}'",
+                                        calls[idx].tool_name
+                                    ),
+                                ));
+                            }
+                        }
+                        calls[idx].result = match m.get("content") {
+                            None | Some(Value::Null) => None,
+                            Some(Value::String(s)) => Some(s.clone()),
+                            Some(other) => {
+                                // Structured content is a shape this
+                                // mapping does not express — gap, not a
+                                // silent None.
+                                return Err(refuse(
+                                    gaps,
+                                    "result_content_not_string",
+                                    format!("{uuid}: {}", truncate(other)),
+                                ));
+                            }
+                        };
                         unresulted.remove(0);
                     }
                     None => {

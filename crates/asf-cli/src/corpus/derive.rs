@@ -90,13 +90,19 @@ pub fn derive(schema: Option<&ToolSchema>, name: &str, mode: Mode) -> Derived {
         _ => {
             // Strip the server prefix before verb classification, or the
             // server slug pollutes the tokens ("exa-search-create_note"
-            // must classify on "create_note", not on "search"). Calls
-            // without a schema (hallucinated names) classify on the full
-            // name — documented noise, deny-bound via action.allow anyway.
+            // must classify on "create_note", not on "search"). The
+            // strip runs in SLUG space on both sides — raw-space
+            // stripping misses ~5% of real names (CJK/punctuated server
+            // prefixes) and lets server tokens force-classify tools.
+            let slugged = super::model::slug(name);
             let stripped = schema
-                .and_then(|t| name.strip_prefix(&format!("{}-", t.server)))
-                .unwrap_or(name);
-            classify_by_name(stripped)
+                .and_then(|t| {
+                    slugged
+                        .strip_prefix(&format!("{}-", t.server))
+                        .map(str::to_string)
+                })
+                .unwrap_or(slugged);
+            classify_by_name(&stripped)
         }
     };
     d.class = class;

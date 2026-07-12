@@ -24,7 +24,16 @@ struct SourceStats {
     destructive_hint: u64,
     idempotent_hint: u64,
     open_world_hint: u64,
+    /// Tools with at least one reversibility-shaped hint (readOnlyHint
+    /// OR destructiveHint) — per-tool set membership, never a sum of
+    /// key counts (a full annotation block must count once, not twice).
+    reversibility_signal: u64,
+    /// Corpus-DECLARED categories only; harness provenance never counts.
     categories: u64,
+    /// Harness provenance tags (bookkeeping: which file/marketplace the
+    /// schema came from). Reported so the categories/provenance split
+    /// is auditable; contributes to NO derivability figure.
+    provenance: u64,
     class_read: u64,
     class_write: u64,
     class_delete: u64,
@@ -48,11 +57,16 @@ pub fn run(universe: &[ToolSchema]) -> Value {
         }
         if let Some(a) = &t.annotations {
             s.annotations_any += 1;
-            if a.get("readOnlyHint").is_some() {
+            let read_only = a.get("readOnlyHint").is_some();
+            let destructive = a.get("destructiveHint").is_some();
+            if read_only {
                 s.read_only_hint += 1;
             }
-            if a.get("destructiveHint").is_some() {
+            if destructive {
                 s.destructive_hint += 1;
+            }
+            if read_only || destructive {
+                s.reversibility_signal += 1;
             }
             if a.get("idempotentHint").is_some() {
                 s.idempotent_hint += 1;
@@ -63,6 +77,9 @@ pub fn run(universe: &[ToolSchema]) -> Value {
         }
         if !t.categories.is_empty() {
             s.categories += 1;
+        }
+        if t.provenance.is_some() {
+            s.provenance += 1;
         }
         let d = derive::derive(Some(t), &t.name, Mode::Heuristic);
         match d.class {
@@ -87,14 +104,14 @@ pub fn run(universe: &[ToolSchema]) -> Value {
     // and path_args are structurally underivable from these corpora:
     // nothing in an MCP tool schema declares locality, a fabric store
     // binding (SI-16), or which argument fields carry write paths.
-    let annotations_any = totals(|s| s.annotations_any);
     let categories = totals(|s| s.categories);
-    let reversibility_signal = totals(|s| s.read_only_hint) + totals(|s| s.destructive_hint);
+    let reversibility_signal = totals(|s| s.reversibility_signal);
 
     json!({
         "universe": {
             "tools": n_tools,
-            "servers": by_source.values().map(|s| s.servers.len() as u64).sum::<u64>(),
+            "servers_by_source_sum": by_source.values().map(|s| s.servers.len() as u64).sum::<u64>(),
+            "servers_note": "per-source counts only; mcp-flow server identity is best-effort name-prefix recovery (an UPPER BOUND — underscore-less tool names become their own 'server', and this subset-derived count exceeds upstream's declared 1,166 total); cross-source dedup is not attempted",
             "by_source": by_source.iter().map(|(src, s)| {
                 (src.to_string(), json!({
                     "tools": s.tools,
@@ -106,7 +123,8 @@ pub fn run(universe: &[ToolSchema]) -> Value {
                     "destructiveHint": s.destructive_hint,
                     "idempotentHint": s.idempotent_hint,
                     "openWorldHint": s.open_world_hint,
-                    "server_categories_present": s.categories,
+                    "declared_categories_present": s.categories,
+                    "provenance_tag_present": s.provenance,
                     "heuristic_class": {
                         "read": s.class_read,
                         "write": s.class_write,
@@ -121,18 +139,18 @@ pub fn run(universe: &[ToolSchema]) -> Value {
             "egress": { "derivable": 0, "pct": 0.0,
                 "note": "undeclared egress = egress on external open surfaces (§0)" },
             "reversibility": { "derivable": reversibility_signal, "pct": pct(reversibility_signal),
-                "note": "only MCP readOnlyHint/destructiveHint qualify as declared signal, and MCP itself marks them untrusted hints" },
-            "action_class": { "derivable": annotations_any, "pct": pct(annotations_any),
-                "note": "same annotation dependence as reversibility" },
+                "note": "tools carrying readOnlyHint or destructiveHint (set membership, not a key sum); MCP itself marks these untrusted hints" },
+            "action_class": { "derivable": reversibility_signal, "pct": pct(reversibility_signal),
+                "note": "same reversibility-shaped hints; idempotent/openWorld-only annotations classify nothing" },
             "domain": { "derivable": categories, "pct": pct(categories),
-                "note": "server-level categories/tags only; taxonomy governance stays open" },
+                "note": "corpus-DECLARED server categories only (Toucan crawler labels — third-party, not §4 self-declared registration metadata); harness provenance tags count as nothing; taxonomy governance stays open" },
             "store": { "derivable": 0, "pct": 0.0,
                 "note": "SI-16 store binding has no foreign analogue; harness uses a representational ext:<server>" },
             "path_args": { "derivable": 0, "pct": 0.0,
                 "note": "no schema names its path-carrying arguments; paths.write can only fail closed on write-shaped foreign calls" },
         },
         "conservative_floor": {
-            "irreversible_pct": pct(n_tools - reversibility_signal),
+            "irreversible_pct": pct(n_tools.saturating_sub(reversibility_signal)),
             "egress_pct": 100.0,
             "note": "share of the universe the free defaults treat as irreversible egress absent ratified reclassification",
         },
@@ -148,10 +166,13 @@ pub fn render_md(census: &Value, gaps: &Value) -> String {
     let mut md = String::new();
     md.push_str("# W-9 census — zero-authorship defaults over the tool universe\n\n");
     md.push_str(&format!(
-        "Universe: **{} tools** across **{} servers**.\n\n",
-        census["universe"]["tools"], census["universe"]["servers"]
+        "Universe: **{} tools**. Server counts are per-source only — \
+         mcp-flow server identity is best-effort name-prefix recovery \
+         (an upper bound, not distinct servers); see census.json \
+         `servers_note`.\n\n",
+        census["universe"]["tools"]
     ));
-    md.push_str("| source | tools | servers | desc % | params % | annotations % | categories % | read/write/delete (heuristic) |\n");
+    md.push_str("| source | tools | servers (upper bound) | desc % | params % | annotations % | declared categories % | read/write/delete (heuristic) |\n");
     md.push_str("|---|---|---|---|---|---|---|---|\n");
     if let Some(map) = census["universe"]["by_source"].as_object() {
         for (src, s) in map {
@@ -164,7 +185,7 @@ pub fn render_md(census: &Value, gaps: &Value) -> String {
                 p("description_present"),
                 p("parameters_present"),
                 p("annotations_any"),
-                p("server_categories_present"),
+                p("declared_categories_present"),
                 s["heuristic_class"]["read"],
                 s["heuristic_class"]["write"],
                 s["heuristic_class"]["delete"],

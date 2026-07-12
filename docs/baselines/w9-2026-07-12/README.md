@@ -1,4 +1,4 @@
-# W-9 baseline — first run (2026-07-12)
+# W-9 baseline — v2 (2026-07-12)
 
 Produced by `asf corpus baseline` (crates/asf-cli/src/corpus/) over
 corpora fetched by `scripts/fetch-corpora`. Method, lanes, and hard
@@ -7,27 +7,51 @@ is fixtures/calibration only — never founding examples (R1/R6) — and
 stays operator-side (`corpora/` is gitignored; MCP-Flow declares no
 license, so only aggregates appear here).
 
-## Input pins
+> **v2 (2026-07-12, same day).** The fresh-eyes review after v1 merged
+> (PR #29) found a mistranscribed MCP-Flow revision pin, a census
+> derivability figure inflated by harness-injected provenance tags, and
+> several converter fidelity gaps. v2 re-runs on the corrected harness:
+> slug-identity and result-name guards (18 more rows quarantine instead
+> of silently merging/mis-pairing), broker-faithful structural denial
+> for undeclared actions, slug-space prefix stripping (≈150 heuristic
+> misclassifications fixed), split declared-categories vs provenance,
+> and load-time hash verification of every corpus file against
+> FETCH.json. v1's vector hash, retained for the record only:
+> `c65b80d81b4c0d276db4252c58948b2c054b5bd020e3ff8d091faf610fb63c8f`.
+
+## Input pins (machine-recorded; never hand-transcribed)
 
 - **Toucan-1.5M** (Apache-2.0): config `Kimi-K2`, split `train`, rows
   0–4999, HF revision `0df3cf37f2abefb380370cfb02eabea2a35ae782`.
 - **MCP-Flow** (no license declared): revision
-  `c7e3f6b859490c559d18ba2c3f426b3c4a2ff23c`, the four
+  `c7e3f6b85949d844a6cebddd627e13eb3bd6d4ca`, the four
   `*_seen_test_tool10.json` schema sets (deepnlp, glama, mcphub, mcpso).
-- Per-file sha256 manifests live in each corpus dir's `FETCH.json`
-  (operator-side). The Toucan `/rows` endpoint cannot pin a revision;
-  the fetch script records and enforces revision equality instead.
+- Authoritative copies of both pins live in each corpus dir's
+  `FETCH.json` (per-file sha256 included) and are echoed into
+  `census.json .inputs` / `replay.json .corpus_revision` by the harness
+  itself. The loader hash-verifies every consumed file against
+  FETCH.json; `scripts/fetch-corpora verify` checks everything at rest.
+  (The Toucan `/rows` endpoint cannot pin a revision; the fetch script
+  records and enforces revision equality instead.)
 
 ## Census headline (census.json / census.md)
 
-**9,807 tools across 1,921 servers. Zero MCP ToolAnnotations anywhere.**
-Reversibility, action class, side-effect/locality, egress, store
-binding (SI-16), and path arguments are all **0% derivable** from what
-real tools declare; only domain-shaped metadata is present (100%, but
-shallow — marketplace/category strings, and the taxonomy governance
-problem stays open). The §0 conservative floor therefore claims **100%
-of the real-world universe**: every tool is irreversible-egress until
-the ratification loop reclassifies it.
+**9,795 tools; zero MCP ToolAnnotations anywhere.** Reversibility,
+action class, side-effect/locality, egress, store binding (SI-16), and
+path arguments are all **0% derivable** from anything the tools or
+servers declare. Domain-shaped signal exists for **22.0%** of the
+universe (2,155 Toucan tools) — and even that is third-party labeling
+(marketplace/crawler categories), not §4 self-declared registration
+metadata; the MCP-Flow schema sets declare no categories at all
+(harness provenance tags count as nothing). The §0 conservative floor
+therefore claims **100% of the real-world universe**: every tool is
+irreversible-egress until the ratification loop reclassifies it.
+
+Server counts are per-source upper bounds, not distinct servers:
+Toucan 358 (slug-guarded); MCP-Flow ≈1,563 by best-effort name-prefix
+recovery, which both over-splits (underscore-less tool names become
+their own "server") and exceeds upstream's declared 1,166 total —
+see `servers_note` in census.json. No cross-source dedup is attempted.
 
 Serialization caveat, stated plainly: both corpora serialize tools in
 OpenAI function form, which structurally drops MCP annotations — so
@@ -39,64 +63,85 @@ registration metadata is a spec question, not a harness decision.
 
 ## Verdict baseline (replay.json / replay.md)
 
-4,922 replayable trajectories (of 5,000 rows: 66 quarantined for
+4,916 replayable trajectories (of 5,000 rows: 66 quarantined for
 malformed call-argument JSON — a generator artifact worth knowing
-about, 1.3% — and 12 for ambiguous tool→server mapping; zero no-call
-rows), 23,536 calls, 94,144 evaluations across four cells:
+about — and 18 for unsluggable server identities; 84 total, 1.7%; zero
+no-call rows), 23,479 calls, 93,916 vector lines across four cells
+(88,932 evaluator invocations; 1,246 hallucinated calls per cell deny
+structurally before evaluation, exactly as `broker::propose_call`
+would):
 
 | cell | allow | deny | escalate | dominant failures |
 |---|---|---|---|---|
-| floor-t0 | 0 (0%) | 23,536 | 0 | external_reach, paths.write, reversibility.max ×23,536 |
-| floor-t1 | 0 (0%) | 23,536 | 0 | reversibility.max ×23,536 |
-| heuristic-t0 | 0 (0%) | 23,536 | 0 | external_reach ×23,536; paths.write ×10,322 |
-| heuristic-t1 | 22,216 (94.4%) | 1,314 | 6 | action.allow ×1,263; reversibility.max ×199; budget ×6 |
+| floor-t0 | 0 (0%) | 23,479 | 0 | reversibility.max / external_reach / paths.write ×22,233; structural ×1,246 |
+| floor-t1 | 0 (0%) | 23,479 | 0 | reversibility.max ×22,233; structural ×1,246 |
+| heuristic-t0 | 0 (0%) | 23,479 | 0 | external_reach ×22,233; paths.write ×9,742; structural ×1,246 |
+| heuristic-t1 | 22,176 (94.5%) | 1,297 | 6 | structural ×1,246; reversibility.max ×51; budget ×6 |
 
 Readings: under zero-authorship defaults the broker denies **all** real
 MCP traffic in every posture — the ratchet loop is not an optimization,
-it is the product. The entire distance from 0% to 94.4% is one
+it is the product. The entire distance from 0% to 94.5% is one
 non-normative classifier (`corpus-heuristic-v1`) plus a working-tier
 capability — i.e. exactly the caveats the compilation loop is designed
-to earn, one ratified rule at a time. 1,263 calls (5.4%) name tools not
-offered in-context (hallucinated calls); action.allow catches every one
-mechanically. All three evaluator outcomes occur (6 escalations =
-budget exhaustion as the sole failure in >20-write trajectories).
+to earn, one ratified rule at a time. 1,246 calls (5.3%) name tools not
+offered in-context; every one is structurally uncallable (§4) before
+any caveat is consulted. All three evaluator outcomes occur (6
+escalations = budget exhaustion as the sole failure in >20-write
+trajectories).
 
-**Verdict vector** (`w9-verdict-vector-v1`, 94,144 lines):
+**Verdict vector** (`w9-verdict-vector-v1`, 93,916 lines):
 
 ```
-sha256: c65b80d81b4c0d276db4252c58948b2c054b5bd020e3ff8d091faf610fb63c8f
+sha256: 885d783528a0735c8615ee230645d8b0bb3cddd76e9cf7cfd143f07573f0e367
 ```
 
-**W-8 regression contract:** after capability closure/revocation lands,
-re-running `asf corpus replay` on the same pinned corpus MUST reproduce
-this hash bit-for-bit — corpora containing no revoke events may not
-change a single verdict. Regenerate with `--vector` to diff line-level
-on any mismatch.
+**W-8 regression contract — everything it pins:** after capability
+closure/revocation lands, re-running `asf corpus replay` MUST reproduce
+this hash bit-for-bit under: (1) the corpus revisions above per
+FETCH.json (loader-enforced), (2) the same harness commit both sides of
+the kernel change (a harness edit is a different experiment — rerun
+both sides on one commit), (3) `corpus-heuristic-v1` and
+`w9-verdict-vector-v1` as recorded in replay.json, and (4) the
+identical 84-row quarantine set recorded in replay.json. Under those
+pins, corpora containing no revoke events may not change a single
+verdict. Regenerate with `--vector` to diff line-level on any mismatch.
+The fixture-scale twin of this contract is enforced in CI: the
+committed test fixture's vector hash is pinned as a constant in
+`crates/asf-cli/tests/corpus.rs`.
 
 ## Performance (release build, single thread)
 
-- Pure evaluator: **~316k evaluations/sec** (94,144 evals in 298 ms) —
-  decision-time checking is nowhere near the bottleneck at wedge scale.
-- Substrate ingest: **~3.5k events/sec** end-to-end (1,000 observed-mode
-  manifests, 5,537 signed tool_call events with per-payload encryption,
-  JCS canonicalization, hash-chaining, and per-call store snapshots;
-  8,697 events verified across 1,001 spans afterwards; 32 MB fabric.db).
-  First measured input to `scalability-analysis-2026-07-10.md` and the
-  F2 decision on the W-6 path.
+- Pure evaluator: **~192k evaluator invocations/sec** (88,932 in
+  462 ms, structural short-circuits excluded from the count; wall
+  includes per-call derivation/slugging) — decision-time checking is
+  nowhere near the bottleneck at wedge scale.
+- Substrate ingest: **~3.6k events/sec** end-to-end (1,000
+  observed-mode manifests, 5,514 signed tool_call events with
+  per-payload encryption, JCS canonicalization, hash-chaining, and
+  per-call store snapshots; 8,673 events verified across 1,001 spans;
+  32 MB fabric.db).
+- **Not measured here:** promotion-gate replay throughput (three-way
+  merge + trace-vs-capability at the gate). The ingest lane is
+  observed-mode and never branches or promotes; the gate-side corpus
+  measurement is deferred to W-8's gate work, where it lands together
+  with the closure semantics it must exercise.
 
 ## Encodability result
 
 **Zero spec-level gaps.** Every parseable trajectory expressed cleanly
 as an observed-mode manifest (M7) with §6 `register`/`intent`/
 `tool_call` events; ledger accounting explained every root; no new SIs
-filed. The quarantined 1.6% failed on corpus-side malformations (gap
-kinds and bounded samples in gaps.json), not on ASF schema limits.
+filed. The quarantined 1.7% failed on corpus-side malformations and
+identity ambiguities the mapping refuses to guess about (gap kinds and
+bounded samples in gaps.json), not on ASF schema limits.
 
 ## Regenerate
 
 ```
-scripts/fetch-corpora all 5000        # + mcpflow-testdata (idempotent, pinned)
+scripts/fetch-corpora all 5000        # idempotent, revision-pinned
+scripts/fetch-corpora verify          # hash-check everything at rest
 cargo build -p asf --release
 ./target/release/asf corpus baseline --corpora corpora \
-    --out docs/baselines/w9-2026-07-12 --home <scratch> --ingest-limit 1000
+    --out docs/baselines/w9-2026-07-12 --home <fresh scratch dir> \
+    --ingest-limit 1000
 ```

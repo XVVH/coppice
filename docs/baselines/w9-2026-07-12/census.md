@@ -1,11 +1,11 @@
 # W-9 census — zero-authorship defaults over the tool universe
 
-Universe: **9807 tools** across **1921 servers**.
+Universe: **9795 tools**. Server counts are per-source only — mcp-flow server identity is best-effort name-prefix recovery (an upper bound, not distinct servers); see census.json `servers_note`.
 
-| source | tools | servers | desc % | params % | annotations % | categories % | read/write/delete (heuristic) |
+| source | tools | servers (upper bound) | desc % | params % | annotations % | declared categories % | read/write/delete (heuristic) |
 |---|---|---|---|---|---|---|---|
-| mcp-flow | 7640 | 1563 | 99% | 100% | 0% | 100% | 2909/4483/248 |
-| toucan | 2167 | 358 | 97% | 100% | 0% | 100% | 1013/1122/32 |
+| mcp-flow | 7640 | 1563 | 99% | 100% | 0% | 0% | 1915/5538/187 |
+| toucan | 2155 | 357 | 97% | 100% | 0% | 100% | 1003/1120/32 |
 
 ## Zero-authorship derivability (§0/§4, per registration field)
 
@@ -13,9 +13,9 @@ Universe: **9807 tools** across **1921 servers**.
 |---|---|---|---|
 | side_effect | 0 | 0.0% | nothing declares locality; §0 floors every tool to external |
 | egress | 0 | 0.0% | undeclared egress = egress on external open surfaces (§0) |
-| reversibility | 0 | 0.0% | only MCP readOnlyHint/destructiveHint qualify as declared signal, and MCP itself marks them untrusted hints |
-| action_class | 0 | 0.0% | same annotation dependence as reversibility |
-| domain | 9807 | 100.0% | server-level categories/tags only; taxonomy governance stays open |
+| reversibility | 0 | 0.0% | tools carrying readOnlyHint or destructiveHint (set membership, not a key sum); MCP itself marks these untrusted hints |
+| action_class | 0 | 0.0% | same reversibility-shaped hints; idempotent/openWorld-only annotations classify nothing |
+| domain | 2155 | 22.0% | corpus-DECLARED server categories only (Toucan crawler labels — third-party, not §4 self-declared registration metadata); harness provenance tags count as nothing; taxonomy governance stays open |
 | store | 0 | 0.0% | SI-16 store binding has no foreign analogue; harness uses a representational ext:<server> |
 | path_args | 0 | 0.0% | no schema names its path-carrying arguments; paths.write can only fail closed on write-shaped foreign calls |
 
@@ -25,12 +25,12 @@ Universe: **9807 tools** across **1921 servers**.
 
 ```json
 {
-  "tool_server_ambiguous": {
-    "count": 12,
+  "server_name_not_sluggable": {
+    "count": 18,
     "samples": [
-      "2b33f477-0368-512c-b5f8-58e699f07e55: 虚拟币价格查询服务-get_coin_price",
-      "3d024251-1d9b-5ee5-8c90-27da920574a1: 虚拟币价格查询服务-get_coin_price",
-      "450e900f-0d1a-5c0e-ae8c-4a2c053fcbdb: 虚拟币价格查询服务-get_coin_price"
+      "774640e2-405c-5993-b032-c24824824858: 虚拟币价格查询服务",
+      "7e3aebdc-0b20-562e-a4ab-45273a1a958d: 虚拟币价格查询服务",
+      "be50a227-5bca-5427-8999-8100a481b5f5: 虚拟币价格查询服务"
     ]
   },
   "unparseable_call_arguments": {

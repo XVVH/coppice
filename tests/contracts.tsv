@@ -55,7 +55,9 @@ C2|negative|proxied_session_end_to_end
 
 # W-9 foreign-trace corpus harness: conversion fails closed (quarantine
 # leaves NOTHING in the substrate), and the pure replay is the
-# deterministic W-8 verdict baseline (docs/agent-trace-corpora-2026-07-11.md)
+# deterministic W-8 verdict baseline (docs/baselines/w9-2026-07-12/)
 CORPUS-FAIL-CLOSED|positive|corpus_sample_replay_matches_golden_verdicts
+CORPUS-FAIL-CLOSED|positive|corpus_vector_file_bytes_hash_to_reported_value
 CORPUS-FAIL-CLOSED|negative|corpus_malformed_trajectory_is_quarantined_and_emits_no_events
-CORPUS-FAIL-CLOSED|supporting|corpus_hallucinated_call_denies_action_allow
+CORPUS-FAIL-CLOSED|negative|corpus_reingest_into_existing_home_is_refused_and_substrate_unchanged
+CORPUS-FAIL-CLOSED|supporting|corpus_hallucinated_call_is_denied_structurally_before_evaluation

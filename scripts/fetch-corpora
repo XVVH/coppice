@@ -5,9 +5,11 @@ Downloads land in ./corpora/ (gitignored — corpora stay operator-side per
 docs/agent-trace-corpora-2026-07-11.md; MCP-Flow declares no license, so
 its files are never committed or redistributed, aggregates only).
 
-  scripts/fetch-corpora toucan   [N_ROWS]   # default 5000 (Kimi-K2/train)
-  scripts/fetch-corpora mcpflow             # all marketplace tool files
-  scripts/fetch-corpora all      [N_ROWS]
+  scripts/fetch-corpora toucan            [N_ROWS]  # default 5000 (Kimi-K2/train)
+  scripts/fetch-corpora mcpflow-testdata            # the schema-bearing sets
+  scripts/fetch-corpora all               [N_ROWS]  # toucan + mcpflow-testdata
+  scripts/fetch-corpora verify                      # re-hash vs FETCH.json
+  scripts/fetch-corpora mcpflow-callpairs           # unused by harness; explicit only
 
 Reproducibility: each corpus dir gets a FETCH.json recording the dataset
 revision, parameters, and per-file sha256. Toucan's /rows API always
@@ -38,19 +40,31 @@ MARKETPLACES = ["deepnlp", "glama", "mcphub", "mcpso", "pipedream", "smithery"]
 def get(url, tries=6, timeout=120):
     # curl rather than urllib: it follows redirects and negotiates
     # TLS/proxies the way the rest of this environment already does.
+    # The HTTP status is captured explicitly so permanent failures
+    # (404) fail fast instead of burning ~8 minutes of backoff.
     for attempt in range(tries):
         r = subprocess.run(
-            ["curl", "-sfL", "--max-time", str(timeout), "-A", UA, url],
+            ["curl", "-sL", "--max-time", str(timeout), "-A", UA,
+             "-w", "\n%{http_code}", url],
             capture_output=True,
             check=False,
         )
-        if r.returncode == 0 and r.stdout:
-            return r.stdout
+        body, _, code = r.stdout.rpartition(b"\n")
+        code = code.decode(errors="replace").strip()
+        if r.returncode == 0 and code == "200" and body:
+            return body
+        if code == "404":
+            raise RuntimeError(f"HTTP 404 (permanent) for {url.split('?')[0]}")
         if attempt == tries - 1:
-            raise RuntimeError(f"curl failed ({r.returncode}) for {url.split('?')[0]}")
+            raise RuntimeError(
+                f"curl failed (rc {r.returncode}, http {code or '?'}) for {url.split('?')[0]}"
+            )
         wait = 15 * 2 ** attempt
-        print(f"  retry {attempt + 1} in {wait}s: {url.split('?')[0]} (rc {r.returncode})",
-              flush=True)
+        print(
+            f"  retry {attempt + 1} in {wait}s: {url.split('?')[0]} "
+            f"(rc {r.returncode}, http {code or '?'})",
+            flush=True,
+        )
         time.sleep(wait)
     raise RuntimeError("unreachable")
 
@@ -72,9 +86,38 @@ def load_meta(path):
 
 
 def save_meta(path, meta):
-    with open(path, "w") as f:
+    # Atomic: a crash mid-write must never corrupt the manifest the
+    # harness verifies against.
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(meta, f, indent=1, sort_keys=True)
         f.write("\n")
+    os.replace(tmp, path)
+
+
+def verify_dir(name):
+    """Re-hash every file listed in a corpus dir's FETCH.json."""
+    out = os.path.join(CORPORA, name)
+    meta = load_meta(os.path.join(out, "FETCH.json"))
+    if meta is None:
+        print(f"{name}: no FETCH.json (nothing fetched)", flush=True)
+        return 0
+    bad = 0
+    for rel, entry in sorted(meta["files"].items()):
+        path = os.path.join(out, rel)
+        if not os.path.exists(path):
+            print(f"{name}: MISSING {rel}", flush=True)
+            bad += 1
+            continue
+        with open(path, "rb") as f:
+            actual = sha256(f.read())
+        if actual != entry["sha256"]:
+            print(f"{name}: HASH MISMATCH {rel}", flush=True)
+            bad += 1
+    status = "OK" if bad == 0 else f"{bad} BAD"
+    print(f"{name}: {len(meta['files'])} file(s) verified, {status} "
+          f"(rev {meta['revision'][:12]})", flush=True)
+    return bad
 
 
 def fetch_toucan(n_rows):
@@ -213,12 +256,20 @@ def fetch_mcpflow_testdata():
 def main():
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     n_rows = int(sys.argv[2]) if len(sys.argv) > 2 else 5000
+    if what == "verify":
+        # Integrity lane: the Rust harness also verifies consumed files
+        # at load; this checks everything at rest.
+        bad = sum(verify_dir(d) for d in ("toucan", "mcp-flow", "mcp-flow-testdata"))
+        sys.exit(1 if bad else 0)
     if what in ("toucan", "all"):
         fetch_toucan(n_rows)
-    if what in ("mcpflow", "all"):
-        fetch_mcpflow()
     if what in ("mcpflow-testdata", "all"):
         fetch_mcpflow_testdata()
+    if what == "mcpflow-callpairs":
+        # The per-server function_call files carry instruction→call
+        # pairs WITHOUT schemas; nothing in the harness consumes them
+        # today, so this lane is explicit-only (not part of `all`).
+        fetch_mcpflow()
 
 
 if __name__ == "__main__":

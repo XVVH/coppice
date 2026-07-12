@@ -2,8 +2,10 @@
 /target
 
 # Local mutation-test reports (CI workspaces are ephemeral; local reports are
-# reproducible with `scripts/ci mutation`).
+# reproducible with `scripts/ci mutation`). cargo-mutants rotates the
+# previous run's report to mutants.out.old — ignore both.
 /mutants.out/
+/mutants.out.old/
 
 # W-9 corpus downloads (operator-side only; MCP-Flow is unlicensed —
 # never commit or redistribute; see docs/agent-trace-corpora-2026-07-11.md)

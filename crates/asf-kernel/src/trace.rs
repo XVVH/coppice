@@ -236,6 +236,20 @@ pub fn all_events(conn: &Connection) -> Result<Vec<EventRow>, TraceError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Fetch one event by its global substrate offset for operator inspection.
+pub fn event_at_offset(
+    conn: &Connection,
+    offset: i64,
+) -> Result<Option<EventRow>, TraceError> {
+    conn.query_row(
+        &format!("SELECT {EVENT_COLS} FROM events WHERE offset = ?1"),
+        [offset],
+        row_to_event,
+    )
+    .optional()
+    .map_err(TraceError::from)
+}
+
 /// Events of the given kinds in offset order — the cheap fetch for the
 /// A22/§5.4 authority view at decision time. The gate feeds the same view
 /// builders from `all_events` over verified spans; pre-filtering by kind

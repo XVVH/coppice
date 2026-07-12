@@ -7,6 +7,8 @@
 //! - `asf vault-server --vault V` — toy downstream MCP server
 //! - `asf approve --home H list|approve <id> [--uses N]|deny <id>` — the
 //!   human side of the C2 surface (separate terminal, never the agent)
+//! - `asf revoke --home H <cap:…> [--reason R]` — A22/§5.4 early closure:
+//!   permanent for the id, descendant-closing; operator surface only
 //! - `asf recover --home H --vault V [man:… …]` — gate sessions a dead
 //!   proxy left stranded (RF-9); explicit ids for pre-marker branches
 
@@ -84,6 +86,16 @@ fn main() -> Result<()> {
             let uses = flag(&args, "--uses").and_then(|u| u.parse().ok()).unwrap_or(1);
             proxy::approve_cli(Path::new(&home), sub, id, uses)
         }
+        Some("revoke") => {
+            let home = flag(&args, "--home").context("revoke needs --home <dir>")?;
+            let cap = args
+                .iter()
+                .find(|a| a.starts_with("cap:"))
+                .context("revoke needs a capability id (cap:…)")?
+                .clone();
+            let reason = flag(&args, "--reason").unwrap_or_else(|| "operator_request".into());
+            proxy::revoke_cli(Path::new(&home), &cap, &reason)
+        }
         Some("recover") => {
             let home = flag(&args, "--home").context("recover needs --home <dir>")?;
             let vault = flag(&args, "--vault").context("recover needs --vault <dir>")?;
@@ -135,7 +147,7 @@ fn main() -> Result<()> {
         Some("corpus") => corpus::cli(&args[2..]),
         _ => {
             eprintln!(
-                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>\n  asf corpus census|replay|ingest|baseline --corpora <dir> --out <dir> [--home <dir>] [--limit N]"
+                "usage:\n  asf demo [dir]\n  asf broker-demo [dir]\n  asf vault-server --vault <dir>\n  asf proxy --home <dir> --vault <dir> --downstream <cmd> [args…]\n  asf approve --home <dir> list|approve <id> [--uses N]|deny <id>|promotions|promote <id>|reject <id>\n  asf revoke --home <dir> <cap:…> [--reason <text>]\n  asf recover --home <dir> --vault <dir> [man:… …]\n  asf revert --home <dir> <man:…>\n  asf ledger --home <dir>\n  asf stats --home <dir>\n  asf corpus census|replay|ingest|baseline|gate-replay [--corpora <dir>] --out <dir> [--home <dir>] [--limit N]"
             );
             std::process::exit(2);
         }

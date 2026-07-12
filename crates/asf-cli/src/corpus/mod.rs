@@ -8,11 +8,12 @@
 //! examples, R1/R6), and quarantine is fail-closed — a trajectory the
 //! mapping cannot express contributes gaps, not events.
 //!
-//!   asf corpus census   --corpora DIR --out DIR
-//!   asf corpus replay   --corpora DIR --out DIR [--limit N] [--vector]
-//!   asf corpus ingest   --corpora DIR --out DIR --home DIR [--limit N]
-//!   asf corpus baseline --corpora DIR --out DIR --home DIR
-//!                       [--limit N] [--ingest-limit N]
+//!   asf corpus census      --corpora DIR --out DIR
+//!   asf corpus replay      --corpora DIR --out DIR [--limit N] [--vector]
+//!   asf corpus ingest      --corpora DIR --out DIR --home DIR [--limit N]
+//!   asf corpus baseline    --corpora DIR --out DIR --home DIR
+//!                          [--limit N] [--ingest-limit N]
+//!   asf corpus gate-replay --out DIR --home DIR   (an ingested home)
 
 mod census;
 mod derive;
@@ -23,14 +24,19 @@ mod replay;
 mod toucan;
 
 use anyhow::{bail, Context, Result};
+use asf_kernel::broker::Broker;
+use asf_kernel::kernel::Fabric;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 pub fn cli(args: &[String]) -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("");
-    let corpora = flag(args, "--corpora")
-        .map(PathBuf::from)
-        .context("corpus needs --corpora <dir> (see scripts/fetch-corpora)")?;
+    let corpora = flag(args, "--corpora").map(PathBuf::from);
+    let need_corpora = || {
+        corpora
+            .clone()
+            .context("corpus needs --corpora <dir> (see scripts/fetch-corpora)")
+    };
     let out = flag(args, "--out")
         .map(PathBuf::from)
         .context("corpus needs --out <dir>")?;
@@ -40,25 +46,93 @@ pub fn cli(args: &[String]) -> Result<()> {
     let limit = parse_limit(args, "--limit")?;
 
     match sub {
-        "census" => run_census(&corpora, &out),
-        "replay" => run_replay(&corpora, &out, limit, args.iter().any(|a| a == "--vector")),
+        "census" => run_census(&need_corpora()?, &out),
+        "replay" => run_replay(&need_corpora()?, &out, limit, args.iter().any(|a| a == "--vector")),
         "ingest" => {
             let home = flag(args, "--home")
                 .map(PathBuf::from)
                 .context("corpus ingest needs --home <dir>")?;
-            run_ingest(&corpora, &out, &home, limit.unwrap_or(500))
+            run_ingest(&need_corpora()?, &out, &home, limit.unwrap_or(500))
         }
         "baseline" => {
             let home = flag(args, "--home")
                 .map(PathBuf::from)
                 .context("corpus baseline needs --home <dir>")?;
             let ingest_limit = parse_limit(args, "--ingest-limit")?.unwrap_or(500);
-            run_census(&corpora, &out)?;
-            run_replay(&corpora, &out, limit, false)?;
-            run_ingest(&corpora, &out, &home, ingest_limit)
+            run_census(&need_corpora()?, &out)?;
+            run_replay(&need_corpora()?, &out, limit, false)?;
+            run_ingest(&need_corpora()?, &out, &home, ingest_limit)?;
+            run_gate_replay(&home, &out)
         }
-        other => bail!("unknown corpus subcommand '{other}' (census|replay|ingest|baseline)"),
+        "gate-replay" => {
+            let home = flag(args, "--home")
+                .map(PathBuf::from)
+                .context("corpus gate-replay needs --home <dir> (an ingested corpus home)")?;
+            run_gate_replay(&home, &out)
+        }
+        other => bail!(
+            "unknown corpus subcommand '{other}' (census|replay|ingest|baseline|gate-replay)"
+        ),
     }
+}
+
+/// The gate-side corpus measurement W-9 deferred to W-8, landed with the
+/// closure semantics it exercises: replay every ingested manifest's
+/// recorded trace through the promotion gate's read-only check — span
+/// verification, M7 activation, §5.4 closure at each effect's offset,
+/// full caveat re-evaluation — and report throughput. Fail-closed: an
+/// ingested corpus home must replay clean; any gate violation is a
+/// harness or substrate defect, not a number to average away.
+fn run_gate_replay(home: &Path, out: &Path) -> Result<()> {
+    let fabric = Fabric::open_existing(home.join("fabric"))
+        .with_context(|| format!("no fabric home under {}", home.display()))?;
+    let broker = Broker::new(fabric)?;
+    let manifests: Vec<String> = {
+        let mut stmt = broker
+            .fabric
+            .conn
+            .prepare("SELECT id FROM objects WHERE kind = 'manifest' ORDER BY rowid")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    if manifests.is_empty() {
+        bail!(
+            "no manifests under {} — run `asf corpus ingest` first",
+            home.display()
+        );
+    }
+    let start = std::time::Instant::now();
+    let (mut tool_calls, mut events_replayed) = (0u64, 0u64);
+    for m in &manifests {
+        let report = broker
+            .gate_replay_check(m)
+            .with_context(|| format!("gate replay failed for {m}"))?;
+        tool_calls += report["tool_calls"].as_u64().unwrap_or(0);
+        events_replayed += report["events"].as_u64().unwrap_or(0);
+    }
+    let wall = start.elapsed();
+    let secs = wall.as_secs_f64().max(f64::EPSILON);
+    let report = json!({
+        "manifests": manifests.len(),
+        "tool_calls_replayed": tool_calls,
+        "span_events_replayed": events_replayed,
+        "wall_ms": wall.as_millis() as u64,
+        "manifests_per_sec": (manifests.len() as f64 / secs).round() as u64,
+        "calls_per_sec": (tool_calls as f64 / secs).round() as u64,
+        "note": "read-only gate replay per manifest over the full substrate; \
+                 cost scales with total substrate size per manifest (the \
+                 measurement exists to watch exactly that)",
+    });
+    write_json(&out.join("gate-replay.json"), &report)?;
+    println!(
+        "gate-replay: {} manifests, {} tool_calls in {}ms ({} manifests/s, {} calls/s)",
+        report["manifests"],
+        report["tool_calls_replayed"],
+        report["wall_ms"],
+        report["manifests_per_sec"],
+        report["calls_per_sec"],
+    );
+    Ok(())
 }
 
 fn run_census(corpora: &Path, out: &Path) -> Result<()> {

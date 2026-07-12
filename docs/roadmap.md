@@ -42,34 +42,6 @@ approvals to cluster — but not far after; this is where authority stops
 evaporating at session end. *Provenance: 2026-07-10 review (highest-
 confidence convergent recommendation: ratchet before judge).*
 
-**W-8 — Capability closure + revocation.** Unblocked: SI-24 ratified as
-A22 (spec v0.7 §5.4, 2026-07-12; the eight ratification deltas live in
-the SI-24 resolution record, per the boundary rule).
-Implement §5.4: the signed `revoke` edge as the permanent, prospective,
-descendant-closing dual of A21's `grant` — pure event-derived
-`capability_state_at` shared by decision and gate replay (structural
-precondition in front of caveat evaluation, so pure-evaluator consumers
-like the corpus harness are untouched); verified parent ancestry with
-revokes resolved by capability id across manifests; operator-side
-revoke; closure denials non-escalatable; approvals/exemptions inert
-after closure while pre-revoke parked promotions stay approvable;
-`EVENT_KINDS` gains `revoke`, drops `expiry`; two-sided adversarial
-coverage per testing-theory G8 and a targeted mutation lane. Must land
-before W-3 progresses from candidate generation to standing authority,
-and before live egress or actuation.
-The W-9 verdict baseline is in place (`docs/baselines/w9-2026-07-12/`):
-W-8 verification includes reproducing its vector hash under its
-recorded pins (no verdict may change where no revoke event exists) and
-lands the gate-replay corpus-throughput measurement W-9 deferred. The
-current local wedge may conservatively strand an in-flight branch at revoke;
-the parked durable external-effect protocol supplies the signed dispatch
-linearization point before any remote effect ships. Production/distributed
-claims additionally require RF-13 trace-head anchoring and P21 cross-host
-fencing so rollback or a stale partition cannot erase the latest revoke.
-Closes posture gap P25; composes with but does not subsume P10/P15/P20/P21/P22
-or SI-23's P3/P4/P5/P12 cluster. *Provenance: 2026-07-11 revocation design
-review.*
-
 **W-4 — Attestation + containment, as a pair.** The intent/behavior
 analog of what A21 did for authority. (a) Per-lineage assurance classes
 generalizing M7's observed/brokered split — the proxy today records a
@@ -176,6 +148,32 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-8 — capability closure + revocation (A22/§5.4)** — the signed
+  `revoke` edge as the permanent, prospective, descendant-closing dual of
+  A21's `grant`: pure event-derived liveness (`a22_*` predicates — the
+  spec's `capability_state_at`) shared verbatim by decision time and gate
+  replay at each effect's durable authorization offset; revokes resolved
+  by capability id across manifests (M2 sub-agent chains); closure denials
+  structural and non-escalatable; approvals/exemptions inert after closure
+  while pre-revoke parked promotions stay approvable; mint/attenuate
+  refuse closed parents and closed ids; operator kill switch `asf revoke`
+  on the C2 socket + offline path, never advertised over MCP;
+  `EVENT_KINDS` gains `revoke`, drops `expiry`. Evidence: A22 two-sided
+  contract (19 tests: broker decision-time, gate matrix incl. both
+  dispatch-vs-revoke orders + cross-manifest cascade + doubt-never-widens
+  both edges, socket smoke), targeted `a22_*` mutation lane (36/36 caught;
+  first run surfaced and killed a real observed-mode activation gap), W-9
+  verdict baseline reproduced bit-for-bit under its pins
+  (`885d7835…`, identical 84-row quarantine), and the gate-replay
+  corpus-throughput measurement W-9 deferred (numbers in
+  `docs/baselines/w9-2026-07-12/`). Wedge consequence kept honest: an
+  in-flight branch at revoke conservatively strands (revert remains); the
+  parked durable external-effect protocol supplies the signed dispatch
+  point before any remote effect ships; RF-13/P21 remain the
+  production/distributed gates against revoke-erasing rollback. Closes
+  posture gap P25; composes with but does not subsume
+  P10/P15/P20/P21/P22 or SI-23's P3/P4/P5/P12 cluster. Unblocks W-3's
+  progression to standing authority. (PR #33, 2026-07-12)
 - **W-9 — foreign-trace corpus baseline** — `asf corpus` harness
   (census/replay/ingest; fail-closed quarantine; CORPUS-FAIL-CLOSED
   contracts) and the pinned baseline at `docs/baselines/w9-2026-07-12/`

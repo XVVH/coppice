@@ -36,6 +36,17 @@
 //!   reorder tamper belong to chain verification (trace.rs
 //!   `deleting_a_middle_event_breaks_the_chain`; offset-integrity residual
 //!   tracked as RF-13).
+//! - A22/§5.4 capability closure (the `a22_*` block below; decision-time
+//!   cases in tests/broker.rs): liveness at each effect's durable
+//!   authorization offset — non-retroactive (`a22_pre_revoke_work…`,
+//!   `a22_parked_promotion…`), dispatch-vs-revoke total order in both
+//!   directions (`a22_effect_recorded_after…`, `a22_inflight_ticket…`),
+//!   descendant cascade across manifests (`a22_ancestor_revoke…`) with
+//!   child-only isolation (`a22_child_revoke…`), doubt-never-widens on
+//!   both edges (`a22_unsigned_revocation_row…`,
+//!   `a22_anomalous_manifest_revoke…`), permanence (`a22_same_id_regrant…`,
+//!   `a22_revoked_before_first_grant…`), and ancestry well-ordering
+//!   (`a22_ancestor_grants…`).
 
 use asf_kernel::broker::{Broker, BrokerError, Decision, PromotionOutcome};
 use asf_kernel::kernel::{AuthorityMode, Fabric};
@@ -1107,5 +1118,532 @@ fn si22_gate_clock_is_the_events_at_not_gate_time() {
     assert_eq!(
         fs::read_to_string(w.vault.join("inbox/in-window.md")).unwrap(),
         "authorized in time\n"
+    );
+}
+
+// ---- A22/§5.4 capability closure at the gate ------------------------------
+//
+// Liveness is evaluated at each effect's durable authorization offset —
+// its own signed offset, never gate time — via the same pure view decision
+// time enforces at the current head. Decision-time closure cases live in
+// tests/broker.rs; here: non-retroactivity (including through parked
+// promotions), the dispatch-vs-revoke total order in both directions,
+// descendant cascade across manifest boundaries, doubt-never-widens on
+// both edges, permanence, and ancestry well-ordering.
+
+/// Sign a capability with the fabric key and store its object row WITHOUT
+/// any grant — optionally as a child of `parent` — for adversarial lineage
+/// construction. (`store_ungranted_capability` is the parentless form.)
+fn store_capability_row(w: &mut World, parent: Option<&str>, issued_at: &str) -> String {
+    let sk = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    let body = capability::build(
+        &w.agent,
+        &w.manifest,
+        parent,
+        issued_at,
+        "2027-01-01T00:00:00Z",
+        caveats(),
+        vec![],
+    )
+    .unwrap();
+    let sealed = canon::seal("cap", body, &sk).unwrap();
+    trace::put_object(&w.broker.fabric.conn, "capability", &sealed, issued_at).unwrap()
+}
+
+fn revoke(w: &mut World, cap: &str, reason: &str) {
+    let chan = w.chan.clone();
+    w.broker
+        .revoke_capability(cap, reason, Some((&chan, "local_session")))
+        .unwrap();
+}
+
+#[test]
+fn a22_pre_revoke_work_promotes_after_revoke() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/pre.md", "authorized before closure\n");
+    let cap = w.cap.clone();
+    revoke(&mut w, &cap, "operator_request");
+
+    // Read-only replay agrees before anything merges.
+    let report = w.broker.gate_replay_check(&w.manifest).unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["closure_anomalies"].as_array().unwrap().len(), 0);
+
+    // Non-retroactivity: effects durably authorized before R remain
+    // historically valid; the revoke closes future authority only.
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("pre-revoke work must promote: {other:?}"),
+    }
+    assert_eq!(
+        fs::read_to_string(w.vault.join("inbox/pre.md")).unwrap(),
+        "authorized before closure\n"
+    );
+}
+
+#[test]
+fn a22_effect_recorded_after_revoke_fails_gate() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/pre.md", "fine\n");
+    let cap = w.cap.clone();
+    revoke(&mut w, &cap, "compromise");
+    // An effect recorded after the revoke — its durable authorization
+    // offset follows R, so the branch conservatively strands.
+    record_claimed_write(&mut w, &cap, "inbox/post.md");
+    assert_m7_rejected_without_promotion(&mut w, "revoked", "inbox/post.md");
+}
+
+#[test]
+fn a22_inflight_ticket_recorded_after_revoke_strands_branch() {
+    let mut w = setup_brokered();
+    // Dispatch vs revoke, the other direction of the single signed total
+    // order: the broker said Allowed BEFORE the revoke, but the effect's
+    // first signed record lands AFTER it. An in-memory ticket is never
+    // authorization evidence (§5.4) — the branch strands, revert remains.
+    let d = w
+        .broker
+        .propose_call(
+            &w.cap,
+            "tool:vault@1.0",
+            "note.write",
+            &json!({"path": "inbox/racy.md", "content": "in flight\n"}),
+        )
+        .unwrap();
+    let ticket = match d {
+        Decision::Allowed { ticket, .. } => ticket,
+        other => panic!("expected Allowed pre-revoke: {other:?}"),
+    };
+    let cap = w.cap.clone();
+    revoke(&mut w, &cap, "compromise");
+    let p = w.branch["fs:vault"].join("inbox/racy.md");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(p, "in flight\n").unwrap();
+    w.broker.record_result(ticket, b"{}").unwrap();
+
+    assert_m7_rejected_without_promotion(&mut w, "revoked", "inbox/racy.md");
+}
+
+#[test]
+fn a22_ancestor_revoke_closes_cross_manifest_child() {
+    let mut w = setup_brokered();
+    let parent = w.cap.clone();
+    // A hermetic sub-agent fork (M2): child manifest, child capability
+    // bound to it, attenuated from the parent capability on manifest 1.
+    let behavior = json!({"bundle":"sha256:g","skills":[]});
+    let step2 = w
+        .broker
+        .fabric
+        .step_boundary_with_mode(&w.human, &w.agent, &w.intent, behavior, AuthorityMode::Brokered)
+        .unwrap();
+    let branch2 = w.broker.fabric.create_branch(&step2.manifest).unwrap();
+    let child = w
+        .broker
+        .attenuate(&parent, &w.agent, &step2.manifest, caveats(), vec![], "2027-01-01T00:00:00Z")
+        .unwrap();
+
+    // Revoking the parent closes the whole descendant subtree — including
+    // a child bound to a DIFFERENT manifest. Revokes resolve by capability
+    // id across the substrate, never filtered by the evaluating manifest.
+    revoke(&mut w, &parent, "compromise");
+
+    let p = branch2["fs:vault"].join("inbox/sub.md");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(p, "sub-agent write\n").unwrap();
+    w.broker
+        .fabric
+        .record_tool_call(
+            "tool:vault@1.0",
+            "note.write",
+            serde_json::to_string(&json!({"path": "inbox/sub.md"}))
+                .unwrap()
+                .as_bytes(),
+            b"{}",
+            json!({ "capability": child, "action_class": "write", "paths": ["inbox/sub.md"] }),
+            json!([]),
+            Some("reversible"),
+        )
+        .unwrap();
+
+    match w.broker.promote_manifest(&step2.manifest, &branch2) {
+        Err(BrokerError::GateTraceViolation(msg)) => {
+            assert!(msg.contains("revoked"), "{msg}");
+            assert!(msg.contains(&parent), "the closed ANCESTOR is named: {msg}");
+        }
+        other => panic!("ancestor revoke must close the cross-manifest child: {other:?}"),
+    }
+    assert!(!w.vault.join("inbox/sub.md").exists(), "stranded effect reached trunk");
+}
+
+#[test]
+fn a22_child_revoke_leaves_parent_promotable() {
+    let mut w = setup_brokered();
+    let parent = w.cap.clone();
+    let child = w
+        .broker
+        .attenuate(&parent, &w.agent, &w.manifest, caveats(), vec![], "2027-01-01T00:00:00Z")
+        .unwrap();
+    revoke(&mut w, &child, "operator_request");
+    // Parent work after a CHILD revoke: parent and siblings stay live.
+    agent_write(&mut w, "inbox/parent-still-live.md", "yes\n");
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("child revoke must not close the parent: {other:?}"),
+    }
+    assert!(w.vault.join("inbox/parent-still-live.md").exists());
+}
+
+#[test]
+fn a22_unsigned_revocation_row_moves_nothing() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/a22.md", "live\n");
+    // Unsigned state is not part of the view (§5.4): a raw row shaped like
+    // a revoke, on its own span, with no valid signature — injected by a
+    // DB writer — must close nothing at decision time or at the gate.
+    let fake_raw = json!({
+        "id": "evt:fake", "span": "span:fake", "seq": 0, "prev": null,
+        "manifest": w.manifest, "at": "2026-07-12T00:00:00Z",
+        "kind": "revoke",
+        "body": { "capability": w.cap, "reason": "forged", "channel": null, "auth_strength": null },
+        "sig": { "key_id": "fabric", "alg": "ed25519", "value": "00" }
+    });
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "INSERT INTO events (id, span, seq, prev, manifest, at, kind, raw)
+             VALUES ('evt:fake', 'span:fake', 0, NULL, ?1, '2026-07-12T00:00:00Z', 'revoke', ?2)",
+            rusqlite::params![w.manifest, serde_json::to_string(&fake_raw).unwrap()],
+        )
+        .unwrap();
+
+    // Decision time: still live.
+    match w
+        .broker
+        .propose_call(&w.cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/b22.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Allowed { ticket, .. } => {
+            let p = w.branch["fs:vault"].join("inbox/b22.md");
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, "x").unwrap();
+            w.broker.record_result(ticket, b"{}").unwrap();
+        }
+        other => panic!("unsigned revoke row must move nothing: {other:?}"),
+    }
+    // Gate: promotes clean.
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("unsigned revoke row must not strand the branch: {other:?}"),
+    }
+    assert!(w.vault.join("inbox/a22.md").exists());
+}
+
+#[test]
+fn a22_anomalous_manifest_revoke_still_closes_loudly() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/pre-anomaly.md", "authorized before closure\n");
+    // A signature-verified revoke whose manifest field disagrees with the
+    // target's bound_manifest: doubt never widens — the closure HOLDS (a
+    // kill switch that silently no-ops on malformed emission is the worst
+    // outcome) and the inconsistency surfaces loudly at the gate.
+    let (cap, chan) = (w.cap.clone(), w.chan.clone());
+    append_substrate_event(
+        &mut w,
+        "man:wrong",
+        "revoke",
+        json!({
+            "capability": cap, "reason": "compromise",
+            "channel": chan, "auth_strength": "local_session"
+        }),
+    );
+
+    // Closure holds at decision time.
+    match w
+        .broker
+        .propose_call(&w.cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/x.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Denied { structural: Some(s), .. } => assert!(s.contains("revoked"), "{s}"),
+        other => panic!("anomalous verified revoke must still close: {other:?}"),
+    }
+
+    // Pre-revoke work still promotes (non-retroactive), and the anomaly is
+    // ledger-visible through the promotion event's trace_check.
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("pre-revoke work must promote: {other:?}"),
+    }
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    let promo = events.iter().rev().find(|e| e.kind == "promotion").unwrap();
+    let anomalies = promo.raw["body"]["trace_check"]["closure_anomalies"]
+        .as_array()
+        .unwrap();
+    assert_eq!(anomalies.len(), 1, "the anomaly is loud: {anomalies:?}");
+    assert!(
+        anomalies[0].as_str().unwrap().contains("closure holds"),
+        "{anomalies:?}"
+    );
+}
+
+#[test]
+fn a22_same_id_regrant_cannot_reactivate() {
+    let mut w = setup_brokered();
+    let cap = w.cap.clone();
+    revoke(&mut w, &cap, "compromise");
+    // Permanence is the condition-2 quantifier: ALL revokes before O count,
+    // not merely those after the latest grant — a later grant of the same
+    // id activates nothing.
+    let man = w.manifest.clone();
+    append_substrate_event(
+        &mut w,
+        &man,
+        "grant",
+        json!({ "capability": cap, "parent": null }),
+    );
+    match w
+        .broker
+        .propose_call(&cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/z.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Denied { structural: Some(s), .. } => assert!(s.contains("revoked"), "{s}"),
+        other => panic!("re-granted closed id must stay dead: {other:?}"),
+    }
+    record_claimed_write(&mut w, &cap, "inbox/regrant.md");
+    assert_m7_rejected_without_promotion(&mut w, "revoked", "inbox/regrant.md");
+}
+
+#[test]
+fn a22_revoked_before_first_grant_is_dead() {
+    let mut w = setup_brokered();
+    // R < G: an id revoked before it was ever granted is permanently
+    // poisoned — a capability minted to it later is born dead.
+    let doomed = store_capability_row(&mut w, None, "2026-07-10T00:00:00Z");
+    let (man, chan) = (w.manifest.clone(), w.chan.clone());
+    append_substrate_event(
+        &mut w,
+        &man,
+        "revoke",
+        json!({
+            "capability": doomed, "reason": "compromise",
+            "channel": chan, "auth_strength": "local_session"
+        }),
+    );
+    let man = w.manifest.clone();
+    append_substrate_event(
+        &mut w,
+        &man,
+        "grant",
+        json!({ "capability": doomed, "parent": null }),
+    );
+    record_claimed_write(&mut w, &doomed, "inbox/doomed.md");
+    assert_m7_rejected_without_promotion(&mut w, "revoked", "inbox/doomed.md");
+}
+
+#[test]
+fn a22_parked_promotion_of_pre_revoke_work_remains_approvable() {
+    let mut w = setup_brokered();
+    // Destructive class parks under zero-authorship policy…
+    agent_delete(&mut w, "inbox/b.md");
+    let branch = w.branch.clone();
+    let promotion = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Parked { promotion } => promotion,
+        other => panic!("delete must park: {other:?}"),
+    };
+    // …the capability is revoked while the promotion waits…
+    let cap = w.cap.clone();
+    revoke(&mut w, &cap, "operator_request");
+    // …and the parked promotion of PRE-revoke work remains approvable:
+    // promotion ratifies past recorded work at its own offsets; the merge
+    // is the human's act. Only future authority died (§5.4).
+    let chan = w.chan.clone();
+    w.broker
+        .approve_promotion(promotion, &chan, "local_session")
+        .unwrap();
+    assert!(!w.vault.join("inbox/b.md").exists(), "approved delete applied");
+}
+
+#[test]
+fn a22_ancestor_grants_must_be_well_ordered() {
+    let mut w = setup_brokered();
+    // Adversarial lineage: an ungranted parent row, a child row granted
+    // ahead of it. Liveness requires every link's exact-binding grant with
+    // earliest grants well-ordered along the chain (§5.4 condition 4).
+    let parent = store_ungranted_capability(&mut w);
+    let child = store_capability_row(&mut w, Some(&parent), "2026-07-10T00:00:01Z");
+    let man = w.manifest.clone();
+    append_substrate_event(
+        &mut w,
+        &man,
+        "grant",
+        json!({ "capability": child, "parent": parent }),
+    );
+
+    // Missing ancestor grant fails closed.
+    record_claimed_write(&mut w, &child, "inbox/orphan.md");
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant binds", "inbox/orphan.md");
+
+    // Granting the parent AFTER the child is a disordered lineage — still
+    // fail closed (an injected object row + late grant activates nothing).
+    let man = w.manifest.clone();
+    append_substrate_event(
+        &mut w,
+        &man,
+        "grant",
+        json!({ "capability": parent, "parent": null }),
+    );
+    assert_m7_rejected_without_promotion(&mut w, "out of order", "inbox/orphan.md");
+}
+
+#[test]
+fn a22_non_grant_event_cannot_activate_capability_in_observed_mode() {
+    // Observed mode skips the brokered-only m7 ordering check, so the a22
+    // view is the ONLY activation check for attributed calls (which are
+    // checked in full whenever a capability exists — M7). A fabric-signed
+    // NON-grant event that happens to carry a capability id in its body
+    // and a manifest field — broker denial verdicts legitimately look
+    // exactly like this — must not activate anything (the view builder
+    // keys strictly on kind == "grant").
+    let mut w = setup();
+    let ungranted = store_ungranted_capability(&mut w);
+    let man = w.manifest.clone();
+    append_substrate_event(
+        &mut w,
+        &man,
+        "verdict",
+        json!({
+            "verdict": "deny", "source": "broker", "capability": ungranted,
+            "tool": "tool:vault@1.0", "action": "note.write",
+            "failed": [], "structural": null, "checks": []
+        }),
+    );
+    record_claimed_write(&mut w, &ungranted, "inbox/nogrant.md");
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant binds", "inbox/nogrant.md");
+}
+
+/// Append a fabric-signed event to an arbitrary span — for adversarial
+/// placement cases (§6 records authority acts on the fabric-lifetime span;
+/// these tests park them elsewhere on purpose).
+fn append_event_on_span(w: &mut World, span: &str, manifest: &str, kind: &str, body: Value) {
+    let sk = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    trace::append(
+        &mut w.broker.fabric.conn,
+        &sk,
+        span,
+        Some(manifest),
+        kind,
+        body,
+        "2026-07-12T00:00:01Z",
+    )
+    .unwrap();
+}
+
+fn run_span_of(w: &World, manifest: &str) -> String {
+    trace::get_object(&w.broker.fabric.conn, manifest).unwrap()["trace"]["span"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a22_grant_on_session_span_activates_nothing() {
+    // Observed mode: m7's brokered-only ordering check is skipped, so the
+    // a22 view is the ONLY activation check — exactly the surface where a
+    // misplaced grant would otherwise widen authority. §6 records
+    // authority acts on the fabric-lifetime span; a signed, body-perfect
+    // grant parked on a session span is an anomaly, and activation
+    // anomalies never widen (§5.4 doubt-never-widens, activation side —
+    // the deliberate asymmetry with revokes, which close from any span).
+    let mut w = setup();
+    let orphan = store_ungranted_capability(&mut w);
+    let run_span = run_span_of(&w, &w.manifest);
+    let man = w.manifest.clone();
+    append_event_on_span(
+        &mut w,
+        &run_span,
+        &man,
+        "grant",
+        json!({ "capability": orphan, "parent": null }),
+    );
+
+    // Decision time: not activated.
+    match w
+        .broker
+        .propose_call(&orphan, "tool:vault@1.0", "note.write", &json!({"path":"inbox/x.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Denied { structural: Some(s), .. } => {
+            assert!(s.contains("no verified grant binds"), "{s}");
+        }
+        other => panic!("session-span grant must not activate at decision time: {other:?}"),
+    }
+    // Gate, observed mode: not activated either.
+    record_claimed_write(&mut w, &orphan, "inbox/misplaced.md");
+    assert_m7_rejected_without_promotion(&mut w, "no verified grant binds", "inbox/misplaced.md");
+}
+
+#[test]
+fn a22_unexpected_span_revoke_closes_loudly() {
+    let mut w = setup_brokered();
+    agent_write(&mut w, "inbox/pre-span.md", "authorized before closure\n");
+    // A signature-verified revoke emitted on the RUN span instead of the
+    // fabric-lifetime span, with unpaired C1 provenance (channel set,
+    // auth_strength null). Doubt never widens: it still closes — and BOTH
+    // anomalies surface loudly in the gate report.
+    let run_span = run_span_of(&w, &w.manifest);
+    let (cap, chan, man) = (w.cap.clone(), w.chan.clone(), w.manifest.clone());
+    append_event_on_span(
+        &mut w,
+        &run_span,
+        &man,
+        "revoke",
+        json!({ "capability": cap, "reason": "compromise", "channel": chan, "auth_strength": null }),
+    );
+
+    // Closure holds at decision time.
+    match w
+        .broker
+        .propose_call(&cap, "tool:vault@1.0", "note.write", &json!({"path":"inbox/y.md","content":"x"}))
+        .unwrap()
+    {
+        Decision::Denied { structural: Some(s), .. } => assert!(s.contains("revoked"), "{s}"),
+        other => panic!("unexpected-span revoke must still close: {other:?}"),
+    }
+
+    // Pre-revoke work promotes (non-retroactive); both anomalies are loud.
+    let branch = w.branch.clone();
+    match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Applied { .. } => {}
+        other => panic!("pre-revoke work must promote: {other:?}"),
+    }
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    let promo = events.iter().rev().find(|e| e.kind == "promotion").unwrap();
+    let anomalies: Vec<&str> = promo.raw["body"]["trace_check"]["closure_anomalies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(anomalies.len(), 2, "{anomalies:?}");
+    assert!(
+        anomalies.iter().any(|a| a.contains("instead of the fabric-lifetime span")),
+        "{anomalies:?}"
+    );
+    assert!(
+        anomalies.iter().any(|a| a.contains("unpaired C1 provenance")),
+        "{anomalies:?}"
     );
 }

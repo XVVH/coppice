@@ -521,3 +521,259 @@ fn expired_capability_denies_structurally() {
         other => panic!("{other:?}"),
     }
 }
+
+// ---- A22/§5.4 capability closure: decision-time surface ------------------
+//
+// The gate-side matrix lives in tests/gate.rs; here: closure denies
+// structurally before any caveat, escalation, or exemption is consulted,
+// mint/attenuation refuse closed authority, and the revocation API keeps
+// its own provenance rules.
+
+fn count_events(w: &World, kind: &str) -> usize {
+    trace::all_events(&w.broker.fabric.conn)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == kind)
+        .count()
+}
+
+#[test]
+fn a22_revoked_capability_denies_structurally_and_never_escalates() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    // Live before closure (also the positive half of the pair).
+    match write_call(&mut w, &cap, "inbox/before.md") {
+        Decision::Allowed { ticket, .. } => {
+            fs::write(w.vault.join("inbox/before.md"), "x").unwrap();
+            w.broker.record_result(ticket, b"{}").unwrap();
+        }
+        other => panic!("expected Allowed before revoke: {other:?}"),
+    }
+
+    let ev = w
+        .broker
+        .revoke_capability(&cap, "compromise", Some(("chan:test", "local_session")))
+        .unwrap();
+    assert!(ev.starts_with("evt:"), "revocation is a signed event");
+
+    // Closed: structural denial, never escalation — an escalatable closure
+    // would be an un-revoke lever inside the agent's loop (§5.4).
+    match write_call(&mut w, &cap, "inbox/after.md") {
+        Decision::Denied { structural: Some(s), .. } => {
+            assert!(s.contains("revoked"), "{s}");
+        }
+        other => panic!("closed capability must deny structurally: {other:?}"),
+    }
+    assert_eq!(
+        w.broker.list_escalations("pending").unwrap().len(),
+        0,
+        "closure denial must not enqueue an escalation"
+    );
+    // The revoke event carries C1 provenance.
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    let rv = events.iter().find(|e| e.kind == "revoke").unwrap();
+    assert_eq!(rv.raw["body"]["channel"], "chan:test");
+    assert_eq!(rv.raw["body"]["auth_strength"], "local_session");
+    assert_eq!(rv.raw["body"]["reason"], "compromise");
+}
+
+#[test]
+fn a22_child_revoke_preserves_parent_and_siblings() {
+    let mut w = setup();
+    let parent = mint_default(&mut w);
+    let narrower = vec![
+        json!({"dim":"action.allow","tools":["tool:vault@1.0"],"actions":["note.write"]}),
+        json!({"dim":"reversibility.max","max":"reversible"}),
+        json!({"dim":"paths.write","globs":["inbox/**"]}),
+        json!({"dim":"budget.count","action_class":"write","max":2,"window":"run"}),
+        json!({"dim":"approval.min_auth","min":"local_session"}),
+    ];
+    let child1 = w
+        .broker
+        .attenuate(&parent, &w.agent, &w.manifest, narrower.clone(), vec![], &far_expiry())
+        .unwrap();
+    let child2 = w
+        .broker
+        .attenuate(&parent, &w.agent, &w.manifest, narrower, vec![], &far_expiry())
+        .unwrap();
+    assert_ne!(child1, child2, "distinct issued_at ⇒ distinct ids");
+
+    w.broker
+        .revoke_capability(&child1, "operator_request", Some(("chan:test", "local_session")))
+        .unwrap();
+
+    // Revoking a child leaves its parent and siblings live (§5.4).
+    match write_call(&mut w, &child1, "inbox/c1.md") {
+        Decision::Denied { structural: Some(s), .. } => assert!(s.contains("revoked"), "{s}"),
+        other => panic!("revoked child must deny: {other:?}"),
+    }
+    assert!(matches!(
+        write_call(&mut w, &parent, "inbox/p.md"),
+        Decision::Allowed { .. }
+    ));
+    assert!(matches!(
+        write_call(&mut w, &child2, "inbox/c2.md"),
+        Decision::Allowed { .. }
+    ));
+}
+
+#[test]
+fn a22_exemptions_cannot_resurrect_closed_capability() {
+    let mut w = setup();
+    let cap = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            vec![
+                json!({"dim":"action.allow","tools":["tool:vault@1.0"],"actions":["note.write"]}),
+                json!({"dim":"paths.write","globs":["inbox/**"]}),
+                json!({"dim":"budget.count","action_class":"write","max":1,"window":"run"}),
+                json!({"dim":"approval.min_auth","min":"local_session"}),
+            ],
+            vec!["budget.count:write"],
+            &far_expiry(),
+        )
+        .unwrap();
+    // Exhaust the budget, escalate, and approve headroom — all pre-revoke.
+    match write_call(&mut w, &cap, "inbox/one.md") {
+        Decision::Allowed { ticket, .. } => {
+            fs::write(w.vault.join("inbox/one.md"), "x").unwrap();
+            w.broker.record_result(ticket, b"{}").unwrap();
+        }
+        other => panic!("{other:?}"),
+    }
+    let esc = match write_call(&mut w, &cap, "inbox/two.md") {
+        Decision::Escalated { escalations } => escalations[0],
+        other => panic!("expected escalation: {other:?}"),
+    };
+    w.broker
+        .approve_escalation(esc, 3, "chan:test", "local_session")
+        .unwrap();
+
+    w.broker
+        .revoke_capability(&cap, "behavior_change", None)
+        .unwrap();
+
+    // The signed approval headroom is now visible-but-inert: closure is
+    // checked before exemptions are consulted, and the unused exemption
+    // is not consumed by the denial (nothing to destructively delete).
+    match write_call(&mut w, &cap, "inbox/three.md") {
+        Decision::Denied { structural: Some(s), .. } => assert!(s.contains("revoked"), "{s}"),
+        other => panic!("exemption must not resurrect closed authority: {other:?}"),
+    }
+    let remaining: i64 = w
+        .broker
+        .fabric
+        .conn
+        .query_row(
+            "SELECT remaining FROM exemptions WHERE cap = ?1",
+            [cap.as_str()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 3, "denial consumed no exemption headroom");
+}
+
+#[test]
+fn a22_post_revoke_attenuation_is_refused() {
+    let mut w = setup();
+    let parent = mint_default(&mut w);
+    w.broker
+        .revoke_capability(&parent, "compromise", Some(("chan:test", "local_session")))
+        .unwrap();
+    let grants_before = count_events(&w, "grant");
+
+    let out = w.broker.attenuate(
+        &parent,
+        &w.agent,
+        &w.manifest,
+        default_caveats(),
+        vec![],
+        &far_expiry(),
+    );
+    match out {
+        Err(BrokerError::CapabilityClosed(msg)) => assert!(msg.contains("revoked"), "{msg}"),
+        other => panic!("closed parent must not produce a child: {other:?}"),
+    }
+    assert_eq!(
+        count_events(&w, "grant"),
+        grants_before,
+        "no grant event was emitted for a child of a closed parent"
+    );
+}
+
+#[test]
+fn a22_broker_refuses_to_grant_a_closed_id() {
+    let mut w = setup();
+    // The timestamp-collision seam: identical body at an identical instant
+    // reproduces the same content id. Restoration must be a NEW mint, and
+    // a colliding re-mint must fail loudly, never silently issue a dead
+    // token (§5.4).
+    let issued = "2026-07-12T00:00:00Z";
+    let cap = w
+        .broker
+        .mint_at(&w.manifest, &w.agent, default_caveats(), vec![], &far_expiry(), issued)
+        .unwrap();
+    w.broker
+        .revoke_capability(&cap, "compromise", Some(("chan:test", "local_session")))
+        .unwrap();
+    let grants_before = count_events(&w, "grant");
+
+    match w.broker.mint_at(
+        &w.manifest,
+        &w.agent,
+        default_caveats(),
+        vec![],
+        &far_expiry(),
+        issued,
+    ) {
+        Err(BrokerError::CapabilityClosed(msg)) => {
+            assert!(msg.contains("permanent"), "{msg}");
+        }
+        other => panic!("granting a closed id must be refused: {other:?}"),
+    }
+    assert_eq!(count_events(&w, "grant"), grants_before, "no re-grant landed");
+
+    // A genuinely new mint (different issued_at ⇒ different id) restores.
+    let restored = w
+        .broker
+        .mint_at(
+            &w.manifest,
+            &w.agent,
+            default_caveats(),
+            vec![],
+            &far_expiry(),
+            "2026-07-12T00:00:01Z",
+        )
+        .unwrap();
+    assert_ne!(restored, cap);
+    assert!(matches!(
+        write_call(&mut w, &restored, "inbox/again.md"),
+        Decision::Allowed { .. }
+    ));
+}
+
+#[test]
+fn a22_revocation_api_refuses_bad_targets_and_bad_provenance() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+
+    // Unknown target: a typo'd kill fails loudly instead of poisoning an id.
+    assert!(matches!(
+        w.broker
+            .revoke_capability("cap:doesnotexist", "compromise", Some(("chan:test", "local_session"))),
+        Err(BrokerError::InvalidRevocation(_))
+    ));
+    // Broker-mechanical closure must name a mechanical cause (§5.4).
+    assert!(matches!(
+        w.broker.revoke_capability(&cap, "operator_request", None),
+        Err(BrokerError::InvalidRevocation(_))
+    ));
+    // Neither refusal emitted a closure event, and the target stays live.
+    assert_eq!(count_events(&w, "revoke"), 0, "refusals close nothing");
+    assert!(matches!(
+        write_call(&mut w, &cap, "inbox/live.md"),
+        Decision::Allowed { .. }
+    ));
+}

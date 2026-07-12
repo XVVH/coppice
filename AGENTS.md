@@ -7,7 +7,7 @@ caveats down). Read `docs/agent-state-fabric-brief.md` (why/what, v0.2) and
 `docs/asf-schema-spec.md` (the constitution, v0.7) before writing any code.
 The spec wins over this file wherever they disagree. Spec ambiguities found
 while implementing go to `docs/spec-issues.md` (never silently interpret);
-SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6); SI-22 is interpreted (gate replay clock, W-2); SI-24 is resolved (A22/§5.4 in v0.7 — capability early closure; the revocation implementation ships only through W-8's gated matrix, including the W-9 verdict-invariance regression); SI-23 (actuation vs approval surfaces) is OPEN — no actuation-scoped tool may register before SI-23 resolves. New issues start at SI-25.
+SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6); SI-22 is interpreted (gate replay clock, W-2); SI-24 is resolved (A22/§5.4 in v0.7 — capability early closure; implemented by W-8 under its gated matrix: A22 two-sided contract, targeted `a22_*` mutation lane, W-9 verdict-invariance reproduced bit-for-bit); SI-23 (actuation vs approval surfaces) is OPEN — no actuation-scoped tool may register before SI-23 resolves. New issues start at SI-25.
 
 ## Built — Stages 1–3 (kernel, spine, promotion gate). Current queue: docs/roadmap.md
 
@@ -15,7 +15,9 @@ The four components below exist and are dogfooding; work-in-flight and
 ordering live in `docs/roadmap.md` (W-n), not here.
 
 1. **Broker daemon**: MCP proxy in front of a Hermes agent; capability evaluation
-   (conjunctive caveats, fail-closed on unknown dimensions); credential injection
+   (conjunctive caveats, fail-closed on unknown dimensions); capability closure
+   (A22/§5.4: signed `revoke`, event-derived liveness at decision + gate, operator
+   `asf revoke` kill switch — never an MCP-reachable tool); credential injection
    (agent never sees secrets); daemon-owned approval surface — approvals NEVER pass
    through the agent's stdin or chat loop (spec C2, day-one requirement).
 2. **Snapshot coordinator**: step-boundary, content-addressed snapshots over the

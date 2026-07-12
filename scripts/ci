@@ -79,10 +79,35 @@ run_mutation() {
         --timeout-multiplier 3
 
     heading "A21/M7 authority-binding mutation tests"
+    # Second exclusion since W-8: the ordering guard in m7_verify_grant is
+    # backstopped by the a22 leaf-activation check that runs on the same
+    # gate path (defense in depth) — under honest emission the two layers
+    # are equivalent (grants land only on the substrate span; both views
+    # take the earliest offset), so the guard→true mutant is masked, and
+    # the ordering property itself is killed in the a22 lane below.
     cargo mutants \
         -f crates/asf-kernel/src/broker.rs \
         -F 'm7_(grant_offsets|effect_capability|verify_grant)' \
         -E 'replace < with <= in m7_verify_grant' \
+        -E 'replace match guard \*grant_offset < effect_offset with true in m7_verify_grant' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+
+    heading "A22/§5.4 capability-closure mutation tests"
+    # The closure duals of the m7_* activation predicates: the pure
+    # event-derived liveness view shared by decision time and gate replay.
+    # Named functions, not source lines, so refactoring cannot silently
+    # move the closure predicates outside the scheduled check (G5).
+    # Excluded as equivalent (the m7_verify_grant precedent): substrate
+    # offsets are globally unique, so a revoke or grant and the effect it
+    # is compared against can never occupy the same offset, and decision
+    # time evaluates at head+1, which no existing event occupies —
+    # < and <= are indistinguishable at every call site.
+    cargo mutants \
+        -f crates/asf-kernel/src/broker.rs \
+        -F 'a22_(revoke_offsets|grant_bindings|ancestry|state_at)' \
+        -E 'replace < with <= in a22_state_at' \
         -j 4 \
         --minimum-test-timeout 20 \
         --timeout-multiplier 3

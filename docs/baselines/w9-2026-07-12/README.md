@@ -126,6 +126,29 @@ committed test fixture's vector hash is pinned as a constant in
   measurement is deferred to W-8's gate work, where it lands together
   with the closure semantics it must exercise.
 
+## W-8 verification (2026-07-12, same day — closure landed)
+
+- **Verdict invariance held:** with A22/§5.4 capability closure
+  implemented (decision-time liveness + gate liveness-at-offset), the
+  full replay under the pins above reproduced the v2 vector hash
+  **bit-for-bit**
+  (`885d783528a0735c8615ee230645d8b0bb3cddd76e9cf7cfd143f07573f0e367`,
+  93,916 lines, identical 84-row quarantine). Revocation-free corpora changed zero verdicts, as the
+  contract requires. Harness note: W-8 added a `gate-replay` subcommand
+  (CLI plumbing only); the replay/derivation path is byte-identical.
+- **Gate-replay throughput (the measurement deferred above), landed via
+  `asf corpus gate-replay` (gate-replay.json):** 1,000 ingested
+  manifests re-verified read-only (span verification, M7 activation,
+  §5.4 closure at each effect's offset, full caveat re-evaluation) in
+  128.2 s — **~8 manifests/s, ~43 replayed calls/s, ~128 ms per gate
+  call** on the 8,673-event substrate. Reading: a single
+  promotion-time gate on a wedge-scale substrate costs ~130 ms
+  (invisible per session); batch replay is quadratic in substrate size
+  because each gate call re-verifies the whole substrate span and
+  reloads all events. That is tripwire data (ADR 0002 family), not a
+  defect: incremental span verification / an authority-event index is
+  future work triggered by substrate growth, not by this number.
+
 ## Encodability result
 
 **Zero spec-level gaps.** Every parseable trajectory expressed cleanly

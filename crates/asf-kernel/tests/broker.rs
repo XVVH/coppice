@@ -210,6 +210,88 @@ fn forged_capability_is_dead() {
 }
 
 #[test]
+fn w14_mistyped_capability_cannot_dispatch_or_escalate() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE objects SET kind = 'manifest' WHERE id = ?1",
+            [&cap],
+        )
+        .unwrap();
+
+    let protected = w.vault.join("inbox/must-not-dispatch.md");
+    let decision = write_call(&mut w, &cap, "inbox/must-not-dispatch.md");
+    if let Decision::Allowed { .. } = decision {
+        fs::write(&protected, "dispatched").unwrap();
+    }
+    match decision {
+        Decision::Denied {
+            structural: Some(reason),
+            ..
+        } => {
+            assert!(reason.contains("RF-19"), "{reason}");
+            assert!(reason.contains("stored kind"), "{reason}");
+        }
+        other => panic!("mistyped capability must be structurally denied: {other:?}"),
+    }
+    assert!(
+        !protected.exists(),
+        "a mistyped capability crossed the protected dispatch boundary"
+    );
+    assert!(w.broker.list_escalations("pending").unwrap().is_empty());
+}
+
+#[test]
+fn w14_mistyped_capability_cannot_receive_approval_authority() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    for path in ["inbox/a.md", "inbox/b.md"] {
+        match write_call(&mut w, &cap, path) {
+            Decision::Allowed { ticket, .. } => {
+                w.broker.record_result(ticket, b"{}").unwrap();
+            }
+            other => panic!("expected budget-burning call to pass: {other:?}"),
+        }
+    }
+    let escalation = match write_call(&mut w, &cap, "inbox/c.md") {
+        Decision::Escalated { escalations } => escalations[0],
+        other => panic!("expected escalation, got {other:?}"),
+    };
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE objects SET kind = 'manifest' WHERE id = ?1",
+            [&cap],
+        )
+        .unwrap();
+
+    assert!(
+        w.broker
+            .approve_escalation(escalation, 1, "chan:tty", "local_session")
+            .is_err(),
+        "mistyped capability received approval authority"
+    );
+    assert_eq!(w.broker.list_escalations("pending").unwrap().len(), 1);
+    let exemptions: i64 = w
+        .broker
+        .fabric
+        .conn
+        .query_row("SELECT COUNT(*) FROM exemptions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(exemptions, 0);
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    assert_eq!(
+        events.iter().filter(|event| event.kind == "approval").count(),
+        0,
+        "failed approval still appended an authority event"
+    );
+}
+
+#[test]
 fn undeclared_action_uncallable() {
     let mut w = setup();
     let cap = mint_default(&mut w);

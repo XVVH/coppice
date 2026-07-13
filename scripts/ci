@@ -107,6 +107,19 @@ run_mutation() {
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
 
+    heading "W-14 typed-object and verified-restore mutation tests"
+    # Stable boundaries for signed-id/prefix/stored-kind agreement and for
+    # staging hash-verified CAS bytes before any filesystem commit. Consumer-
+    # level negatives prove that surviving mutants reach no branch, approval,
+    # promotion, dispatch, or live-store effect.
+    cargo mutants \
+        -f crates/asf-kernel/src/trace.rs \
+        -f crates/asf-kernel/src/snapshot.rs \
+        -F '(load_verified_object|w14_(object_id_matches|object_prefix_matches|object_kind_matches|stage_verified_blob|prepare_verified_fs_entries))' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+
     heading "authority-evaluation and promotion-policy mutation tests"
     cargo mutants \
         -f crates/asf-kernel/src/evaluate.rs \

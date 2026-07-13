@@ -481,8 +481,15 @@ fn advertisable(cap: &Value, broker: &Broker, action_name: &str) -> bool {
 
 /// Filter a downstream tools/list result down to the session grant.
 fn filter_tools_result(broker: &Broker, cap_id: &str, mut resp: Value) -> Value {
-    let Ok(cap) = trace::get_object(&broker.fabric.conn, cap_id) else {
-        resp["result"]["tools"] = json!([]); // no readable grant → advertise nothing
+    let Ok(cap) = trace::load_verified_object(
+        &broker.fabric.conn,
+        cap_id,
+        "cap",
+        "capability",
+        &broker.fabric.fabric_vk(),
+    ) else {
+        // No verified, correctly typed grant → advertise nothing.
+        resp["result"]["tools"] = json!([]);
         return resp;
     };
     if let Some(list) = resp["result"]["tools"].as_array() {

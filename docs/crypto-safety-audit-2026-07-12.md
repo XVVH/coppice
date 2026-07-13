@@ -18,11 +18,13 @@ forensic-erasure mechanism.
 The original audit found mechanism failures around the primitives. W-10 through
 W-13 and W-19 have since closed the bundled-SQLite, unsigned-selector, JCS input,
 missing-key continuity, and operator-ledger defects. The remaining release
-blockers are an unauthenticated global trace order/head, incomplete typed
-verification before state application, an unbound/non-atomic payload envelope,
-an unspecified production key lifecycle/custody boundary, and asserted rather
-than authenticated identity/credential surfaces. The merged repairs do not
-weaken those remaining production gates.
+blockers are an unauthenticated global trace order/head, an unbound/non-atomic
+payload envelope, an unspecified production key lifecycle/custody boundary,
+and asserted rather than authenticated identity/credential surfaces. W-14's
+typed-object and verified-restore repair is implemented with green required and
+targeted-mutation evidence, but remains a blocker until its required
+independent-context authority review and merge. The merged repairs do not
+weaken the remaining production gates.
 
 ## Remediation merged from this audit
 
@@ -107,8 +109,8 @@ current Rust crates are not evidence of a validated cryptographic module.
 | operator ledger trusts or silently omits unverified rows | RF-28, G10, W-19 | fixed in PR #41; SI-25 global-order/rollback residual retained |
 | JCS semantic collision | RF-17, P24, G2, W-12 | fixed in PR #39; SI-26/RF-6 separate |
 | missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | fixed in PR #40; lifecycle/custody design follows |
-| unverified manifest application | RF-19, G10, W-14 | fix now |
-| restore preflight validates presence, not bytes | RF-20, G3, W-14 | fix now |
+| unverified manifest application | RF-19, G10, W-14 | implemented; independent review and merge pending |
+| restore preflight validates presence, not bytes | RF-20, G3, W-14 | implemented; independent review and merge pending |
 | bundled SQLite WAL-reset defect | RF-21, W-10 | fixed in PR #37; 4/4 floor mutants caught |
 | payload AAD/dispatch/atomicity/shred generation | RF-22, P13/P19, SI-28/SI-29 | design now; versioned implementation |
 | credential reflection through downstream result | RF-23, P27, SI-23, W-18 | block credentials/third-party tools |
@@ -171,6 +173,35 @@ complete steady-state publication and fail-closed partial reopen; it does not
 yet inject hard process exit at each syscall. That remaining crash-injection
 evidence is recorded in G3 rather than claimed here.
 
+## W-14 G9 conformance sweep (§0, §3, §4, §5, §5.3, §5.4, §8.1, §8.3)
+
+W-14 changes authority-bearing object consumers and coherent restore
+preparation. The typed boundary deliberately validates only the universal
+signed-object envelope and caller-expected type; it does not invent the
+per-kind schema work filed as G11/W-6.
+
+| Normative edge | Enforcing line/function | Negative evidence or filing |
+|---|---|---|
+| object ids recompute over canonical signed content and cross-references resolve by id (§0) | `trace::load_verified_object` performs strict parse and `canon::verify`, then requires the signed id to equal the requested row id | `w14_verified_object_rejects_wrong_id_prefix_kind_signature_or_key`; lineage/branch/revert protected-effect negative |
+| object namespace and materialized type agree with the caller's expected artifact (§0 schemas) | `w14_object_prefix_matches`, `w14_object_kind_matches`, and the single loader boundary | four-type positive matrix plus mistyped manifest/capability/tool protected-effect negatives; per-kind body schemas remain G11/W-6 |
+| manifest roots and parent lineage are fabric-signed, content-addressed authority inputs (§3, §8.1, §8.3) | `Fabric::load_manifest`; `step_boundary_with_mode`, `create_branch`, and `revert_to` consume it | `w14_unverified_manifest_cannot_extend_lineage_or_mutate_state` proves no new object/event, branch substitution, or live-store restore |
+| promotion is the only live mutation and uses the manifest's signed base (§5.3) | `gate_replay_check`, `promote_manifest`, `gate_trace_check`, and `approve_promotion` call `Fabric::load_manifest` before applying manifest fields | `w14_mistyped_manifest_cannot_promote_branch_state` proves no trunk file or promotion event |
+| coherent revert restores every manifest root together (§5.3) | `revert_to` verifies the manifest, prepares every store, then commits; `w14_prepare_verified_fs_entries` verifies and retains every filesystem blob | corrupt-blob and unverified-manifest negatives preserve both live filesystem and SQLite state; hard-exit all-store atomicity remains G3 |
+| broker-minted capability identity and ancestry verify fail-closed (§5 F1, §5.4.4, §8.1) | `Broker::load_capability`; decision, attenuation, revoke, ancestry, gate replay, and escalation resolution use the typed boundary | mistyped capability cannot dispatch, escalate, or receive approval authority; existing F1/tamper and A22 ancestry contracts remain green |
+| approval strength cannot be hidden by unsigned object classification (§5.1, §5.4 materialized-view rule) | `check_min_auth_for_manifest` discovers ids from verified signed grants and typed-loads every referenced capability | `w14_mistyped_capability_cannot_receive_approval_authority` proves pending escalation remains pending with no exemption or approval event |
+| a callable tool requires the verified registered tool object (§4, §5.4 liveness prerequisite) | `registered_tools` combines the W-11 signed placement predicate with `load_verified_object(..., "tool", "tool", ...)` | `w14_mistyped_registered_tool_cannot_dispatch` proves the protected tool effect is absent |
+| channel registrations use the `chan` namespace and fabric signer (§8.1) | the shared loader's four-type positive/rejection matrix pins the channel boundary | SI-23/W-18 remains explicit: no current approval/identity consumer authenticates holder, sender, or user presence, so W-14 claims no channel-proof enforcement |
+| interim SHA-256 state roots resolve only to bytes matching their address (F2 direction) | `Cas::get`; filesystem prepare calls it for the tree and every leaf and retains verified bytes for commit; SQLite prepare already materializes from `Cas::get` | `revert_is_all_or_nothing` covers a missing dependency; `w14_corrupt_referenced_blob_prevents_revert_before_live_mutation` covers present-but-corrupt bytes; `w14_prepared_fs_restore_commits_only_staged_verified_bytes` covers substitution after prepare; CID/DAG-CBOR transition remains W-6 |
+| global order, completeness, rollback, home/epoch, and freshness are authenticated | not implemented by typed object reads or CAS rehashing | SI-25/RF-13/P15/W-15; W-14 does not narrow or claim that boundary |
+
+The two-sided registry carries 20 contracts, 105 contracted tests, and 94
+frozen legacy tests. The W-14 targeted lane tested 18 mutants: 17 caught, one
+compiler-unviable, zero survivors or timeouts. Required CI passed all 199
+workspace tests and both acceptance demos outside the socket-restricted
+sandbox. The deep release lane also passed with 4,096 authority cases and 512
+real-store model histories. Independent-context review remains mandatory
+before merge.
+
 ## W-19 G9 inverse conformance (brief §3/§5.1; spec §6)
 
 W-19 changes the operator diagnostic consumer, not authority reconstruction.
@@ -225,6 +256,13 @@ human whether history is explainable.
   three compiler-unviable, zero survivors or timeouts. Iterative runs exposed
   and corrected a missing middle-deletion location assertion and an unsigned
   offset/signed-sequence accounting gap before publication.
+- W-14's required lane passed outside the socket-restricted sandbox: strict
+  Clippy, 20 contracts with 105 registered tests and 94 frozen legacy tests,
+  all 199 workspace tests, and both demos. Its targeted typed-object/restore
+  lane tested 18 mutants: 17 caught, one compiler-unviable, zero survivors or
+  timeouts; the deep release lane passed with 4,096 authority cases and 512
+  real-store model histories. Independent-context authority review and merge
+  remain pending.
 - W-11 merged in PR #36, W-10 in PR #37, W-12 in PR #39, W-13 in PR #40,
   and W-19 in PR #41. The remaining findings and spec decisions stay queued in
   the canonical RF/SI/P/G/W trackers rather than being implied complete here.

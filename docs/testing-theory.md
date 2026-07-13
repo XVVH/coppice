@@ -393,13 +393,18 @@ kinds, signed-sequence/offset inversions, and broken chains are individually sur
 silently omitted. The process-level negative snapshots the complete fabric
 home and proves integrity failure already present in the observed view occurs
 before drift attribution or CAS capture can mutate it; concurrent replacement
-after that view remains SI-25 freshness. The targeted `w19_*` mutation lane guards the new
-classification and no-accounting-on-doubt predicates. Repeat the
-typed-object half for manifests, tools,
-capabilities, and channels, plus corrupt/missing CAS objects. Every negative
-case asserts the protected call, promotion, revert, or live-store mutation did
-not occur. The matrix is a caller-boundary complement to G5 mutation testing,
-not a substitute for it.
+after that view remains SI-25 freshness. The targeted `w19_*` mutation lane
+guards the new classification and no-accounting-on-doubt predicates. W-14
+implements the typed-object half with one `load_verified_object` boundary for
+manifests, tools, capabilities, and channels, plus verified-and-staged CAS reads
+during filesystem restore prepare; missing and corrupt dependencies are both
+covered. Its `TYPED-OBJECT` and
+`RESTORE-INTEGRITY` negatives assert that lineage, branch/revert, promotion,
+dispatch/escalation, approval, tool lookup, and live-store mutation do not
+occur on doubt. The targeted W-14 lane tested 18 mutants: 17 caught, one
+compiler-unviable whole-function replacement, zero survivors or timeouts.
+Independent-context review remains the merge gate. The matrix is a caller-
+boundary complement to G5 mutation testing, not a substitute for it.
 
 **G11. Universal signed-event body conformance.** W-19 closes the retained-row
 cryptographic and envelope boundary for operator diagnostics: strict JSON,
@@ -420,7 +425,7 @@ authority consumers continue to fail closed on missing fields in the meantime.
 | Local required / pre-push | strict Clippy; two-sided contract validation; every workspace target; deterministic/exhaustive and bounded shrinkable properties; both executable acceptance demos |
 | Local full | required lane plus the networked RustSec advisory audit |
 | Weekly/manual deep | release-mode suite with 4,096 authority cases and 512 real-store model histories |
-| Weekly/manual mutation | scoped evaluator, promotion, A21/M7, A22, verified-event authority, and W-19 operator-ledger integrity mutation runs |
+| Weekly/manual mutation | scoped evaluator, promotion, A21/M7, A22, verified-event authority, W-14 typed-object/restore integrity, and W-19 operator-ledger integrity mutation runs |
 | Future fault/soak | full process crash matrix, adversarial MCP corpus, thousands-of-events/storage growth |
 | Dogfooding | denial false-positive judgment, legibility, approval latency, bypass behavior, and real-corpus tripwires |
 

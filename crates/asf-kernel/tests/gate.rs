@@ -323,6 +323,49 @@ fn assert_m7_rejected_without_promotion(w: &mut World, expected: &str, rel: &str
 }
 
 #[test]
+fn w14_mistyped_manifest_cannot_promote_branch_state() {
+    let mut w = setup();
+    agent_write(&mut w, "must-not-land.md", "protected branch state\n");
+    fs::write(w.vault.join("human-only.md"), "must survive\n").unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE objects SET kind = 'capability' WHERE id = ?1",
+            [&w.manifest],
+        )
+        .unwrap();
+
+    let events_before: i64 = w
+        .broker
+        .fabric
+        .conn
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+    let branch = w.branch.clone();
+    assert!(w.broker.promote_manifest(&w.manifest, &branch).is_err());
+    assert!(
+        !w.vault.join("must-not-land.md").exists(),
+        "a mistyped manifest crossed the protected promotion boundary"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("human-only.md")).unwrap(),
+        "must survive\n"
+    );
+    let events = trace::all_events(&w.broker.fabric.conn).unwrap();
+    assert_eq!(
+        events.len() as i64,
+        events_before,
+        "a rejected mistyped promotion appended drift or gate evidence"
+    );
+    assert_eq!(
+        events.iter().filter(|event| event.kind == "promotion").count(),
+        0,
+        "failed promotion still wrote a promotion authority record"
+    );
+}
+
+#[test]
 fn concurrent_human_and_agent_edits_merge() {
     let mut w = setup();
     // Agent (on branch): edits a.md, adds new.md.

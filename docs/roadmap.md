@@ -30,13 +30,17 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-## Queued (ordered)
+**W-14 — typed object application + verified restore preparation.** Owner:
+agent. One expected-prefix/kind/signature boundary now covers every
+authority-bearing object consumer; branch/revert/parent, promotion, capability,
+approval, and tool-registration paths use it. Filesystem restore preparation
+hash-verifies and retains every referenced blob before any live mutation.
+The two new two-sided contracts and targeted mutation lane are green; the
+repository-required independent-context authority review is pending. Closes
+RF-19/RF-20 when merged. *Provenance: 2026-07-12 cryptographic mechanism
+audit.*
 
-**W-14 — typed object application + verified restore preparation.** One
-expected-prefix/kind/signature boundary for every authority-bearing object;
-update branch/revert/parent consumers; verify and stage every CAS dependency
-before live mutation. Negative contracts leave all protected stores unchanged.
-Closes RF-19/RF-20. *Provenance: 2026-07-12 cryptographic mechanism audit.*
+## Queued (ordered)
 
 **W-15 — authenticated global trace head (design then implementation).**
 Ratify SI-25, then bind global order, completeness, home/epoch, export order,

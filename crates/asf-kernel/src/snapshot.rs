@@ -6,8 +6,9 @@
 //! nothing is in flight (brief §4), "atomic multi-root capture" degenerates
 //! to: collect each store's current root, record the tuple in one manifest.
 //! Restore is prepare-all-then-commit-all: every store's plan is validated
-//! first (tree parse + CAS presence; any failure aborts with stores
-//! untouched), then committed. Sqlite commits are staging renames; fs
+//! first (tree parse + CAS integrity, with immutable verified bytes staged;
+//! any failure aborts with stores untouched), then committed. Sqlite commits
+//! are staging renames; fs
 //! commits apply IN PLACE (RF-10) — only differing files are written, so
 //! unchanged files keep their mtimes/inodes and a promotion touches
 //! exactly what it changed.
@@ -425,12 +426,41 @@ struct FsEntry {
     rel: String,
     hash: String,
     mode: String,
+    content: Vec<u8>,
 }
 
-/// Prepare a store's restore to `root`. All tree parsing and CAS presence
-/// checks happen here, so a multi-store restore that is going to fail does
-/// so before ANY store is touched (the prepare-all-then-commit-all
-/// contract behind coherent revert).
+fn w14_stage_verified_blob(cas: &Cas, hash: &str) -> Result<Vec<u8>, SnapError> {
+    cas.get(hash)
+}
+
+fn w14_prepare_verified_fs_entries(cas: &Cas, root: &str) -> Result<Vec<FsEntry>, SnapError> {
+    let tree = load_tree_object(cas, root)?;
+    let raw = tree["entries"]
+        .as_array()
+        .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+    let mut entries = Vec::with_capacity(raw.len());
+    for e in raw {
+        let hash = e["hash"]
+            .as_str()
+            .ok_or_else(|| SnapError::MalformedTree(root.into()))?
+            .to_string();
+        entries.push(FsEntry {
+            rel: e["path"]
+                .as_str()
+                .ok_or_else(|| SnapError::MalformedTree(root.into()))?
+                .to_string(),
+            content: w14_stage_verified_blob(cas, &hash)?,
+            hash,
+            mode: e["mode"].as_str().unwrap_or("644").to_string(),
+        });
+    }
+    Ok(entries)
+}
+
+/// Prepare a store's restore to `root`. All tree parsing and every referenced
+/// CAS object's hash verification happen here. Filesystem bytes are retained
+/// in the prepared plan, so neither corruption discovered late nor a
+/// prepare/commit substitution can cause partial live mutation (RF-20/W-14).
 pub fn prepare_restore(
     cas: &Cas,
     spec: &StoreSpec,
@@ -438,28 +468,7 @@ pub fn prepare_restore(
 ) -> Result<PreparedRestore, SnapError> {
     match spec.kind {
         StoreKind::Fs => {
-            let tree = load_tree_object(cas, root)?;
-            let raw = tree["entries"]
-                .as_array()
-                .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
-            let mut entries = Vec::with_capacity(raw.len());
-            for e in raw {
-                let entry = FsEntry {
-                    rel: e["path"]
-                        .as_str()
-                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?
-                        .to_string(),
-                    hash: e["hash"]
-                        .as_str()
-                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?
-                        .to_string(),
-                    mode: e["mode"].as_str().unwrap_or("644").to_string(),
-                };
-                if !cas.has(&entry.hash) {
-                    return Err(SnapError::MissingBlob(entry.hash));
-                }
-                entries.push(entry);
-            }
+            let entries = w14_prepare_verified_fs_entries(cas, root)?;
             Ok(PreparedRestore {
                 spec: spec.clone(),
                 plan: RestorePlan::FsInPlace { entries },
@@ -525,7 +534,7 @@ fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), 
 /// Production supplies a no-op hook; unit tests can fail after mutation N and
 /// verify that replay converges without encoding sleeps or permission tricks.
 fn apply_fs_in_place_with_hook(
-    cas: &Cas,
+    _cas: &Cas,
     root: &Path,
     entries: &[FsEntry],
     before_mutation: &mut dyn FnMut(&Path) -> Result<(), SnapError>,
@@ -574,7 +583,7 @@ fn apply_fs_in_place_with_hook(
             ".asf-tmp-{}",
             target.file_name().unwrap_or_default().to_string_lossy()
         ));
-        fs::write(&tmp, cas.get(&e.hash)?).map_err(io_err(&tmp))?;
+        fs::write(&tmp, &e.content).map_err(io_err(&tmp))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -784,6 +793,33 @@ mod tests {
         // Bogus root: prepare fails, live content untouched.
         assert!(prepare_restore(&cas, &spec, "sha256:deadbeefdeadbeef").is_err());
         assert_eq!(fs::read_to_string(vault.join("a.md")).unwrap(), "live");
+    }
+
+    #[test]
+    fn w14_prepared_fs_restore_commits_only_staged_verified_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let desired = tmp.path().join("desired");
+        let live = tmp.path().join("live");
+        write(&desired.join("kept.md"), "verified desired bytes");
+        write(&live.join("kept.md"), "old live bytes");
+        write(&live.join("obsolete.md"), "delete only after prepare");
+
+        let root = capture_fs(&cas, &desired).unwrap();
+        let tree = load_tree_object(&cas, &root).unwrap();
+        let blob = tree["entries"][0]["hash"].as_str().unwrap();
+        let prepared = prepare_restore(&cas, &fs_spec(&live), &root).unwrap();
+
+        // After prepare, commit must consume the immutable verified bytes in
+        // the plan rather than re-reading attacker-controlled CAS storage.
+        fs::write(cas.blob_path(blob).unwrap(), b"substituted after prepare").unwrap();
+        commit_restore(&cas, prepared).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(live.join("kept.md")).unwrap(),
+            "verified desired bytes"
+        );
+        assert!(!live.join("obsolete.md").exists());
     }
 
     #[test]

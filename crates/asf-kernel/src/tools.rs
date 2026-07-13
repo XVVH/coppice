@@ -133,16 +133,8 @@ fn registered_tools(
 
     let mut objects = Vec::new();
     for id in live {
-        let obj = trace::get_object(conn, &id)?;
-        if canon::verify(&obj, fabric_vk).is_err() {
-            return Err(ToolError::NotLive(id));
-        }
-        let stored_kind: String = conn
-            .query_row("SELECT kind FROM objects WHERE id = ?1", [&id], |r| r.get(0))
-            .map_err(trace::TraceError::from)?;
-        if stored_kind != "tool" {
-            return Err(ToolError::NotLive(id));
-        }
+        let obj = trace::load_verified_object(conn, &id, "tool", "tool", fabric_vk)
+            .map_err(|_| ToolError::NotLive(id.clone()))?;
         objects.push(obj);
     }
     Ok(objects)
@@ -365,6 +357,42 @@ mod tests {
                 "{case}: a misplaced signed registration made the protected tool callable"
             );
         }
+    }
+
+    #[test]
+    fn w14_mistyped_registered_tool_cannot_dispatch() {
+        let (mut conn, sk, span) = setup();
+        let id = register(
+            &mut conn,
+            &sk,
+            &span,
+            "tool:vault@1.0",
+            vault_actions(),
+            "t0",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE objects SET kind = 'capability' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let protected = tmp.path().join("must-not-dispatch");
+        if lookup_action(
+            &conn,
+            &sk.verifying_key(),
+            "tool:vault@1.0",
+            "note.write",
+        )
+        .is_ok()
+        {
+            std::fs::write(&protected, "dispatched").unwrap();
+        }
+        assert!(
+            !protected.exists(),
+            "a mistyped tool object crossed the protected dispatch boundary"
+        );
     }
 
     #[test]

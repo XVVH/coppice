@@ -528,7 +528,7 @@ treating it as empty.
 SI-27 owns external trust anchoring, rotation, recovery, and historical
 verification; RF-14 remains the separate cleartext-custody finding.
 
-## RF-19 — manifests are applied without universal signature/type verification — open
+## RF-19 — manifests are applied without universal signature/type verification — remediation in review (W-14)
 
 **Severity: high. Direction: INTEGRITY / UNAUTHORIZED STATE APPLICATION.**
 Promotion verifies manifests, but `create_branch`, `revert_to`, and some parent
@@ -541,7 +541,19 @@ that the root was authorized.
 stored kind, and verifying key; every authority-bearing object read goes
 through it. Negative tests must leave all live stores byte-for-byte unchanged.
 
-## RF-20 — filesystem restore preparation checks CAS presence, not integrity — open
+**W-14 remediation:** `trace::load_verified_object` verifies strict stored raw,
+signature/id recomputation, exact requested signed id, id prefix, and stored
+kind before returning fields. Manifest branch, parent-lineage, revert, and
+promotion consumers; capability decision, ancestry, approval, and replay
+consumers; and registered-tool lookup share that boundary. Approval-strength
+aggregation discovers capability ids from verified signed grants rather than
+the unsigned `objects.kind` selector. The `TYPED-OBJECT` contract covers all
+four prefixes (manifest/tool/capability/channel) and protected-effect negatives
+for lineage, branch/revert, promotion, dispatch/escalation, approval, and tool
+lookup. Required CI and the targeted mutation lane are green; independent-
+context authority review remains required before this finding is fixed.
+
+## RF-20 — filesystem restore preparation checks CAS presence, not integrity — remediation in review (W-14)
 
 **Severity: medium-high. Direction: PARTIAL DESTRUCTIVE FAILURE.** For
 filesystem restores, `prepare_restore` checks only `cas.has`. Commit deletes
@@ -552,6 +564,14 @@ and fail only during the later write pass.
 **Fix:** read and hash-verify every referenced blob during prepare, preferably
 staging immutable verified bytes for commit. The negative contract asserts no
 live mutation when any required CAS object is missing or corrupt.
+
+**W-14 remediation:** filesystem preparation now loads the tree and calls the
+rehashing CAS read for every referenced blob, retaining the verified bytes in
+the prepared plan. Commit never re-reads attacker-controlled CAS content. The
+`RESTORE-INTEGRITY` contract proves prepared commits consume the staged bytes
+and missing or present-but-corrupt dependencies abort coherent revert before
+either the filesystem or SQLite live store is restored. Required CI and the
+targeted mutation lane are green; merge review remains pending.
 
 ## RF-21 — bundled SQLite 3.46.0 is affected by the WAL-reset corruption race — fixed (fa9defd, W-10)
 

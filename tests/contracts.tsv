@@ -86,6 +86,23 @@ KEY-CONTINUITY|supporting|keys::tests::initialized_keystore_material_is_complete
 KEY-CONTINUITY|supporting|keys::tests::concurrent_initialization_publishes_one_complete_identity
 KEY-CONTINUITY|supporting|keys::tests::valid_secret_store_roundtrip
 
+# W-14/RF-19 typed object application: signed raw must bind exactly to the
+# requested id namespace, stored object kind, and expected verifying key before
+# manifests, capabilities, tools, or channel objects can drive protected work.
+TYPED-OBJECT|positive|trace::tests::w14_verified_object_accepts_each_expected_signed_type
+TYPED-OBJECT|negative|w14_unverified_manifest_cannot_extend_lineage_or_mutate_state
+TYPED-OBJECT|negative|w14_mistyped_manifest_cannot_promote_branch_state
+TYPED-OBJECT|negative|w14_mistyped_capability_cannot_dispatch_or_escalate
+TYPED-OBJECT|negative|w14_mistyped_capability_cannot_receive_approval_authority
+TYPED-OBJECT|negative|tools::tests::w14_mistyped_registered_tool_cannot_dispatch
+TYPED-OBJECT|supporting|trace::tests::w14_verified_object_rejects_wrong_id_prefix_kind_signature_or_key
+
+# W-14/RF-20 restore preparation: every referenced CAS object is read and
+# hash-verified into an immutable plan before any live store is mutated.
+RESTORE-INTEGRITY|positive|snapshot::tests::w14_prepared_fs_restore_commits_only_staged_verified_bytes
+RESTORE-INTEGRITY|negative|w14_corrupt_referenced_blob_prevents_revert_before_live_mutation
+RESTORE-INTEGRITY|negative|revert_is_all_or_nothing
+
 # W-2 unified gate replay: the decision evaluator re-runs over signed
 # records, clocked at each event's `at` (SI-22 at-the-time semantics).
 GATE-REPLAY|positive|si22_gate_clock_is_the_events_at_not_gate_time

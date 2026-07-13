@@ -21,7 +21,7 @@ use crate::tools::{self, ToolError};
 use crate::{canon, now_rfc3339, trace};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
@@ -139,6 +139,16 @@ impl Broker {
         })
     }
 
+    fn load_capability(&self, id: &str) -> Result<Value, BrokerError> {
+        Ok(trace::load_verified_object(
+            &self.fabric.conn,
+            id,
+            "cap",
+            "capability",
+            &self.fabric.fabric_vk(),
+        )?)
+    }
+
     // ---- registration & minting ----------------------------------------
 
     pub fn register_tool(
@@ -243,8 +253,7 @@ impl Broker {
             .iter()
             .find(|c| c["dim"] == "action.allow")
             .ok_or(BrokerError::NoActionAllow)?;
-        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk())?;
+        let man = self.fabric.load_manifest(manifest_id)?;
         let root_stores: Vec<&str> = man["state"]["roots"]
             .as_array()
             .into_iter()
@@ -278,8 +287,7 @@ impl Broker {
         escalatable: Vec<&str>,
         expires_at: &str,
     ) -> Result<String, BrokerError> {
-        let parent = trace::get_object(&self.fabric.conn, parent_id)?;
-        canon::verify(&parent, &self.fabric.fabric_vk())?;
+        let parent = self.load_capability(parent_id)?;
         // §5.4: a parent closed at the child's grant offset cannot produce
         // a live child — refused here, and the liveness view derives the
         // same answer regardless of what rows were injected.
@@ -326,13 +334,8 @@ impl Broker {
         reason: &str,
         channel: Option<(&str, &str)>,
     ) -> Result<String, BrokerError> {
-        let cap = trace::get_object(&self.fabric.conn, cap_id).map_err(|e| {
+        let cap = self.load_capability(cap_id).map_err(|e| {
             BrokerError::InvalidRevocation(format!("target {cap_id} not found: {e}"))
-        })?;
-        canon::verify(&cap, &self.fabric.fabric_vk()).map_err(|e| {
-            BrokerError::InvalidRevocation(format!(
-                "target {cap_id} is not a broker-verified capability: {e}"
-            ))
         })?;
         let bound_manifest = cap["bound_manifest"].as_str().ok_or_else(|| {
             BrokerError::InvalidRevocation(format!("target {cap_id} has no bound_manifest"))
@@ -437,19 +440,21 @@ impl Broker {
         args: &Value,
     ) -> Result<Decision, BrokerError> {
         let now = now_rfc3339();
-        let cap = trace::get_object(&self.fabric.conn, cap_id)?;
-        // Broker-minted or bust (F1): the capability must verify under the
-        // broker's own key. A forged or tampered token is structurally dead.
-        if canon::verify(&cap, &self.fabric.fabric_vk()).is_err() {
-            return self.deny(
-                cap_id,
-                tool,
-                action,
-                vec![],
-                Some("capability signature invalid (F1)".into()),
-                json!([]),
-            );
-        }
+        // Broker-minted and correctly typed or bust (F1/RF-19): a forged,
+        // tampered, row-swapped, or mistyped capability is structurally dead.
+        let cap = match self.load_capability(cap_id) {
+            Ok(cap) => cap,
+            Err(error) => {
+                return self.deny(
+                    cap_id,
+                    tool,
+                    action,
+                    vec![],
+                    Some(format!("capability object invalid (F1/RF-19): {error}")),
+                    json!([]),
+                )
+            }
+        };
 
         // A22/§5.4 structural precondition: closure and activation at the
         // current verified head, BEFORE caveat evaluation and before any
@@ -767,7 +772,7 @@ impl Broker {
 
         // approval.min_auth (§5.1): the approving channel must be strong
         // enough; unrankable strengths fail closed.
-        let cap = trace::get_object(&self.fabric.conn, &cap_id)?;
+        let cap = self.load_capability(&cap_id)?;
         if let Some(min) = cap["caveats"]
             .as_array()
             .into_iter()
@@ -1035,7 +1040,7 @@ fn a22_ancestry(
     cap_id: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let mut chain = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen = BTreeSet::new();
     let mut cur = cap_id.to_string();
     loop {
         if !seen.insert(cur.clone()) {
@@ -1043,12 +1048,13 @@ fn a22_ancestry(
                 "ancestry of {cap_id} contains a cycle at {cur} (fail closed)"
             ));
         }
-        let obj = trace::get_object(conn, &cur).map_err(|e| {
-            format!("capability {cur} in ancestry of {cap_id} unavailable: {e} (fail closed)")
-        })?;
-        canon::verify(&obj, vk).map_err(|e| {
-            format!("capability {cur} in ancestry of {cap_id} unverifiable: {e} (fail closed)")
-        })?;
+        let obj = trace::load_verified_object(conn, &cur, "cap", "capability", vk).map_err(
+            |e| {
+                format!(
+                    "capability {cur} in ancestry of {cap_id} unavailable or mistyped: {e} (fail closed)"
+                )
+            },
+        )?;
         let man = obj["bound_manifest"]
             .as_str()
             .ok_or_else(|| format!("capability {cur} has no bound_manifest (fail closed)"))?
@@ -1141,8 +1147,7 @@ impl Broker {
     /// — without merging, locking, or mutating anything. The W-8
     /// gate-replay measurement lane and operator diagnostics drive this.
     pub fn gate_replay_check(&self, manifest_id: &str) -> Result<Value, BrokerError> {
-        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk())?;
+        let man = self.fabric.load_manifest(manifest_id)?;
         let span = man["trace"]["span"]
             .as_str()
             .ok_or_else(|| {
@@ -1163,13 +1168,14 @@ impl Broker {
         manifest_id: &str,
         branch_paths: &BTreeMap<String, PathBuf>,
     ) -> Result<PromotionOutcome, BrokerError> {
+        // Reject an invalid authority object before drift accounting can
+        // append evidence for a promotion that never existed.
+        let man = self.fabric.load_manifest(manifest_id)?;
         // M8 (A20): attribute any out-of-band divergence BEFORE the merge
         // consumes live trunk, under the per-home gate lock — attribution
         // must not depend on when the human edited relative to the session.
         let _gate = self.fabric.gate_lock()?;
         self.fabric.check_drift()?;
-        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk())?;
         let span = man["trace"]["span"]
             .as_str()
             .ok_or_else(|| {
@@ -1257,9 +1263,10 @@ impl Broker {
         // closed below — every effect capability-attributed, and its grant
         // event at a lower substrate offset. Observed claims nothing;
         // attributed calls are still checked in full.
-        let man = trace::get_object(&self.fabric.conn, manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk()).map_err(|e| {
-            BrokerError::GateTraceViolation(format!("manifest {manifest_id} unverifiable: {e}"))
+        let man = self.fabric.load_manifest(manifest_id).map_err(|e| {
+            BrokerError::GateTraceViolation(format!(
+                "manifest {manifest_id} unavailable, mistyped, or unverifiable: {e}"
+            ))
         })?;
         let brokered = man["authority"]["mode"] == "brokered";
 
@@ -1313,17 +1320,23 @@ impl Broker {
                     ev.span,
                 ));
             }
-            if let Ok(obj) = trace::get_object(&self.fabric.conn, target) {
-                let bound = obj["bound_manifest"].as_str();
-                let stamped = ev.raw["manifest"].as_str();
-                if bound.is_some() && stamped != bound {
-                    closure_anomalies.push(format!(
-                        "revoke {} stamps manifest {} but {target} is bound to {} — closure holds (§5.4)",
-                        ev.id,
-                        stamped.unwrap_or("null"),
-                        bound.unwrap_or("?"),
-                    ));
+            match self.load_capability(target) {
+                Ok(obj) => {
+                    let bound = obj["bound_manifest"].as_str();
+                    let stamped = ev.raw["manifest"].as_str();
+                    if bound.is_some() && stamped != bound {
+                        closure_anomalies.push(format!(
+                            "revoke {} stamps manifest {} but {target} is bound to {} — closure holds (§5.4)",
+                            ev.id,
+                            stamped.unwrap_or("null"),
+                            bound.unwrap_or("?"),
+                        ));
+                    }
                 }
+                Err(error) => closure_anomalies.push(format!(
+                    "revoke {} targets unavailable, mistyped, or unverifiable capability {target}: {error} — closure holds (§5.4)",
+                    ev.id
+                )),
             }
             let chan = body["channel"].as_str();
             let auth = body["auth_strength"].as_str();
@@ -1392,9 +1405,11 @@ impl Broker {
             let cap = match caps.get(cap_id) {
                 Some(c) => c.clone(),
                 None => {
-                    let c = trace::get_object(&self.fabric.conn, cap_id)?;
-                    canon::verify(&c, &self.fabric.fabric_vk())
-                        .map_err(|e| violation(format!("capability {cap_id} unverifiable: {e}")))?;
+                    let c = self.load_capability(cap_id).map_err(|e| {
+                        violation(format!(
+                            "capability {cap_id} unavailable, mistyped, or unverifiable: {e}"
+                        ))
+                    })?;
                     if c["bound_manifest"].as_str() != Some(manifest_id) {
                         return Err(violation(format!(
                             "event {} authorized by capability bound to a different manifest (M2)",
@@ -1774,6 +1789,10 @@ impl Broker {
         let (manifest_id, preview_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
         self.check_min_auth_for_manifest(&manifest_id, auth_strength)?;
 
+        // As at the automatic gate, authenticate the authority object before
+        // a rejected approval can cause drift-accounting side effects.
+        let man = self.fabric.load_manifest(&manifest_id)?;
+
         // M8 (A20): the approval-time re-merge consumes live trunk exactly
         // like the auto gate does — same divergence check, same lock.
         let _gate = self.fabric.gate_lock()?;
@@ -1800,8 +1819,6 @@ impl Broker {
                     })
             })
             .collect::<Result<_, _>>()?;
-        let man = trace::get_object(&self.fabric.conn, &manifest_id)?;
-        canon::verify(&man, &self.fabric.fabric_vk())?;
         let span = man["trace"]["span"]
             .as_str()
             .unwrap_or_default()
@@ -1877,20 +1894,23 @@ impl Broker {
         manifest_id: &str,
         auth_strength: &str,
     ) -> Result<(), BrokerError> {
-        // Strongest approval.min_auth among verified caps bound to this
-        // manifest applies to gate approvals too.
-        let mut stmt = self
-            .fabric
-            .conn
-            .prepare("SELECT raw FROM objects WHERE kind = 'capability'")?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        // Strongest approval.min_auth among activated capabilities bound to
+        // this manifest applies to gate approvals too. Capability ids come
+        // from verified signed grants, not the unsigned objects.kind index;
+        // every referenced object must pass the shared typed loader.
+        let events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let granted: BTreeSet<String> = a22_grant_bindings(&events, self.fabric.substrate_span())
+            .keys()
+            .filter(|(_, manifest, _)| manifest == manifest_id)
+            .map(|(capability, _, _)| capability.clone())
+            .collect();
         let mut need: Option<String> = None;
-        for raw in rows {
-            let cap = canon::parse_fabric_json(&raw?)?;
-            if cap["bound_manifest"].as_str() != Some(manifest_id)
-                || canon::verify(&cap, &self.fabric.fabric_vk()).is_err()
-            {
-                continue;
+        for cap_id in granted {
+            let cap = self.load_capability(&cap_id)?;
+            if cap["bound_manifest"].as_str() != Some(manifest_id) {
+                return Err(BrokerError::GateTraceViolation(format!(
+                    "grant binds capability {cap_id} to {manifest_id}, but its signed object binds a different manifest"
+                )));
             }
             if let Some(min) = cap["caveats"]
                 .as_array()

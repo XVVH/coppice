@@ -367,7 +367,7 @@ impl Fabric {
         &mut self,
         manifest_id: &str,
     ) -> Result<std::collections::BTreeMap<String, std::path::PathBuf>, KernelError> {
-        let man = trace::get_object(&self.conn, manifest_id)?;
+        let man = self.load_manifest(manifest_id)?;
         let short = manifest_id.strip_prefix("man:").unwrap_or(manifest_id);
         let base = self.home.join("branches").join(&short[..12.min(short.len())]);
         let mut map = std::collections::BTreeMap::new();
@@ -426,6 +426,19 @@ impl Fabric {
 
     pub fn fabric_vk(&self) -> ed25519_dalek::VerifyingKey {
         self.fabric_sk.verifying_key()
+    }
+
+    /// RF-19/W-14: manifests are authority-bearing inputs to branch,
+    /// promotion, parent-lineage, and revert operations. All such consumers
+    /// share this exact signed-id/prefix/stored-kind boundary.
+    pub(crate) fn load_manifest(&self, id: &str) -> Result<Value, KernelError> {
+        Ok(trace::load_verified_object(
+            &self.conn,
+            id,
+            "man",
+            "manifest",
+            &self.fabric_vk(),
+        )?)
     }
 
     fn substrate_event(
@@ -722,6 +735,18 @@ impl Fabric {
         behavior: Value,
         mode: AuthorityMode,
     ) -> Result<StepOutcome, KernelError> {
+        // Authenticate the existing lineage before drift accounting or CAS
+        // capture can mutate fabric state. An invalid materialized parent is
+        // not a step boundary and must create no derivative evidence.
+        let parent = trace::meta_get(&self.conn, "current_manifest")?;
+        let behavior_changed = match &parent {
+            Some(p) => {
+                let pm = self.load_manifest(p)?;
+                pm.get("behavior") != Some(&behavior)
+            }
+            None => false,
+        };
+
         let drift = self.check_drift()?;
 
         let mut roots = Vec::new();
@@ -734,15 +759,6 @@ impl Fabric {
                 "root": root,
             }));
         }
-
-        let parent = trace::meta_get(&self.conn, "current_manifest")?;
-        let behavior_changed = match &parent {
-            Some(p) => {
-                let pm = trace::get_object(&self.conn, p)?;
-                pm.get("behavior") != Some(&behavior)
-            }
-            None => false,
-        };
 
         let span = trace::new_span();
         let substrate_offset = trace::head_offset(&self.conn)?;
@@ -903,12 +919,14 @@ impl Fabric {
     /// swapped. Emits the `revert` event and re-baselines expectations —
     /// undo never gaslights the agent with a world its memory contradicts.
     pub fn revert_to(&mut self, manifest_id: &str) -> Result<(), KernelError> {
+        // Authenticate the requested authority object before a rejected
+        // revert can emit drift evidence or capture any new CAS content.
+        let man = self.load_manifest(manifest_id)?;
         // M8: revert consumes live state exactly like a merge does — any
         // out-of-band divergence must be attributed BEFORE the restore
         // erases it, and gates serialize per home.
         let _gate = self.gate_lock()?;
         self.check_drift()?;
-        let man = trace::get_object(&self.conn, manifest_id)?;
         let roots = man["state"]["roots"]
             .as_array()
             .ok_or_else(|| {

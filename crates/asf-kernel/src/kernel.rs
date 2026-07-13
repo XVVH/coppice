@@ -35,12 +35,35 @@ pub enum KernelError {
     Db(#[from] rusqlite::Error),
     #[error("fabric is not initialized at {home}: expected database {database}")]
     NotInitialized { home: PathBuf, database: PathBuf },
+    #[error(
+        "sqlite runtime {observed} is below conservative safe floor {minimum}; its version does not prove inclusion of the WAL-reset corruption fix (RF-21)"
+    )]
+    UnsafeSqliteVersion { observed: i32, minimum: i32 },
     #[error("no active manifest — call step_boundary first")]
     NoActiveManifest,
     #[error("unknown store {0}")]
     UnknownStore(String),
     #[error("manifest {0} malformed: {1}")]
     MalformedManifest(String, String),
+}
+
+/// First mainline SQLite patch release containing the WAL-reset fix.
+///
+/// Keep this runtime guard even with `rusqlite/bundled`: it turns a future
+/// feature/dependency regression into a loud refusal before a fabric home is
+/// created or opened. Upstream also published older fixed backports, but a
+/// version-only check cannot attest their patch provenance; the conservative
+/// floor deliberately rejects them. SQLite encodes 3.51.3 as 3_051_003.
+const MIN_SAFE_SQLITE_VERSION: i32 = 3_051_003;
+
+fn require_safe_sqlite_version(observed: i32) -> Result<(), KernelError> {
+    if observed < MIN_SAFE_SQLITE_VERSION {
+        return Err(KernelError::UnsafeSqliteVersion {
+            observed,
+            minimum: MIN_SAFE_SQLITE_VERSION,
+        });
+    }
+    Ok(())
 }
 
 /// The Stage 1 fabric: one sqlite substrate (events, objects, payloads),
@@ -97,6 +120,17 @@ impl Fabric {
     /// Open (or create) a fabric home at `dir`, coordinating `stores`.
     /// Layout: `dir/fabric.db`, `dir/cas/`, `dir/keys/`.
     pub fn open(dir: impl AsRef<Path>, stores: Vec<StoreSpec>) -> Result<Self, KernelError> {
+        Self::open_with_sqlite_version(dir, stores, rusqlite::version_number())
+    }
+
+    /// Test seam for the fail-before-effects SQLite version gate. Production
+    /// always supplies `rusqlite::version_number()` through [`Self::open`].
+    fn open_with_sqlite_version(
+        dir: impl AsRef<Path>,
+        stores: Vec<StoreSpec>,
+        sqlite_version: i32,
+    ) -> Result<Self, KernelError> {
+        require_safe_sqlite_version(sqlite_version)?;
         let dir = dir.as_ref();
         std::fs::create_dir_all(dir).map_err(|source| snapshot::SnapError::Io {
             path: dir.to_path_buf(),
@@ -1112,4 +1146,39 @@ pub struct Explanation {
     /// Store roots whose live value the ledger cannot account for.
     /// Non-empty means the substrate failed its own thesis.
     pub unexplained: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patched_sqlite_runtime_opens_fabric() {
+        assert!(
+            rusqlite::version_number() >= MIN_SAFE_SQLITE_VERSION,
+            "bundled SQLite {} is below RF-21 floor {}",
+            rusqlite::version(),
+            MIN_SAFE_SQLITE_VERSION
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("fabric");
+        let fabric = Fabric::open(&home, vec![]).unwrap();
+        assert!(home.join("fabric.db").is_file());
+        drop(fabric);
+    }
+
+    #[test]
+    fn affected_sqlite_runtime_creates_no_fabric_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("must-not-exist");
+        let result = Fabric::open_with_sqlite_version(&home, vec![], MIN_SAFE_SQLITE_VERSION - 1);
+        assert!(matches!(
+            result,
+            Err(KernelError::UnsafeSqliteVersion { .. })
+        ));
+        assert!(
+            !home.exists(),
+            "an unsafe SQLite runtime must not initialize any protected fabric state"
+        );
+    }
 }

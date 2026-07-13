@@ -493,9 +493,9 @@ includes bounds, nested floats, collision inputs, and duplicates. A protected
 tool-dispatch negative covers both duplicate-bearing object and event rows.
 Type/domain transcript binding remains the separate RF-6/SI-26 decision.
 
-## RF-18 — existing homes silently regenerate missing identity and KEK files — in-progress
+## RF-18 — existing homes silently regenerate missing identity and KEK files — fixed by W-13 (PR #40)
 
-**W-13 correction (pending merge):** `Fabric::initialize` and
+**W-13 remediation:** `Fabric::initialize` and
 `Fabric::open_existing` are now distinct public operations. Initialization
 publishes the complete fabric/user-root/owner-KEK set as one fsynced directory
 entry; reopen validates all three before opening SQLite and never creates key
@@ -507,18 +507,24 @@ The `KEY-CONTINUITY` contract exercises loss, malformed material, database-only,
 keys-only, mixed partial-home, missing-CAS/runtime, and path-substitution cases;
 the targeted `w13_*` mutation lane caught all 35 viable mutants (five
 compiler-unviable, zero survivors). SI-27/W-17 and RF-14 remain open.
+The first independent-context review found three ordering/path blockers; the
+corrected implementation was independently re-reviewed and approved, then
+merged in PR #40.
 
-**Severity: high. Direction: IDENTITY SPLIT / IRRECOVERABLE DATA LOSS.**
-`load_or_create_raw` cannot distinguish first initialization from key loss.
+**Severity: high. Direction: IDENTITY SPLIT / IRRECOVERABLE DATA LOSS.** The
+original `load_or_create_raw` path could not distinguish first initialization
+from key loss.
 Removing `fabric.ed25519`, `user_root.ed25519`, or `owner.kek` from an existing
 home silently creates new material. Old events then fail under a new fabric
 identity and old payloads become unreadable under a new KEK. No trusted home
 identity, historical key registry, rotation chain, or recovery ceremony exists;
-parent-directory entries are not explicitly fsynced after publication.
+before W-13, parent-directory entries were not explicitly fsynced after
+publication.
 
-**Fix now:** split explicit initialization from reopen, fail closed when any
-required key is absent from initialized state, fsync directory publication,
-and refuse malformed secret storage rather than treating it as empty.
+**Required boundary (implemented by W-13):** split explicit initialization from
+reopen, fail closed when any required key is absent from initialized state,
+fsync directory publication, and refuse malformed secret storage rather than
+treating it as empty.
 SI-27 owns external trust anchoring, rotation, recovery, and historical
 verification; RF-14 remains the separate cleartext-custody finding.
 
@@ -661,18 +667,18 @@ a process-level recovery negative proving the stranded branch is not skipped.
 This is a non-blocking dogfooding hardening item outside W-11's authority
 surface; schedule it with the next RF-9 recovery pass.
 
-## RF-28 — operator ledger trusts or hides unverified retained rows — in progress (W-19)
+## RF-28 — operator ledger trusts or hides unverified retained rows — fixed by W-19 (PR #41)
 
 **Severity: medium. Direction: FAIL-OPEN OPERATOR DECEPTION.**
-`Fabric::explain` currently folds raw `EventRow` values into its narrative and
-root accounting without checking the event signature, signed/materialized
-selector agreement, or per-span chain. A storage writer can therefore make an
-unsigned or invalidly signed row claim that live state has an explaining cause,
-or alter the displayed kind, span, or time of a genuine signed event. The
-one-line W-11-era candidate replacement with `verified_events` is also
-insufficient: that authority view deliberately omits wholly unsigned or
-foreign-signed rows, which would make an operator integrity surface silently
-hide the anomaly.
+Before W-19, `Fabric::explain` folded raw `EventRow` values into its narrative
+and root accounting without checking the event signature,
+signed/materialized selector agreement, or per-span chain. A storage writer
+could therefore make an unsigned or invalidly signed row claim that live state
+had an explaining cause, or alter the displayed kind, span, or time of a
+genuine signed event. The one-line W-11-era candidate replacement with
+`verified_events` was also insufficient: that authority view deliberately
+omits wholly unsigned or foreign-signed rows, which would make an operator
+integrity surface silently hide the anomaly.
 
 The edit was never part of a merged PR. PR #37 explicitly excluded it as an
 unrelated W-11 reporting-line change; the docs-only PR #38 excluded it again,
@@ -680,7 +686,7 @@ but the local candidate was not removed or tracked. A review of every PR
 merged, opened, or updated in the preceding 24 hours (#30–#40) confirmed that
 no patch or review owned it.
 
-**Fix:** W-19 gives reporting its own integrity view. Verified events may feed
+**Remediation:** W-19 gives reporting its own integrity view. Verified events may feed
 the narrative and root accounting only when the retained view is free of
 signature, selector, parse, kind, and chain findings. It also rejects unsigned
 storage order that contradicts the already-signed within-span sequence,
@@ -693,6 +699,8 @@ ledger contract and a stable targeted mutation lane cover this boundary.
 SI-25/RF-13 remain explicit for unsigned cross-span offset order, deletion,
 rollback, expected-head completeness, and freshness, including replacement
 after a diagnostic view has already been observed.
+Merged in PR #41 after the required, deep, and targeted mutation lanes passed;
+GitHub's Linux, macOS, static, and audit checks also passed.
 
 ## Verified sound during review (recorded so they aren't re-litigated)
 

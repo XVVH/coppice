@@ -30,30 +30,6 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-**W-13 — key continuity and explicit initialization.** Owner: agent branch
-`agent/w13-key-continuity`. New-home initialization and existing-home reopen
-are separate APIs; reopen validates the fabric key, user-root key, and owner
-KEK before opening SQLite and never generates replacements. Complete keystore
-publication is directory-atomic and parent-fsynced; partial homes fail closed;
-malformed secret storage is never treated as empty. Two-sided loss/partial-home
-matrices and the targeted `w13_*` mutation lane (35 caught, five unviable,
-zero survivors) are implemented pending review.
-Closes RF-18's immediate mechanism when merged. SI-27/W-17 remains open for
-external custody, trust anchoring, rotation, recovery, and historical
-verification. *Provenance: 2026-07-12 cryptographic mechanism audit.*
-
-**W-19 — integrity-aware operator ledger.** Owner: agent branch
-`codex/w19-ledger-integrity`, rebased onto `main` after W-13 merged in PR #40. The
-diff-attribution ledger accounts only from signature-verified, selector-matched,
-chain-valid events while reporting malformed, foreign-signed, selector-mismatched,
-signed-sequence-reordered, and chain-anomalous retained rows explicitly instead
-of trusting or omitting them. Integrity already present in the observed view
-preflights before drift attribution can mutate state; process-level negatives
-preserve the complete fabric home on failure. Closes
-RF-28 without claiming SI-25's authenticated global order, completeness,
-rollback, or freshness. *Provenance: disposition of the excluded W-11-era
-`Fabric::explain` candidate after PRs #35–#40 were audited, 2026-07-13.*
-
 ## Queued (ordered)
 
 **W-14 — typed object application + verified restore preparation.** One
@@ -201,6 +177,15 @@ decision, not by drift. From the 2026-07-10 review sessions:
   one design, not four references. Composes with the R2 read-authority
   gate (both fire at first live-egress tool).
 - **Forensic crypto-shredding** — post-dogfooding release gate.
+- **Fabric-home at-rest protection / deployment floor (RF-15/P17)** — trigger:
+  production, offline backups, privileged-host compromise in scope, or tenants
+  sharing one uid/home. W-17 closes key custody, not plaintext CAS/branch/DB
+  storage; choose an OS/full-disk deployment floor or application envelope
+  before assigning an implementation item.
+- **Verified recovery preselection (RF-27)** — trigger: the next RF-9 recovery
+  hardening pass. Derive the promotion-event half from `VerifiedEvent`, retain
+  the broker-owned promotions-table half, and prove anomalous unsigned selectors
+  cannot make `asf recover` skip stranded work.
 - **Multi-actor roots/visibility, HA topology, model judge/clerk-as-model,
   Tier-2/3 stores** — deferred until the W-1..W-3 loop produces pull
   (2026-07-10 review: both external reviews independently concurred).
@@ -210,6 +195,21 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-19 — integrity-aware operator ledger** — diagnostic accounting now
+  consumes only a clean signature-verified, selector-matched, chain-valid
+  retained-row view; malformed, foreign-signed, selector-mismatched,
+  signed-sequence-reordered, and chain-anomalous rows fail loudly without
+  drift/CAS/DB effects while decodable raw text remains inspectable. Closes
+  RF-28 without claiming SI-25's cross-span order, completeness, rollback, or
+  freshness. (PR #41, 2026-07-13)
+- **W-13 — key continuity and explicit initialization** — separates new-home
+  initialization from existing-home reopen; required fabric, user-root, and
+  owner-KEK material is published as one fsynced directory entry and never
+  regenerated or repaired on reopen. Partial/malformed homes, path
+  substitutions, missing CAS/runtime state, and malformed secret storage fail
+  closed. Independent review requested three corrections and approved the
+  final implementation. Closes RF-18's immediate mechanism; SI-27/W-17 and
+  RF-14 remain open. (PR #40, 2026-07-13)
 - **W-12 — strict JCS input domain** — recursively enforces the integer-only
   `|n| < 2^53` domain at seal and verify, rejects duplicate names at every raw
   persisted fabric-object ingress, preserves valid signed bytes, and carries

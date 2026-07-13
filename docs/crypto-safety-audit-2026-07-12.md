@@ -15,13 +15,14 @@ suitable only for cooperative local dogfooding. It is not yet a production
 security boundary, published signed format, live-egress authority system, or
 forensic-erasure mechanism.
 
-The release blockers are mechanism failures around the primitives: an
-unauthenticated global trace order/head, an unchecked JCS input domain,
-missing key-identity continuity, incomplete typed verification before state
-application, an unbound/non-atomic payload envelope, and asserted rather than
-authenticated identity/credential surfaces. W-10 and W-11 merged the immediate
-bundled-SQLite and unsigned-index repairs; neither weakens the remaining
-production gates.
+The original audit found mechanism failures around the primitives. W-10 through
+W-13 and W-19 have since closed the bundled-SQLite, unsigned-selector, JCS input,
+missing-key continuity, and operator-ledger defects. The remaining release
+blockers are an unauthenticated global trace order/head, incomplete typed
+verification before state application, an unbound/non-atomic payload envelope,
+an unspecified production key lifecycle/custody boundary, and asserted rather
+than authenticated identity/credential surfaces. The merged repairs do not
+weaken those remaining production gates.
 
 ## Remediation merged from this audit
 
@@ -38,6 +39,21 @@ production gates.
   The original combined `kind`+`span` revocation concealment now fails
   structurally before any ticket/effect/escalation, and a per-field matrix plus
   targeted mutation lane pins the boundary.
+- **W-12 / RF-17 (PR #39):** seal and verify now enforce ASF's integer-only
+  `|n| < 2^53` JCS input domain recursively, and raw persisted fabric JSON
+  rejects duplicate names before `Value` construction. Language-neutral
+  boundary/collision vectors and the targeted lane cover the written
+  predicates; SI-26/RF-6 type/domain transcript binding remains open.
+- **W-13 / RF-18 (PR #40):** explicit initialization is separate from reopen;
+  existing and partial homes never regenerate or repair required fabric,
+  user-root, or owner-KEK material. Independent review found three ordering and
+  path blockers, then approved the corrected implementation. SI-27/W-17 and
+  RF-14 retain lifecycle and custody scope.
+- **W-19 / RF-28 (PR #41):** operator accounting consumes only a clean
+  verified retained-row view and reports decodable anomalies instead of
+  trusting or hiding them. Within-span signed-sequence/unsigned-offset
+  inversions fail loudly; SI-25 retains cross-span order, completeness,
+  rollback, and freshness.
 
 W-11 is an authority-surface change. Its first independent-context review
 returned REQUEST CHANGES with five findings; all five were corrected, and the
@@ -88,9 +104,9 @@ current Rust crates are not evidence of a validated cryptographic module.
 | signed grant parent not bound to capability ancestry | RF-25, G9, W-11 | fixed in PR #36 |
 | signed tool-registration placement not enforced | RF-26, G9, W-11 | fixed in PR #36 |
 | recovery preselection trusts unsigned promotion selectors | RF-27, G7 | non-blocking fail-closed hardening |
-| operator ledger trusts or silently omits unverified rows | RF-28, G10, W-19 | fix in progress; SI-25 global-order/rollback residual retained |
-| JCS semantic collision | RF-17, P24, G2, W-12 | fix now |
-| missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | implementation in progress; lifecycle design follows |
+| operator ledger trusts or silently omits unverified rows | RF-28, G10, W-19 | fixed in PR #41; SI-25 global-order/rollback residual retained |
+| JCS semantic collision | RF-17, P24, G2, W-12 | fixed in PR #39; SI-26/RF-6 separate |
+| missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | fixed in PR #40; lifecycle/custody design follows |
 | unverified manifest application | RF-19, G10, W-14 | fix now |
 | restore preflight validates presence, not bytes | RF-20, G3, W-14 | fix now |
 | bundled SQLite WAL-reset defect | RF-21, W-10 | fixed in PR #37; 4/4 floor mutants caught |
@@ -209,8 +225,9 @@ human whether history is explainable.
   three compiler-unviable, zero survivors or timeouts. Iterative runs exposed
   and corrected a missing middle-deletion location assertion and an unsigned
   offset/signed-sequence accounting gap before publication.
-- W-11 merged in PR #36 and W-10 merged in PR #37; the broader audit trackers
-  remain local work in progress for the queued remediations.
+- W-11 merged in PR #36, W-10 in PR #37, W-12 in PR #39, W-13 in PR #40,
+  and W-19 in PR #41. The remaining findings and spec decisions stay queued in
+  the canonical RF/SI/P/G/W trackers rather than being implied complete here.
 
 ## Review limits
 
@@ -218,5 +235,7 @@ This was source review, dependency/source inspection, standards comparison,
 adversarial local reproduction, and existing-lane execution. It was not a
 formal proof, hardware side-channel assessment, forensic-media experiment,
 FIPS validation, or independent third-party audit. W-11 completed the
-repository's independent-context review discipline; future authority, trace,
-key, and envelope changes must do the same before merge.
+repository's independent-context review discipline. Per `AGENTS.md`, every
+authority-surface change requires independent-context review before merge;
+trace, key, and envelope mechanism changes should receive the same treatment,
+and become mandatory whenever they alter an authority surface.

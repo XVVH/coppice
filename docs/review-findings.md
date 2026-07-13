@@ -464,6 +464,28 @@ completeness, signature-invalid row erasure, rollback, and freshness.
 Independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS.
 The authority-review gate is satisfied; fixed by `452c9bc`.
 
+## RF-21 — bundled SQLite 3.46.0 is affected by the WAL-reset corruption race — fixed (fa9defd, W-10)
+
+**Severity: high for foundational integrity; low-probability occurrence, not a
+remote exploit.** `rusqlite 0.32.1` with `bundled` selects
+`libsqlite3-sys 0.30.1`, whose bundled header is SQLite 3.46.0. ASF explicitly
+enables WAL and can open multiple process/thread connections and checkpoints.
+SQLite reports the corruption race across 3.7.0 through 3.51.2, fixed in
+3.51.3 and later, with separately published fixed backports at 3.44.6 and
+3.50.7; ASF's 3.46.0 is not one of them. RustSec is green because this is
+bundled C source rather than a RustSec advisory. Primary source:
+[SQLite's WAL-reset analysis](https://www.sqlite.org/wal.html#the_wal_reset_bug).
+
+**Fix:** upgrade to a binding that bundles a patched SQLite and enforce the
+minimum runtime library version in code/CI so a dependency regression cannot
+silently reintroduce the affected engine.
+
+**Remediation:** `fa9defd` pins `rusqlite 0.40.1` with
+`libsqlite3-sys 0.38.1` (bundled SQLite 3.53.2) and refuses to initialize or
+open a fabric below the conservative 3.51.3 floor. The version-only guard
+deliberately rejects older fixed backports because it cannot attest their patch
+provenance. The two-sided `SQLITE-ENGINE` contract is green.
+
 ## RF-25 — signed grant parent can disagree with capability ancestry — fixed (452c9bc, W-11)
 
 **Severity: medium; latent FAIL-OPEN at the signer/conformance boundary.**

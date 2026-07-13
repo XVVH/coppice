@@ -46,6 +46,11 @@ TRACE-CHAIN|supporting|trace::tests::verified_snapshot_head_stays_with_the_rows_
 LEDGER-UX|positive|ledger_shows_timestamps_and_full_event_detail
 LEDGER-UX|negative|ledger_rejects_uninitialized_home_and_unknown_event_without_creating_state
 
+# Storage engine integrity: refuse WAL-reset-affected SQLite before creating
+# or opening protected fabric state (RF-21/W-10).
+SQLITE-ENGINE|positive|kernel::tests::patched_sqlite_runtime_opens_fabric
+SQLITE-ENGINE|negative|kernel::tests::affected_sqlite_runtime_creates_no_fabric_state
+
 # W-2 unified gate replay: the decision evaluator re-runs over signed
 # records, clocked at each event's `at` (SI-22 at-the-time semantics).
 GATE-REPLAY|positive|si22_gate_clock_is_the_events_at_not_gate_time

@@ -22,6 +22,15 @@ deferred; un-park trigger named). Ids are `W-n`, stable once assigned.
 
 ## In flight
 
+**W-10 — patched SQLite floor.** Owner: current security-hardening session.
+Upgrade the bundled engine out of the WAL-reset affected range (SQLite
+3.7.0…3.51.2, except separately identified fixed backports), assert the runtime
+version mechanically, and carry a two-sided storage-integrity contract so
+dependency drift cannot silently reintroduce the engine defect. Implemented in
+`fa9defd` at bundled SQLite 3.53.2 with a conservative 3.51.3 runtime floor;
+required/deep/RustSec lanes are green. Closes RF-21 when merged.
+*Provenance: 2026-07-12 cryptographic mechanism audit.*
+
 **W-11 — verified-event authority boundary.** Owner: current
 security-hardening session. Replace A22's trust in denormalized event indexes
 with a `VerifiedEvent` derived from signed raw; establish exact row agreement

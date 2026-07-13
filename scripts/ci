@@ -70,6 +70,18 @@ run_deep() {
 run_mutation() {
     need_command cargo-mutants \
         "install it with: cargo install cargo-mutants --locked --version 27.1.0"
+
+    heading "W-10 SQLite runtime-floor mutation tests"
+    # The dependency pin prevents the known-bad engine from being selected;
+    # this stable function target guards the independent fail-before-effects
+    # runtime check against comparison and return-value regressions.
+    cargo mutants \
+        -f crates/asf-kernel/src/kernel.rs \
+        -F 'require_safe_sqlite_version' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+
     heading "authority-evaluation and promotion-policy mutation tests"
     cargo mutants \
         -f crates/asf-kernel/src/evaluate.rs \

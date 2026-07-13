@@ -58,6 +58,8 @@ Ratify SI-25, then bind global order, completeness, home/epoch, export order,
 and rollback freshness with an explicit recovery story. Closes RF-13/P15's
 production and standing-authority gate. W-11 has landed; W-3 may collect
 disposable examples but may not compile standing authority until W-15 lands.
+Design candidate ADR 0006 is drafted and awaiting ratification; it does not
+resolve SI-25 or authorize implementation.
 *Provenance: RF-13 + 2026-07-12 cryptographic mechanism audit.*
 
 **W-16 — payload envelope v2 and shred protocol.** Ratify SI-28/SI-29, then

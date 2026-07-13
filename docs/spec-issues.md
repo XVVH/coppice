@@ -93,6 +93,18 @@ to the durable external-effect dispatch record. Do not encode an anchor design
 in code until ratified; RF-16's immediate verified-row fix is compatible with
 all candidates.
 
+**Candidate awaiting ratification (ADR 0006, 2026-07-12):** add one signed
+per-home global predecessor/sequence to every new event, checkpoint its terminal
+head, and advance a monotonic anchor outside the fabric home's rollback domain.
+The candidate explicitly limits an unanchored local signed head to retained-row
+order/integrity: it cannot prove freshness after full-disk rollback. Production
+and standing-authority claims therefore require a qualifying remote witness or
+hardware monotonic anchor. The ADR covers append/publication crashes,
+home/epoch and export binding, old-image recovery, durable dispatch ordering,
+legacy migration, key-history seams, performance/DoS, and the G9/G10 test plan.
+SI-25 remains **open**; no candidate field or anchor policy is normative until
+the human choices listed in the ADR are ratified and integrated into the spec.
+
 ---
 
 ## SI-24 — capabilities are called revocable but have no early-closure semantics (§5, §6, §9 F1) — RESOLVED (author, 2026-07-12)

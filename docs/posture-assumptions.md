@@ -204,8 +204,10 @@ in scope, or when storage leaves that filesystem boundary.
   claims survive rollback.
 
 ### G-PUBLISH — before publishing the spec / any cross-implementation artifact  *(relaxes single-implementation)*
-- **P24** JCS numeric constraint (`|n| < 2^53`) not enforced at seal/verify.
-  → audit Medium; W-6 conformance (G2 differential vectors).
+- **P24 — REMEDIATED by W-12 (pending merge):** JCS numeric constraint
+  (`|n| < 2^53`, integer-only) enforced at seal/verify, with strict raw
+  duplicate-name rejection and language-neutral input-domain vectors. W-6
+  still owns the independent-implementation differential and RF-6/SI-26.
 - **P23** Object `id` type-prefix not covered by the signature (defanged
   locally by full-id lookup + fail-closed field reads). → RF-6 (open).
 - **P25 — CLOSED by W-8 (PR #33):** the published lifecycle has
@@ -256,7 +258,7 @@ All 27 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P21 | Host-local `flock` gate; no cross-host fencing | `kernel.rs:383-408` | 1TEN | HA topology (parked; scalability) |
 | P22 | In-flight calls in memory; decision-time budget consumption | `broker.rs:355-364` | LOCAL | RF-3 (accepted); durable-effect protocol (parked) |
 | P23 | `id` type-prefix not signature-covered | `canon.rs:103` | (single impl) | RF-6 (open) |
-| P24 | JCS numeric constraint unenforced; distinct exact integers can share signed bytes | `canon.rs:33,70` | (single impl) | RF-17 High at format boundary; W-12; G2 |
+| P24 | ~~JCS numeric constraint unenforced; distinct exact integers can share signed bytes~~ **REMEDIATED by W-12 (pending merge):** strict recursive seal/verify domain plus duplicate-safe raw fabric parsing | `canon.rs` (`w12_*`, `parse_fabric_json`, `seal`, `verify`) | — after merge (single-implementation differential remains) | RF-17; W-12; G2; residual RF-6/SI-26 |
 
 ---
 

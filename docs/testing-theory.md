@@ -124,6 +124,49 @@ tests. RF-17 makes the input-domain half immediate: carry exact positives at
 floats at every nesting depth, and raw duplicate-property inputs. Rejection is
 part of the vector result; canonical bytes alone are not conformance.
 
+W-12 supplies the input-domain half in
+`tests/vectors/jcs-input-domain.json`: exact accepts at `±(2^53-1)` and
+integer-token `-0` with canonical bytes and SHA-256, exact rejects at `±2^53`, both members of the
+reproduced adjacent-u64 collision, floats at the root and nested through
+objects/arrays (including integer-shaped decimal/exponent forms), and
+top-level/nested duplicate names. The Rust reference test
+consumes the fixture without embedding Rust types in it. A second independent
+RFC 8785 implementation remains W-6's publication work; W-12 does not claim
+that differential half.
+
+**W-12 G9 inverse conformance sweep (spec §0 Serialization + Extensibility).**
+
+| Normative edge | Enforcement | Inverse / two-sided evidence |
+|---|---|---|
+| Fabric serialization is JCS | `canon::jcs_bytes`, `body_bytes` | `jcs_rfc8785_shapes`; language-neutral accepted vectors |
+| `id` hashes the canonical body excluding both `id` and `sig` | `canon::hash_body`, `compute_id` | `id_excludes_id_and_sig_and_is_stable`; `verify_roundtrip_and_tamper_detection` |
+| Ed25519 signs the same body bytes used by the id | `canon::seal`, `verify` via `body_bytes` | valid-boundary output equals the pre-W-12 signing path byte-for-byte; tamper/recomputed-id negatives remain rejected |
+| Numbers are integers with `|n| < 2^53`; floats are forbidden recursively | `w12_raw_number_is_in_domain` preserves lexical integer `-0` while rejecting decimal/exponent forms; `w12_number_is_in_domain`, `w12_validate_value`; unavoidable through raw parse, `jcs_bytes`, `seal`, `compute_id`, and `verify` | `JCS-DOMAIN` positive/negative/supporting tests; G2 exact bounds, `-0`, collision, root/nested/integer-shaped floats; targeted W-12 mutation lane |
+| Raw JCS input cannot contain duplicate object names | `canon::parse_fabric_json` + `w12_duplicate_key`, before `Value` construction | duplicate vectors at root/nesting; protected tool-dispatch negative for both a stored signed object and event |
+| Unknown fields are preserved and hashed | the strict visitor recursively builds every array/object member; `hash_body` removes only `id`/`sig` | `unknown_fields_are_hashed`; `unknown_fields_survive_reserialize` |
+| Cross-references remain by id and lineage remains tamper-evident | unchanged: `trace::get_object` is full-id lookup; `verify_verified_chain` checks signed per-span lineage | existing id/unknown-field/tamper and `TRACE-CHAIN` contracts; W-12 changes no reference or lineage semantics |
+
+The targeted stable-predicate lane caught all 36 generated mutants (36/36;
+zero missed, unviable, timed out, or excluded) over exact numeric comparisons,
+lexical-number scanning/classification, mandatory raw-parser invocation,
+recursive value traversal, and duplicate-key detection. This certifies those
+written predicates; the protected dispatch test supplies the independent
+consumer-boundary evidence.
+
+Every raw persisted/imported **fabric-object** ingress is routed before
+`Value` construction: `trace::row_to_event` covers `events_in_span`,
+`all_events`, and `event_at_offset`; `trace::get_object` covers the common
+stored-object path; `Broker::capability_descendants` and
+`Broker::check_min_auth_for_manifest` cover the only direct `objects.raw`
+queries that bypass `get_object`. There is currently no separate fabric-object
+import API. Promotion previews, escalation samples, store-topology metadata,
+snapshot tree nodes, MCP messages, and corpus records are not signed fabric
+objects and therefore are not silently subjected to the §0 fabric domain.
+
+Explicit scope fence: RF-6/SI-26's signed type/domain transcript is unchanged.
+W-12 preserves the current valid transcript bytes and does not treat input
+validation as type binding.
+
 **G3. Crash consistency.** Preparation failure, injected interruption, hard
 process exit during an in-place filesystem apply, reopen, and idempotent replay
 are covered; session-boundary SIGKILL recovery is covered too. Nothing yet kills

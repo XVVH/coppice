@@ -22,6 +22,15 @@ deferred; un-park trigger named). Ids are `W-n`, stable once assigned.
 
 ## In flight
 
+**W-12 — strict JCS input domain.** Implementation ready for review: the
+spec's integer-only `|n| < 2^53` domain is enforced recursively at seal and
+verify; every raw persisted fabric-object ingress rejects duplicate names
+before `serde_json::Value` construction; G2 vectors carry the exact bounds,
+RF-17 collision, nested floats, and duplicates. Valid signed bytes are
+unchanged. RF-6/SI-26 type-domain transcript versioning remains W-6's
+publication decision. Closes RF-17/P24 on merge.
+*Provenance: 2026-07-12 cryptographic mechanism audit.*
+
 **W-1 — Phase 5 dogfooding: real workflow-3 sessions.** Owner: operator.
 Drive vault-maintenance sessions through the brokered tools per
 `dogfooding.md`; track denial-FP rate, capability gaps, tripwires. First
@@ -31,13 +40,6 @@ Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
 ## Queued (ordered)
-
-**W-12 — strict JCS input domain.** Enforce the spec's integer-only
-`|n| < 2^53` domain at seal and verify, with the reproduced adjacent-u64
-signature collision and nested-float negatives plus language-neutral G2
-vectors. Valid signed bytes do not change; RF-6/SI-26 type-domain transcript
-versioning remains W-6's publication decision. Closes RF-17/P24.
-*Provenance: 2026-07-12 cryptographic mechanism audit.*
 
 **W-13 — key continuity and explicit initialization.** Separate new-home key
 creation from existing-home reopen; fail closed on missing/malformed identity

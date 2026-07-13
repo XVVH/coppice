@@ -469,7 +469,7 @@ Independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS.
 The authority-review gate is satisfied; fixed by `452c9bc` and merged in PR
 #36.
 
-## RF-17 — JCS accepts signature-preserving numeric semantic collisions — open
+## RF-17 — JCS accepts signature-preserving numeric semantic collisions — remediated by W-12 (pending merge)
 
 **Severity: high at the signed-format boundary. Direction: AUTHENTICITY.** The
 spec requires integer `|n| < 2^53` and forbids floats, but `jcs_bytes`, `seal`,
@@ -482,10 +482,16 @@ bytes remained equal and `canon::verify` returned `Ok(())`. This upgrades P24
 from an interoperability note to a signature-authenticity defect for accepted
 out-of-spec input.
 
-**Fix:** reject floats and integers outside the exact spec domain at both seal
-and verify; reject duplicate object names before a raw JSON parser collapses
-them; carry boundary and collision vectors in G2. Type/domain binding remains
-the separate RF-6/SI-26 format decision.
+**Current remediation:** `canon` recursively rejects floats and integers with
+`|n| >= 2^53` before canonicalization at both seal and verify. A strict raw
+fabric-object parser rejects duplicate names before constructing a
+`serde_json::Value`; persisted event rows, the common object loader, and the
+two broker capability scans that bypass it all use that parser. The original
+adjacent-u64 collision is reproduced and denied, exact boundary positives
+prove valid signed bytes unchanged, and the language-neutral G2 fixture
+includes bounds, nested floats, collision inputs, and duplicates. A protected
+tool-dispatch negative covers both duplicate-bearing object and event rows.
+Type/domain transcript binding remains the separate RF-6/SI-26 decision.
 
 ## RF-18 — existing homes silently regenerate missing identity and KEK files — open
 

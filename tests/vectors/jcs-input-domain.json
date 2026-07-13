@@ -1,0 +1,103 @@
+{
+  "schema": "asf-jcs-input-domain-v1",
+  "normative_source": "Agent State Fabric Schema Specification v0.7 §0/A16",
+  "vectors": [
+    {
+      "name": "positive-boundary",
+      "input": "{\"n\":9007199254740991}",
+      "result": "accept",
+      "canonical": "{\"n\":9007199254740991}",
+      "sha256": "sha256:e1da48c6a6089f06ecb4e0a2259e658e3786b2420f52baccdf929ec6460d7b41"
+    },
+    {
+      "name": "negative-boundary",
+      "input": "{\"n\":-9007199254740991}",
+      "result": "accept",
+      "canonical": "{\"n\":-9007199254740991}",
+      "sha256": "sha256:d49d713821fc149f81ef6ca8054beeba696f5da052f0ab3e2d773808c5a9d625"
+    },
+    {
+      "name": "negative-zero-integer",
+      "input": "{\"n\":-0}",
+      "result": "accept",
+      "canonical": "{\"n\":0}",
+      "sha256": "sha256:f3013f933b9fb80ab6d995e7ad9da36f683837ba1d81e950c943d40111eac2f0"
+    },
+    {
+      "name": "number-shaped-escaped-strings",
+      "input": "{\"s\":\"1.0\",\"escaped\":\"\\\"9007199254740992\"}",
+      "result": "accept",
+      "canonical": "{\"escaped\":\"\\\"9007199254740992\",\"s\":\"1.0\"}",
+      "sha256": "sha256:408a6f6ea6c5ed1bc474437de97b0083d142d0d99375ba59f602090293d5edfd"
+    },
+    {
+      "name": "top-level-integer",
+      "input": "0",
+      "result": "accept",
+      "canonical": "0",
+      "sha256": "sha256:5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "name": "positive-limit",
+      "input": "{\"n\":9007199254740992}",
+      "result": "reject"
+    },
+    {
+      "name": "negative-limit",
+      "input": "{\"n\":-9007199254740992}",
+      "result": "reject"
+    },
+    {
+      "name": "rf17-adjacent-u64-collision-left",
+      "input": "{\"n\":9007199254740992}",
+      "result": "reject",
+      "collision_group": "rf17-adjacent-u64"
+    },
+    {
+      "name": "rf17-adjacent-u64-collision-right",
+      "input": "{\"n\":9007199254740993}",
+      "result": "reject",
+      "collision_group": "rf17-adjacent-u64"
+    },
+    {
+      "name": "top-level-float",
+      "input": "1.5",
+      "result": "reject"
+    },
+    {
+      "name": "integer-shaped-decimal",
+      "input": "{\"n\":-0.0}",
+      "result": "reject"
+    },
+    {
+      "name": "integer-shaped-exponent",
+      "input": "{\"n\":1e0}",
+      "result": "reject"
+    },
+    {
+      "name": "nested-object-float",
+      "input": "{\"outer\":{\"n\":1.5}}",
+      "result": "reject"
+    },
+    {
+      "name": "nested-array-float",
+      "input": "{\"outer\":[0,{\"n\":1.5}]}",
+      "result": "reject"
+    },
+    {
+      "name": "duplicate-top-level-property",
+      "input": "{\"x\":1,\"x\":2}",
+      "result": "reject"
+    },
+    {
+      "name": "duplicate-nested-property",
+      "input": "{\"outer\":{\"x\":1,\"x\":2}}",
+      "result": "reject"
+    },
+    {
+      "name": "unterminated-string",
+      "input": "{\"s\":\"1.0",
+      "result": "reject"
+    }
+  ]
+}

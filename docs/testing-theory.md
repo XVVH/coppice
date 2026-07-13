@@ -80,7 +80,7 @@ failure — with review and mutation testing.
 | M6 cheap/frequent manifests | exercised throughout multi-boundary tests; guidance rather than a binary predicate | exercised |
 | M7 authority mode + grant binding (A21) | `m7_brokered_manifest_rejects_unattributed_calls`, `m7_brokered_end_to_end_gates_clean` (grant-before-effect ordering), `m7_observed_manifest_tolerates_unattributed_calls`; the proxy suite now runs declared-brokered end-to-end | covered |
 | M8 attribution completeness | e2e, gate, proxy timing tests, generated state-machine histories | covered for current consumers |
-| §5.4/A22 capability closure | the A22 contract (22 tests): decision-time closure in tests/broker.rs, gate liveness-at-offset matrix in tests/gate.rs, socket kill switch + CLI exit-status contract in proxy_smoke; targeted `a22_*` mutation lane | covered |
+| §5.4/A22 capability closure | the A22 contract (26 tests): decision-time closure in tests/broker.rs, gate liveness-at-offset matrix in tests/gate.rs, exact grant-parent binding, socket kill switch + CLI exit-status contract in proxy_smoke; targeted `a22_*`, verified-event constructor, and W-11 consumer mutation lanes | corrected by W-11 after independent review; SI-25 cross-span order/head residual |
 | C1 authority provenance | intent and escalation/approval integration tests | covered for current channels |
 | C2 agent outside approval path | real proxy/socket topology plus invented in-band method rejection | covered |
 | C3–C5 | channel/delivery machinery absent | future milestone |
@@ -119,7 +119,10 @@ and compare. Becomes existential the moment a second implementation of the
 spec exists, and it is the enforcement mechanism for the §0 number rule
 proposed in ADR 0002. Deliverable shape: a language-neutral fixture file
 (object JSON → expected id) that lives with the spec, not with this repo's
-tests.
+tests. RF-17 makes the input-domain half immediate: carry exact positives at
+`±(2^53-1)`, negatives at `±2^53`, the reproduced adjacent-u64 collision,
+floats at every nesting depth, and raw duplicate-property inputs. Rejection is
+part of the vector result; canonical bytes alone are not conformance.
 
 **G3. Crash consistency.** Preparation failure, injected interruption, hard
 process exit during an in-place filesystem apply, reopen, and idempotent replay
@@ -127,7 +130,11 @@ are covered; session-boundary SIGKILL recovery is covered too. Nothing yet kills
 a process *during* a multi-root promotion/revert commit, between state mutation
 and event append, or between event append and expected-root updates. Add that
 full subprocess crash matrix when the atomic commit protocol is designed. Same
-family: WAL/-shm sidecars under a crashed reader.
+family: WAL/-shm sidecars under a crashed reader. RF-18/RF-20/RF-22 add the
+near-term matrix: key-file publication and missing-key reopen, every boundary
+of payload put/shred, signed shred-event sequencing, and corrupt/missing CAS
+objects during prepare. Every failure asserts that no replacement identity and
+no partial protected state mutation occurred.
 
 **G4. Concurrency.** Generated model histories cover logical interleavings. A
 programmable downstream barrier now forces both in-flight timing directions:
@@ -182,6 +189,10 @@ pre-merge review then added the span-placement clause to
 span), whose mutants
 `a22_grant_on_session_span_activates_nothing` kills on the same
 observed-mode surface; the current lane catches all 38 viable mutants.
+RF-16 found a boundary outside those predicates: their inputs are
+denormalized `EventRow` fields selected before signed-raw agreement is proved.
+W-11 extends the stable mutation/test surface through the verified-event
+constructor so predicate coverage cannot certify an unverified caller again.
 
 **G6. Soak / growth.** Scheduled CI runs release mode with deeper generated
 case counts. A true thousands-of-events/files run remains: ledger size, WAL
@@ -193,15 +204,17 @@ bounded child exit, captured stderr, and child status in failures. They can now
 substitute a barrier-controlled downstream instead of relying only on the
 in-tree vault server. The remaining adversarial MCP corpus is malformed large
 frames, duplicate/out-of-order ids, unsolicited notifications, and downstream
-death at each protocol phase.
+death at each protocol phase. RF-27 adds a recovery-specific case: unsigned
+promotion selectors must not make `asf recover` skip a stranded manifest.
 
-**G8. Revocation lifecycle (SI-24 → A22, spec §5.4) — CLOSED by W-8.** The
+**G8. Revocation lifecycle (SI-24 → A22, spec §5.4) — RF-16 remediation
+implemented in W-11; independent re-review approved.** The
 event-derived closure view is implemented as the `a22_*` predicate family
 in broker.rs (`a22_revoke_offsets`/`a22_grant_bindings`/`a22_ancestry`/
 `a22_state_at` — the spec's `capability_state_at`, decomposed): a
 structural precondition in front of caveat evaluation, never a caveat
 dimension, shared verbatim by decision time (at the current head) and gate
-replay (at each effect's own offset). The A22 two-sided contract (22
+replay (at each effect's own offset). The A22 two-sided contract (26
 tests) covers the full matrix below; the scheduled `a22_*` mutation lane
 guards the predicates. Matrix, all landed:
 call before revoke succeeds; direct and ancestor revoke deny later calls —
@@ -209,7 +222,22 @@ including across manifest boundaries (an M2 sub-agent child dies with its
 ancestor's revoke; revokes resolve by capability id, never filtered by the
 evaluating manifest); child-only revoke preserves parent/siblings; revoke is
 non-retroactive and parked promotions of pre-revoke work remain approvable;
-unsigned rows move nothing (the view is event-derived) and a revoke naming
+wholly unsigned rows move nothing. RF-16 disproved the broader claim that
+the view was fully event-derived: signed rows could be concealed by changing
+their unsigned `kind`/`span` indexes before the view. The W-11
+`VerifiedEvent` boundary now verifies raw and proves agreement for all seven
+materialized selectors before filtering; the combined concealment negative and
+per-field protected-effect matrix are green. The first independent review then
+found four missing enforcement edges: unsigned-offset branch-tip selection,
+split events/head decision reads, grant-parent mismatch, and registration
+placement. W-11 uses signed `seq` for every within-span consumer, derives the
+event set plus head from one SQLite statement snapshot, binds grant parent
+exactly, and requires registration on the fabric-lifetime span
+with `manifest:null`. Mutation results: constructor 7 caught + 1 unviable;
+W-11 consumers 15 caught + 2 unviable; A22 predicates 29/29 caught, zero
+survivors. SI-25 still owns unsigned cross-span `offset`,
+expected-head/completeness, deletion/signature invalidation, rollback, and
+freshness. A revoke naming
 an id no capability bears affects no other capability, while a
 verified-but-anomalous revoke (wrong `manifest` field, unexpected span,
 unpaired C1 provenance) still closes its target, loudly — each anomaly
@@ -226,7 +254,8 @@ non-escalatable; a `revoke` event is accepted and an `expiry` event is no
 longer emittable (the kind left §6 with A22); `asf revoke` exits non-zero
 when the revocation did not take effect (the kill switch's scripting
 contract) and zero on idempotent re-kills;
-and dispatch vs revoke has one signed total order. The external-effect form
+and dispatch vs revoke has one substrate order whose global authentication is
+still SI-25/RF-13. The external-effect form
 waits for the durable dispatch protocol rather than testing an in-memory
 ticket as if it were a receipt. The W-9 corpus verdict-invariance
 regression belongs to this matrix too: replaying the pinned corpus
@@ -277,6 +306,31 @@ form lives in AGENTS.md):
   the written predicates, not the design; a PR summary states what each
   green lane measures and claims nothing wider.
 
+W-11's first independent-context application validated this discipline: the
+review found unsigned-offset branch-tip selection, an events/head TOCTOU,
+missing signed grant-parent and registration-placement predicates, and a
+constructor-only negative misclassified as protected-effect evidence. All
+ordinary and targeted lanes were green before that review. The corrections
+therefore extend the conformance map, consumer-level contracts, and mutation
+surface rather than treating the findings as isolated lines.
+
+**G10. Authenticated-storage adversary matrix (cryptographic audit,
+2026-07-12).** Treat SQLite/CAS as attacker-controlled materialized storage
+while the signing key remains unavailable. For every signed event, mutate each
+denormalized column independently and in combinations (`id`, `span`, `seq`,
+`prev`, `manifest`, `at`, `kind`, `offset`); drop a tail, a whole span, and the
+latest authority event; restore an older database image; inject malformed raw
+JSON. W-11 now rejects disagreement in the seven signed-materialized
+selectors. Unsigned offset reordering within one span is neutralized by using
+signed `seq`; cross-span `offset`, deletion/completeness, rollback, and
+freshness remain explicitly classified under SI-25's authenticated global
+head. Repeat the
+typed-object half for manifests, tools,
+capabilities, and channels, plus corrupt/missing CAS objects. Every negative
+case asserts the protected call, promotion, revert, or live-store mutation did
+not occur. The matrix is a caller-boundary complement to G5 mutation testing,
+not a substitute for it.
+
 ## Automation lanes
 
 | Lane | Purpose |
@@ -284,7 +338,7 @@ form lives in AGENTS.md):
 | Local required / pre-push | strict Clippy; two-sided contract validation; every workspace target; deterministic/exhaustive and bounded shrinkable properties; both executable acceptance demos |
 | Local full | required lane plus the networked RustSec advisory audit |
 | Weekly/manual deep | release-mode suite with 4,096 authority cases and 512 real-store model histories |
-| Weekly/manual mutation | scoped authority-evaluator, promotion-policy, and A21/M7 authority-binding mutation runs |
+| Weekly/manual mutation | scoped evaluator, promotion, A21/M7, A22, and verified-event boundary mutation runs |
 | Future fault/soak | full process crash matrix, adversarial MCP corpus, thousands-of-events/storage growth |
 | Dogfooding | denial false-positive judgment, legibility, approval latency, bypass behavior, and real-corpus tripwires |
 

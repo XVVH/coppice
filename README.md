@@ -103,6 +103,8 @@ conversation land there before build); the shortcuts our current
 debug/dogfooding posture relies on — and the graduation gate each posture
 transition must clear — in
 [docs/posture-assumptions.md](docs/posture-assumptions.md) (`P-n`).
+The source evidence and primitive-by-primitive verdict from the latest pass are
+in [docs/crypto-safety-audit-2026-07-12.md](docs/crypto-safety-audit-2026-07-12.md).
 Dogfooding setup and
 methodology (corpus, wiring, metrics, graduation criteria) live in
 [docs/dogfooding.md](docs/dogfooding.md).

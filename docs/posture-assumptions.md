@@ -85,6 +85,10 @@ read surface into the exfiltration perimeter.
   protocol** (roadmap parked); RF-3 (accepted residual).
 - **P11** `external_reach` has no mock router (external ⇒ needs `live`). →
   same egress gate.
+- **P27** Broker-injected credentials cross into the downstream tool and an
+  arbitrary downstream result crosses back to the agent unchanged. A buggy or
+  adversarial adapter can echo/encode the secret. → RF-23; W-18. No real
+  credential crosses a third-party or live-egress adapter before containment.
 - Companion: SI-23's contextual-strength and the taint wall (ADR 0005) also
   first bite here if egress and actuation land together.
 
@@ -114,6 +118,9 @@ default cannot save this class retroactively.
   W-4 containment is the eventual answer (a sandbox bounds a lying tool);
   domain-taxonomy governance (AGENTS.md open problem) bounds trust-farming.
   **No generic registration path may ship before both.**
+- **P27** Credential injection trusts the downstream adapter not to reflect or
+  transform a secret into its response. Current first-party vault tools carry
+  no live credential. → RF-23; the same no-registration gate.
 
 ### G-ADVERSARIAL — before trusting a non-cooperative agent (or dropping the deny-rule convention)  *(relaxes COOP)*
 - **P7** Agent and operator are the same uid, no sandbox; session branches
@@ -129,6 +136,10 @@ default cannot save this class retroactively.
   attestation. → audit High (brokered-recorded-as-observed); W-4(a).
 
 ### G-RATCHET — before ledger events compile into standing authority (W-3)  *(no invariant relaxed — the substrate becomes policy-bearing)*
+- **P15 / RF-16** Standing authority may not derive from a substrate whose
+  authority view can be changed through unsigned index columns or whose head
+  can be rolled back. W-11 closes verified-row use; SI-25/W-15 closes global
+  completeness/freshness before W-3 proceeds beyond disposable experiments.
 - **P26** Corpus-ingest homes (`asf corpus ingest`) sign placeholder
   principals and a placeholder behavior bundle into a REAL substrate —
   P8's class, second site. Nothing mechanical distinguishes a corpus
@@ -207,7 +218,7 @@ in scope, or when storage leaves that filesystem boundary.
 
 ## The shortcut ledger (backing index)
 
-All 26 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
+All 27 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 1SESS/1HUMAN/1TEN/DEBUG` = the invariant(s) that make each safe now.
 
 ### Tier 1 — items this sweep filed or newly gated
@@ -222,6 +233,7 @@ All 26 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P6 | Self-declared tool metadata unverified; no gate on third-party registration | `tools.rs:84-98`, `proxy.rs:48-69` | COOP (first-party only) | **new G-3P-TOOL gate**; W-4 + domain-taxonomy |
 | P25 | ~~F1 calls capabilities revocable with expiry-only enforcement~~ **CLOSED by W-8 (PR #33)**: signed `revoke` (§5.4), `a22_*` event-derived liveness at decision + gate, `asf revoke` kill switch | `broker.rs` (`a22_*`, `revoke_capability`), `proxy.rs` revoke surface | — (implemented) | SI-24 → A22 (v0.7) → W-8; residuals: P22 (in-flight dispatch), P15/RF-13 (rollback erasure), P21 (partitions) |
 | P26 | Corpus-ingest homes: placeholder identities/behavior signed into a real substrate; evidence-quarantined by convention only (second P8 site) | `asf-cli corpus/ingest.rs` (`placeholder_key`, behavior literal) | COOP SU | W-3 mechanical exclusion (G-RATCHET); `agent-trace-corpora-2026-07-11.md` boundaries |
+| P27 | Injected credentials enter a downstream adapter whose response reaches the agent unchanged | `broker.rs:560-576`, `proxy.rs:501-571` | COOP LOCAL, first-party/no credential | RF-23; G-EGRESS/G-3P-TOOL; W-18 |
 
 ### Tier 2 — items already tracked (this ledger just indexes and gates them)
 
@@ -236,15 +248,15 @@ All 26 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P12 | Flat `auth_rank` total order (`local_session==passkey`) | `capability.rs:47-58` | NOACT | SI-23 (open) |
 | P13 | Logical-only crypto-shred; old ciphertext + wrapped-DEK pairs may survive | `payload.rs:4-5,172-197`, `keys.rs:131-141` | DEBUG 1TEN | roadmap parked; audit; `AGENTS.md` |
 | P14 | Plaintext-hash confirmation oracle; cross-tenant only if future storage deduplicates globally | `payload.rs:71-100` | 1TEN | RF-7 (accepted; global-dedup topology flagged here) |
-| P15 | No durable trace head; unsigned `offset` backs ordering claims | `trace.rs:236,266`; `broker.rs` | DEBUG 1TEN | RF-13 (open); audit High |
+| P15 | No durable trace head; unsigned `offset` and denormalized event indexes back ordering/authority claims | `trace.rs:193-295`; `broker.rs` | DEBUG 1TEN | RF-13/RF-16; SI-25; W-11/W-15 |
 | P16 | Promotion/revert not crash-atomic across roots | `snapshot.rs`, `kernel.rs`, `broker.rs` | DEBUG | audit High; roadmap parked; scalability |
 | P18 | Drift attributed to the one human by default | `kernel.rs:448-453` | 1HUMAN | multi-actor (parked); SI-20; `dogfooding.md` |
-| P19 | AEAD binds no associated data → swappable row linkage | `keys.rs:252` | DEBUG 1TEN | audit High (format-version decision) |
+| P19 | AEAD binds no associated data and stored algorithm/key-link metadata is not enforced | `keys.rs:210-269`, `payload.rs:122-156` | DEBUG 1TEN | RF-22; SI-28; W-16 |
 | P20 | Home-global `current_manifest`/`current_span`; one broker mutex | `kernel.rs`; scalability | 1SESS | SessionContext (parked) |
 | P21 | Host-local `flock` gate; no cross-host fencing | `kernel.rs:383-408` | 1TEN | HA topology (parked; scalability) |
 | P22 | In-flight calls in memory; decision-time budget consumption | `broker.rs:355-364` | LOCAL | RF-3 (accepted); durable-effect protocol (parked) |
 | P23 | `id` type-prefix not signature-covered | `canon.rs:103` | (single impl) | RF-6 (open) |
-| P24 | JCS numeric constraint unenforced | `canon.rs:33,70` | (single impl) | audit Medium; W-6 |
+| P24 | JCS numeric constraint unenforced; distinct exact integers can share signed bytes | `canon.rs:33,70` | (single impl) | RF-17 High at format boundary; W-12; G2 |
 
 ---
 

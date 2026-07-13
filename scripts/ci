@@ -172,6 +172,18 @@ run_mutation() {
         -j 4 \
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
+
+    heading "W-19 operator-ledger integrity mutation tests"
+    # Authority deliberately ignores wholly unsigned rows; diagnostics must do
+    # the opposite and surface every anomaly before accounting or mutation.
+    # These stable targets cover tolerant row ingestion, signature/selector
+    # classification, kind/body/chain checks, and the clean-view gate.
+    cargo mutants \
+        -f crates/asf-kernel/src/trace.rs \
+        -F '(w19_(stored_event_row|event_is_known_kind|event_has_object_body|signed_sequence_follows_storage_order|ledger_event_view_from_rows|require_clean)|ledger_event_view)' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
 }
 
 usage() {

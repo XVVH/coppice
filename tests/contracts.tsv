@@ -55,6 +55,12 @@ JCS-DOMAIN|supporting|canon::tests::jcs_language_neutral_vectors_match_reference
 LEDGER-UX|positive|ledger_shows_timestamps_and_full_event_detail
 LEDGER-UX|negative|ledger_rejects_uninitialized_home_and_unknown_event_without_creating_state
 
+# Operator accounting consumes only a clean verified retained-row view;
+# decodable anomalies stay inspectable, fail loudly, and create no drift/CAS/DB effect.
+LEDGER-INTEGRITY|positive|ledger_shows_timestamps_and_full_event_detail
+LEDGER-INTEGRITY|negative|ledger_integrity_failure_is_loud_and_preserves_home
+LEDGER-INTEGRITY|supporting|trace::tests::w19_ledger_view_classifies_verified_and_anomalous_rows
+
 # Storage engine integrity: refuse WAL-reset-affected SQLite before creating
 # or opening protected fabric state (RF-21/W-10).
 SQLITE-ENGINE|positive|kernel::tests::patched_sqlite_runtime_opens_fabric

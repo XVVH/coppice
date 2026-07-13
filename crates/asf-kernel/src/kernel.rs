@@ -993,16 +993,28 @@ impl Fabric {
         Ok(out)
     }
 
+    /// Read-only operator diagnostic view. Unlike the authority view, this
+    /// reports every unverified retained row as an integrity finding instead
+    /// of omitting it. SI-25 still bounds cross-span offset/head claims.
+    pub fn ledger_event_view(&self) -> Result<trace::LedgerEventView, KernelError> {
+        Ok(trace::ledger_event_view(&self.conn, &self.fabric_vk())?)
+    }
+
     /// The diff-attribution ledger: replay every event and require that
     /// each store's root only ever changes with a recorded cause. Returns
     /// one line per event plus the final accounting; errors if any root
     /// transition lacks an explaining event (that would mean the substrate
     /// itself failed, not just out-of-band drift — drift IS a cause).
     pub fn explain(&self) -> Result<Explanation, KernelError> {
-        let events = trace::all_events(&self.conn)?;
+        let view = self.ledger_event_view()?;
+        // RF-28: never let a partial diagnostic view reach root accounting.
+        // In particular, the authority view's deliberate unsigned-row omission
+        // is not an acceptable posture for an operator integrity surface.
+        view.w19_require_clean()?;
+        let events = &view.events;
         let mut lines = Vec::new();
         let mut roots: std::collections::BTreeMap<String, String> = Default::default();
-        for ev in &events {
+        for ev in events {
             let body = &ev.raw["body"];
             let line = match ev.kind.as_str() {
                 "register" => format!(

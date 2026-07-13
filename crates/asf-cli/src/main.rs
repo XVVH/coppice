@@ -19,6 +19,7 @@ mod proxy;
 mod vault_server;
 
 use anyhow::{bail, Context, Result};
+use asf_kernel::canon;
 use asf_kernel::kernel::Fabric;
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
 use asf_kernel::trace;
@@ -121,16 +122,29 @@ fn main() -> Result<()> {
         Some("ledger") => {
             let home = flag(&args, "--home").context("ledger needs --home <dir>")?;
             let mut fabric = Fabric::open_existing(Path::new(&home).join("fabric"))?;
+            // RF-28: diagnostic integrity is checked before `check_drift` can
+            // append attribution or `explain` can capture anything into CAS.
+            // The view still carries exact raw text for decodable records so an
+            // anomalous target remains inspectable while the command exits non-zero.
+            let ledger_view = fabric.ledger_event_view()?;
             if args.iter().any(|arg| arg == "--event") {
                 let offset = flag(&args, "--event")
                     .context("ledger --event needs an integer substrate offset")?
                     .parse::<i64>()
                     .context("ledger --event needs an integer substrate offset")?;
-                let event = trace::event_at_offset(&fabric.conn, offset)?
+                let record = ledger_view
+                    .records
+                    .iter()
+                    .find(|record| record.offset == offset)
                     .with_context(|| format!("ledger event at offset {offset} not found"))?;
-                println!("{}", serde_json::to_string_pretty(&event.raw)?);
+                match canon::parse_fabric_json(&record.raw) {
+                    Ok(event) => println!("{}", serde_json::to_string_pretty(&event)?),
+                    Err(_) => println!("{}", serde_json::to_string(&record.raw)?),
+                }
+                ledger_view.w19_require_clean()?;
                 return Ok(());
             }
+            ledger_view.w19_require_clean()?;
             // Attribute any out-of-band edits first so the accounting below
             // is against a current picture, not a stale one.
             for d in fabric.check_drift()? {

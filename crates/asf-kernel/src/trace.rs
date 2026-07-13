@@ -38,6 +38,8 @@ pub enum TraceError {
         "event {id} index column `{field}` disagrees with the signed object (RF-16; fail closed)"
     )]
     EventIndexMismatch { id: String, field: &'static str },
+    #[error("ledger integrity failure: {0}")]
+    LedgerIntegrity(String),
     #[error("object {0} not found")]
     ObjectNotFound(String),
 }
@@ -241,6 +243,85 @@ pub struct VerifiedEventSnapshot {
     pub head: i64,
 }
 
+/// One retained-row anomaly found by the operator ledger's diagnostic view.
+///
+/// `offset` and `span` are locations for forensic inspection, not authenticated
+/// claims. SI-25 remains responsible for authenticating global offset order,
+/// completeness, rollback, and freshness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceIntegrityFinding {
+    pub offset: Option<i64>,
+    pub span: Option<String>,
+    pub detail: String,
+}
+
+impl std::fmt::Display for TraceIntegrityFinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.offset, self.span.as_deref()) {
+            (Some(offset), Some(span)) => {
+                write!(formatter, "offset {offset}, span location {span}: {}", self.detail)
+            }
+            (Some(offset), None) => write!(formatter, "offset {offset}: {}", self.detail),
+            (None, Some(span)) => write!(formatter, "span {span}: {}", self.detail),
+            (None, None) => formatter.write_str(&self.detail),
+        }
+    }
+}
+
+/// Operator-facing retained-row view.
+///
+/// Unlike [`verified_events`], which deliberately omits wholly unsigned or
+/// foreign-signed rows because they carry no authority, this diagnostic view
+/// preserves every decodable anomaly as a finding; an incompatible SQLite
+/// storage type rejects construction before accounting. `events` contains
+/// individually signature- and selector-verified records for forensic display;
+/// callers MUST call [`LedgerEventView::w19_require_clean`] before using them
+/// for accounting.
+#[derive(Debug, Clone)]
+pub struct LedgerEventView {
+    pub events: Vec<VerifiedEvent>,
+    pub findings: Vec<TraceIntegrityFinding>,
+    pub records: Vec<LedgerStoredRecord>,
+}
+
+/// Exact raw text observed for one retained row in the same SQLite statement
+/// snapshot as [`LedgerEventView::events`] and [`LedgerEventView::findings`].
+#[derive(Debug, Clone)]
+pub struct LedgerStoredRecord {
+    pub offset: i64,
+    pub raw: String,
+}
+
+impl LedgerEventView {
+    /// Stable W-19 enforcement predicate: no diagnostic accounting or
+    /// drift-attribution write may proceed while any retained-row doubt exists.
+    pub fn w19_require_clean(&self) -> Result<(), TraceError> {
+        if self.findings.is_empty() {
+            return Ok(());
+        }
+        Err(TraceError::LedgerIntegrity(
+            self.findings
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; "),
+        ))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct W19StoredEventRow {
+    offset: i64,
+    id: String,
+    span: String,
+    seq: i64,
+    prev: Option<String>,
+    manifest: Option<String>,
+    at: String,
+    kind: String,
+    raw: String,
+}
+
 fn signed_string(raw: &Value, event_id: &str, field: &'static str) -> Result<String, TraceError> {
     raw.get(field)
         .and_then(Value::as_str)
@@ -324,6 +405,20 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
     })
 }
 
+fn w19_stored_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<W19StoredEventRow> {
+    Ok(W19StoredEventRow {
+        offset: row.get(0)?,
+        id: row.get(1)?,
+        span: row.get(2)?,
+        seq: row.get(3)?,
+        prev: row.get(4)?,
+        manifest: row.get(5)?,
+        at: row.get(6)?,
+        kind: row.get(7)?,
+        raw: row.get(8)?,
+    })
+}
+
 const EVENT_COLS: &str = "offset, id, span, seq, prev, manifest, at, kind, raw";
 
 pub fn events_in_span(conn: &Connection, span: &str) -> Result<Vec<EventRow>, TraceError> {
@@ -375,6 +470,144 @@ fn verify_verified_chain(span: &str, events: &[&VerifiedEvent]) -> Result<(), Tr
         expected_prev = Some(&event.id);
     }
     Ok(())
+}
+
+fn w19_event_is_known_kind(event: &VerifiedEvent) -> bool {
+    EVENT_KINDS.contains(&event.kind.as_str())
+}
+
+fn w19_event_has_object_body(event: &VerifiedEvent) -> bool {
+    event.raw.get("body").is_some_and(Value::is_object)
+}
+
+fn w19_signed_sequence_follows_storage_order(events: &[&VerifiedEvent]) -> bool {
+    events
+        .windows(2)
+        .all(|pair| pair[0].seq.checked_add(1) == Some(pair[1].seq))
+}
+
+fn w19_ledger_event_view_from_rows(
+    rows: Vec<W19StoredEventRow>,
+    vk: &VerifyingKey,
+) -> LedgerEventView {
+    let records = rows
+        .iter()
+        .map(|row| LedgerStoredRecord {
+            offset: row.offset,
+            raw: row.raw.clone(),
+        })
+        .collect();
+    let mut events = Vec::new();
+    let mut findings = Vec::new();
+
+    for stored in rows {
+        let raw = match canon::parse_fabric_json(&stored.raw) {
+            Ok(raw) => raw,
+            Err(error) => {
+                findings.push(TraceIntegrityFinding {
+                    offset: Some(stored.offset),
+                    span: Some(stored.span),
+                    detail: format!("raw fabric JSON is malformed: {error}"),
+                });
+                continue;
+            }
+        };
+        let row = EventRow {
+            offset: stored.offset,
+            id: stored.id,
+            span: stored.span,
+            seq: stored.seq,
+            prev: stored.prev,
+            manifest: stored.manifest,
+            at: stored.at,
+            kind: stored.kind,
+            raw,
+        };
+        let materialized_span = row.span.clone();
+        match verified_event_from_row(&row, vk) {
+            Ok(event) => {
+                if !w19_event_is_known_kind(&event) {
+                    findings.push(TraceIntegrityFinding {
+                        offset: Some(event.offset),
+                        span: Some(event.span.clone()),
+                        detail: format!("signed event has unknown kind `{}`", event.kind),
+                    });
+                }
+                if !w19_event_has_object_body(&event) {
+                    findings.push(TraceIntegrityFinding {
+                        offset: Some(event.offset),
+                        span: Some(event.span.clone()),
+                        detail: "signed event body is not an object".into(),
+                    });
+                }
+                events.push(event);
+            }
+            Err(error) => findings.push(TraceIntegrityFinding {
+                offset: Some(row.offset),
+                span: Some(materialized_span),
+                detail: format!("event verification failed: {error}"),
+            }),
+        }
+    }
+
+    let mut spans: std::collections::BTreeMap<String, Vec<&VerifiedEvent>> =
+        std::collections::BTreeMap::new();
+    for event in &events {
+        spans.entry(event.span.clone()).or_default().push(event);
+    }
+    for (span, span_events) in spans {
+        if !w19_signed_sequence_follows_storage_order(&span_events) {
+            let inversion = span_events
+                .windows(2)
+                .find(|pair| pair[0].seq.checked_add(1) != Some(pair[1].seq))
+                .expect("sequence-order predicate found an inversion");
+            findings.push(TraceIntegrityFinding {
+                offset: Some(inversion[1].offset),
+                span: Some(span.clone()),
+                detail: format!(
+                    "unsigned offset order contradicts signed per-span sequence: seq {} precedes seq {}",
+                    inversion[0].seq, inversion[1].seq
+                ),
+            });
+        }
+        if let Err(error) = verify_verified_chain(&span, &span_events) {
+            let offset = match &error {
+                TraceError::ChainBroken { seq, .. } => span_events
+                    .iter()
+                    .find(|event| event.seq == *seq)
+                    .map(|event| event.offset),
+                _ => None,
+            }
+            .or_else(|| span_events.first().map(|event| event.offset));
+            findings.push(TraceIntegrityFinding {
+                offset,
+                span: Some(span),
+                detail: format!("per-span chain verification failed: {error}"),
+            });
+        }
+    }
+
+    LedgerEventView {
+        events,
+        findings,
+        records,
+    }
+}
+
+/// Build the operator ledger's integrity-aware retained-row view in one SQLite
+/// statement snapshot. Every decodable row is either represented by a verified
+/// event or by an explicit finding; storage-type errors reject the whole view,
+/// so nothing unverified can be silently used for accounting.
+pub fn ledger_event_view(
+    conn: &Connection,
+    vk: &VerifyingKey,
+) -> Result<LedgerEventView, TraceError> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT {EVENT_COLS} FROM events ORDER BY offset"
+    ))?;
+    let rows = statement.query_map([], w19_stored_event_row)?;
+    let rows = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(w19_ledger_event_view_from_rows(rows, vk))
 }
 
 /// Build the signed event materialized view used by authority consumers.
@@ -663,6 +896,202 @@ mod tests {
                 other => panic!("{field} mismatch must fail at verified-event boundary: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn w19_ledger_view_classifies_verified_and_anomalous_rows() {
+        fn assert_finding(conn: &Connection, sk: &SigningKey, needle: &str) {
+            let view = ledger_event_view(conn, &sk.verifying_key()).unwrap();
+            assert!(
+                view.findings.iter().any(|finding| finding.detail.contains(needle)),
+                "missing `{needle}` finding: {:?}",
+                view.findings
+            );
+            assert!(view.w19_require_clean().is_err());
+        }
+
+        fn insert_signed_row(
+            conn: &Connection,
+            sk: &SigningKey,
+            kind: &str,
+            body: Value,
+        ) {
+            let span = new_span();
+            let mut object = Map::new();
+            object.insert("span".into(), Value::String(span.clone()));
+            object.insert("seq".into(), Value::from(0));
+            object.insert("prev".into(), Value::Null);
+            object.insert("manifest".into(), Value::Null);
+            object.insert("at".into(), Value::String("t".into()));
+            object.insert("kind".into(), Value::String(kind.into()));
+            object.insert("body".into(), body);
+            let sealed = canon::seal("evt", object, sk).unwrap();
+            let id = sealed["id"].as_str().unwrap().to_string();
+            let raw = serde_json::to_string(&Value::Object(sealed)).unwrap();
+            conn.execute(
+                "INSERT INTO events (id, span, seq, prev, manifest, at, kind, raw)
+                 VALUES (?1, ?2, 0, NULL, NULL, 't', ?3, ?4)",
+                params![id, span, kind, raw],
+            )
+            .unwrap();
+        }
+
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":1}),
+            "t",
+        )
+        .unwrap();
+        let clean = ledger_event_view(&conn, &sk.verifying_key()).unwrap();
+        assert_eq!(clean.events.len(), 1);
+        assert_eq!(clean.records.len(), 1);
+        assert!(clean.findings.is_empty());
+        clean.w19_require_clean().unwrap();
+
+        conn.execute_batch(
+            "DROP TRIGGER events_append_only_u;
+             UPDATE events SET raw = replace(raw, '\"n\":1', '\"n\":9');",
+        )
+        .unwrap();
+        assert_finding(&conn, &sk, "event verification failed");
+
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({}),
+            "t",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER events_append_only_u;
+             UPDATE events SET kind = 'grant';",
+        )
+        .unwrap();
+        assert_finding(&conn, &sk, "index column `kind`");
+
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({}),
+            "t",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER events_append_only_u;
+             UPDATE events SET raw = '{';",
+        )
+        .unwrap();
+        assert_finding(&conn, &sk, "raw fabric JSON is malformed");
+
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":1}),
+            "t1",
+        )
+        .unwrap();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":2}),
+            "t2",
+        )
+        .unwrap();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":3}),
+            "t3",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER events_append_only_d;
+             DELETE FROM events WHERE seq = 1;",
+        )
+        .unwrap();
+        let view = ledger_event_view(&conn, &sk.verifying_key()).unwrap();
+        let chain_finding = view
+            .findings
+            .iter()
+            .find(|finding| {
+                finding
+                    .detail
+                    .contains("per-span chain verification failed")
+            })
+            .expect("middle-event deletion must produce a chain finding");
+        assert_eq!(chain_finding.offset, Some(3));
+        assert!(chain_finding.detail.contains("seq 2"));
+        assert!(view.w19_require_clean().is_err());
+
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":1}),
+            "t1",
+        )
+        .unwrap();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":2}),
+            "t2",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "DROP TRIGGER events_append_only_u;
+             UPDATE events SET offset = -1 WHERE seq = 0;
+             UPDATE events SET offset = 1 WHERE seq = 1;
+             UPDATE events SET offset = 2 WHERE offset = -1;",
+        )
+        .unwrap();
+        assert_finding(
+            &conn,
+            &sk,
+            "unsigned offset order contradicts signed per-span sequence",
+        );
+
+        let (conn, sk) = setup();
+        insert_signed_row(&conn, &sk, "made_up", serde_json::json!({}));
+        assert_finding(&conn, &sk, "signed event has unknown kind");
+
+        let (conn, sk) = setup();
+        insert_signed_row(&conn, &sk, "snapshot", Value::String("not-an-object".into()));
+        assert_finding(&conn, &sk, "signed event body is not an object");
     }
 
     #[test]

@@ -7,7 +7,7 @@ caveats down). Read `docs/agent-state-fabric-brief.md` (why/what, v0.2) and
 `docs/asf-schema-spec.md` (the constitution, v0.7) before writing any code.
 The spec wins over this file wherever they disagree. Spec ambiguities found
 while implementing go to `docs/spec-issues.md` (never silently interpret);
-SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6); SI-22 is interpreted (gate replay clock, W-2); SI-24 is resolved (A22/§5.4 in v0.7 — capability early closure; implemented by W-8 under its gated matrix: A22 two-sided contract, targeted `a22_*` mutation lane, W-9 verdict-invariance reproduced bit-for-bit); SI-23 (actuation vs approval surfaces) is OPEN — no actuation-scoped tool may register before SI-23 resolves. SI-25…SI-30 are OPEN from the 2026-07-12 cryptographic mechanism audit (global trace order/head, signed type/domain, key lifecycle, AEAD envelope, post-shred generations, redaction commitments). SI-31…SI-34 are OPEN from the 2026-07-13 PR #43 (W-14) review-cycle analysis (owned-state transition/recovery journal; store publication/filesystem attacker model; event-derived consumable authority; approval candidate binding) — W-20 batches their ratification, and PR #43's required independent re-review uses SI-31/SI-33/SI-34 as its oracle. New issues start at SI-35.
+SI-1…SI-21 are resolved (SI-20 → A20/M8 in v0.5; SI-21 → A21/M7 in v0.6); SI-22 is interpreted (gate replay clock, W-2); SI-24 is resolved (A22/§5.4 in v0.7 — capability early closure; implemented by W-8 under its gated matrix: A22 two-sided contract, targeted `a22_*` mutation lane, W-9 verdict-invariance reproduced bit-for-bit); SI-23 (actuation vs approval surfaces) is OPEN — no actuation-scoped tool may register before SI-23 resolves. SI-25…SI-30 are OPEN from the 2026-07-12 cryptographic mechanism audit (global trace order/head, signed type/domain, key lifecycle, AEAD envelope, post-shred generations, redaction commitments). SI-31…SI-34 are OPEN from the 2026-07-13 PR #43 (W-14) review-cycle analysis (owned-state transition/recovery journal; store publication/filesystem attacker model; event-derived consumable authority; approval candidate binding) — W-20 batches their ratification, and PR #43's required independent re-review uses SI-31/SI-33/SI-34 as its oracle. SI-35 (workboard domain labels vs domain-taxonomy governance, recovered from codex/workboard-dogfood at the W-21 revival decision) is OPEN. New issues start at SI-36.
 
 ## Built — Stages 1–3 (kernel, spine, promotion gate). Current queue: docs/roadmap.md
 
@@ -102,6 +102,23 @@ written clause they enforce (spec section, ratified protocol/ADR, or
 posture row); a finding with no citable clause is a filing (SI/RF/G/P),
 not a blocker. Un-parking a posture row or a parked roadmap item is an
 operator gate decision, never a review outcome.
+
+## Session-end git contract
+
+Work exists once it is on `origin`, not before. Push your branch before
+the session ends — an unpushed branch in a private worktree is invisible
+to every other session and to fresh clones (the roadmap's file-first
+rule, applied to git; founding cases: ADR 0006 sat unpushed on
+`agent/si25-authenticated-head-design` while later sessions cited it as
+if on record, and the workboard profile sat unmerged for three days).
+If the sandbox blocks the push, escalate that push outside the sandbox
+before ending — never end a session with committed-but-unpushed work.
+After a PR merges, its head branch is deleted (the repo auto-deletes
+remote heads; delete the local copy too). Cite PR numbers, not commit
+SHAs, in docs: squash-merge rewrites SHAs, so branch-local ids resolve
+only while their branch or an archive tag survives (the RF-4/5/8
+"fixed in 5350010" citations resolve via the `archive/testing-suite`
+tag).
 
 ## Context
 

@@ -70,6 +70,23 @@ oracle); W-1 dogfooding continues unaffected. *Provenance: the
 2026-07-13 spec-cohesion analysis of the PR #43 review cycle; sequences
 the existing ratify-first clauses of W-15/W-16/W-17 as one campaign.*
 
+**W-21 — workboard dogfood profile (revival).** Owner: agent; operator
+ratifies the registration shape. Recovered from `codex/workboard-dogfood`
+(2026-07-10, unmerged: `workboard_server.rs` first-party MCP profile,
+proxy/CLI wiring, `docs/workboard-dogfooding.md`, rubric extensions) —
+operator decision 2026-07-13: a second live dogfooding surface to widen
+W-1's approval/denial corpus. Revival work: rebase over W-8…W-14 (the
+branch predates the authority boundaries its proxy wiring touches);
+re-answer the two-surface/native-path questions for the new store;
+declare §4 enforcement bindings (store/class/path_args) under current
+M1; SI-35 (refiled from the branch's draft SI-22) governs its
+provisional `work.*` domain labels — resolve or explicitly bless them
+before workboard approvals feed W-3 clustering. Trigger: after PR #43
+merges (rebase target stability); runs parallel to W-20's design
+sessions — dogfooding surface, not an authority protocol. Feeds W-1 and
+W-3's founding examples. *Provenance: 2026-07-13 branch-inventory sweep
++ operator decision same day.*
+
 **W-15 — authenticated global trace head (design then implementation).**
 Ratify SI-25, then bind global order, completeness, home/epoch, export order,
 and rollback freshness with an explicit recovery story. Closes RF-13/P15's

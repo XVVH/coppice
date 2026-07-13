@@ -13,8 +13,11 @@
 > the PR #43 (W-14) review cycle filed **SI-31…SI-34** — protocol
 > questions that cycle answered in code without ratification, re-filed
 > at the spec layer (W-20 batches their ratification; PR #43's required
-> independent re-review uses SI-31/SI-33/SI-34 as its oracle); new
-> issues start at **SI-35**.
+> independent re-review uses SI-31/SI-33/SI-34 as its oracle). **SI-35**
+> is the workboard domain-label question, recovered from
+> `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
+> that number) at its W-21 revival decision; new issues start at
+> **SI-36**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -26,6 +29,38 @@ interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
 
 ---
+
+## SI-35 — workboard domain labels precede domain-taxonomy governance (§4, brief §10.2) — open
+
+*Recovered 2026-07-13 from `codex/workboard-dogfood`, where it was drafted
+2026-07-10 as that branch's SI-22 — a number main had already assigned to
+the gate-clock issue (the same race SI-23's renumbering note records).
+Refiled at the W-21 revival decision with one sharpening (the W-3
+clustering note below); implementation references describe the branch and
+revalidate at rebase.*
+
+The second dogfood profile must declare a domain for every registered action,
+but the brief deliberately leaves fabric-owned domain-taxonomy governance open.
+Using the existing `files.vault` label for structured work would flatten two
+dissimilar workloads; inventing globally authoritative roots in the
+implementation would silently settle the governance problem.
+
+**Branch implementation** (`proxy.rs` on `codex/workboard-dogfood`): the
+trusted, first-party workboard profile provisionally labels SQLite task
+actions `work.tracking` and Markdown evidence actions `work.evidence`. These
+strings make registration and domain-scoped traces honest, but they are not
+ratified taxonomy roots and MUST NOT be treated as portable trust domains or
+founding precedent for third-party registrations. No StandingRules or
+TrustRecords consume them yet, so renaming before that machinery lands is
+cheap — but W-3 clusters approvals by (caveat, action-class, **domain**), so
+the labels become load-bearing as soon as workboard approvals feed
+`asf rules candidates`, well before trust compilation: resolve or explicitly
+bless the provisional labels first.
+
+**Open question for the spec/design:** what fabric-owned root taxonomy and
+extension process should registrations use, and should evidence inherit the
+work item's domain or remain a separate domain? Resolve before these labels
+feed portable rules, trust compilation, or published conformance artifacts.
 
 ## SI-34 — what exactly does a human approval bind to? (§5.3, §6, C1) — open
 

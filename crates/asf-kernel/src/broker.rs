@@ -381,7 +381,7 @@ impl Broker {
         let parent_of: BTreeMap<String, Option<String>> = rows
             .iter()
             .map(|(id, raw)| {
-                let parent = serde_json::from_str::<Value>(raw)
+                let parent = canon::parse_fabric_json(raw)
                     .ok()
                     .and_then(|v| v["parent"].as_str().map(str::to_string));
                 (id.clone(), parent)
@@ -1886,7 +1886,7 @@ impl Broker {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         let mut need: Option<String> = None;
         for raw in rows {
-            let cap: Value = serde_json::from_str(&raw?).expect("stored objects are valid JSON");
+            let cap = canon::parse_fabric_json(&raw?)?;
             if cap["bound_manifest"].as_str() != Some(manifest_id)
                 || canon::verify(&cap, &self.fabric.fabric_vk()).is_err()
             {

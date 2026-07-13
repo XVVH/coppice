@@ -303,6 +303,14 @@ fn verified_event_from_row(row: &EventRow, vk: &VerifyingKey) -> Result<Verified
 }
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
+    let raw_json = row.get::<_, String>(8)?;
+    let raw = canon::parse_fabric_json(&raw_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            8,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })?;
     Ok(EventRow {
         offset: row.get(0)?,
         id: row.get(1)?,
@@ -312,7 +320,7 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
         manifest: row.get(5)?,
         at: row.get(6)?,
         kind: row.get(7)?,
-        raw: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or(Value::Null),
+        raw,
     })
 }
 
@@ -479,12 +487,12 @@ pub fn put_object(
 }
 
 pub fn get_object(conn: &Connection, id: &str) -> Result<Value, TraceError> {
-    conn.query_row("SELECT raw FROM objects WHERE id = ?1", [id], |r| {
+    let raw = conn.query_row("SELECT raw FROM objects WHERE id = ?1", [id], |r| {
         r.get::<_, String>(0)
     })
     .optional()?
-    .map(|raw| serde_json::from_str(&raw).expect("stored objects are valid JSON"))
-    .ok_or_else(|| TraceError::ObjectNotFound(id.into()))
+    .ok_or_else(|| TraceError::ObjectNotFound(id.into()))?;
+    Ok(canon::parse_fabric_json(&raw)?)
 }
 
 pub fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>, TraceError> {
@@ -655,6 +663,45 @@ mod tests {
                 other => panic!("{field} mismatch must fail at verified-event boundary: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn w12_duplicate_names_are_rejected_at_stored_fabric_ingresses() {
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":1}),
+            "t",
+        )
+        .unwrap();
+
+        // A storage attacker can write raw JSON after bypassing the trigger.
+        // Even a same-value duplicate must be rejected before Value parsing;
+        // otherwise parser policy, rather than signed bytes, chooses meaning.
+        conn.execute_batch(
+            "DROP TRIGGER events_append_only_u;
+             UPDATE events SET raw = replace(raw, '\"seq\":0', '\"seq\":0,\"seq\":0');",
+        )
+        .unwrap();
+        assert!(
+            verify_span(&conn, &sk.verifying_key(), &span).is_err(),
+            "duplicate-bearing event must not enter the verified trace"
+        );
+
+        conn.execute(
+            "INSERT INTO objects (id, kind, created_at, raw) VALUES (?1, ?2, ?3, ?4)",
+            params!["test:duplicate", "test", "t", r#"{"x":1,"x":1}"#],
+        )
+        .unwrap();
+        assert!(
+            get_object(&conn, "test:duplicate").is_err(),
+            "duplicate-bearing stored object must produce no accepted fabric value"
+        );
     }
 
     #[test]

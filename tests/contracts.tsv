@@ -41,6 +41,15 @@ TRACE-CHAIN|negative|trace::tests::tamper_after_bypassing_triggers_is_detected
 TRACE-CHAIN|supporting|trace::tests::signed_event_index_mismatch_is_rejected_for_every_materialized_field
 TRACE-CHAIN|supporting|trace::tests::verified_snapshot_head_stays_with_the_rows_it_observed
 
+# Spec §0/A16 canonical input domain: valid boundary integers retain their
+# signed bytes; out-of-range integers, floats, collisions, and raw duplicate
+# names produce neither a signed object nor an accepted verified object/event.
+JCS-DOMAIN|positive|canon::tests::jcs_domain_accepts_exact_integer_boundaries_without_changing_signed_bytes
+JCS-DOMAIN|negative|tools::tests::w12_duplicate_fabric_object_or_event_cannot_dispatch_tool
+JCS-DOMAIN|supporting|canon::tests::jcs_domain_rejects_collisions_floats_and_duplicates_without_signing_or_accepting
+JCS-DOMAIN|supporting|trace::tests::w12_duplicate_names_are_rejected_at_stored_fabric_ingresses
+JCS-DOMAIN|supporting|canon::tests::jcs_language_neutral_vectors_match_reference_outcomes
+
 # Operator ledger inspection: listings expose signed event time and full
 # records; invalid inspection targets fail without creating or changing state.
 LEDGER-UX|positive|ledger_shows_timestamps_and_full_event_detail

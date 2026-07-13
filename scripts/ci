@@ -82,6 +82,17 @@ run_mutation() {
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
 
+    heading "W-12 strict JCS input-domain mutation tests"
+    # Stable predicates for the numeric boundary, recursive traversal, and
+    # duplicate-name rejection. Raw fabric-object ingresses all route through
+    # the parser that consumes these predicates before constructing a Value.
+    cargo mutants \
+        -f crates/asf-kernel/src/canon.rs \
+        -F '(w12_(number_is_in_domain|validate_value|raw_number_is_in_domain|validate_raw_numbers|duplicate_key)|parse_fabric_json)' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+
     heading "authority-evaluation and promotion-policy mutation tests"
     cargo mutants \
         -f crates/asf-kernel/src/evaluate.rs \

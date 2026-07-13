@@ -366,4 +366,68 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn w12_duplicate_fabric_object_or_event_cannot_dispatch_tool() {
+        for target in ["object", "event"] {
+            let (mut conn, sk, span) = setup();
+            let id = register(
+                &mut conn,
+                &sk,
+                &span,
+                "tool:vault@1.0",
+                vault_actions(),
+                "t0",
+            )
+            .unwrap();
+
+            if target == "object" {
+                let raw: String = conn
+                    .query_row("SELECT raw FROM objects WHERE id = ?1", [&id], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                let needle = r#""tool":"tool:vault@1.0""#;
+                let duplicated = raw.replacen(
+                    needle,
+                    r#""tool":"tool:vault@1.0","tool":"tool:vault@1.0""#,
+                    1,
+                );
+                assert_ne!(duplicated, raw);
+                conn.execute(
+                    "UPDATE objects SET raw = ?2 WHERE id = ?1",
+                    rusqlite::params![id, duplicated],
+                )
+                .unwrap();
+            } else {
+                conn.execute_batch("DROP TRIGGER events_append_only_u;")
+                    .unwrap();
+                let raw: String = conn
+                    .query_row(
+                        "SELECT raw FROM events WHERE kind = 'register'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let needle = r#""kind":"register""#;
+                let duplicated = raw.replacen(needle, r#""kind":"register","kind":"register""#, 1);
+                assert_ne!(duplicated, raw);
+                conn.execute(
+                    "UPDATE events SET raw = ?1 WHERE kind = 'register'",
+                    [duplicated],
+                )
+                .unwrap();
+            }
+
+            let tmp = tempfile::tempdir().unwrap();
+            let protected = tmp.path().join("must-not-dispatch");
+            if lookup_action(&conn, &sk.verifying_key(), "tool:vault@1.0", "note.write").is_ok() {
+                std::fs::write(&protected, "dispatched").unwrap();
+            }
+            assert!(
+                !protected.exists(),
+                "duplicate-bearing signed {target} crossed the tool-dispatch boundary"
+            );
+        }
+    }
 }

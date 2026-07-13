@@ -30,13 +30,25 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-## Queued (ordered)
+**W-14 — typed object application + verified restore preparation.** Owner:
+agent. One expected-prefix/kind/signature boundary now covers every
+authority-bearing object consumer; branch/revert/parent, promotion, capability,
+approval, and tool-registration paths use it. The first independent-context
+review returned REQUEST CHANGES: unsigned runtime authority caches, mutable
+SQLite staging, non-atomic multi-root commit, unsigned parked-candidate
+selection, incomplete inverse/mutation evidence, and stale tool advertisement.
+The remediation derives decision authority from signed events plus pending
+reservations; retains verified SQLite bytes; commits promotion/revert through
+an authenticated rollback/roll-forward journal linked to one database
+transaction; signs exact promotion candidates; advertises only currently live
+authority; and adds direct protected-effect contracts across every edge.
+Corrected required CI is green (224 tests and both demos), deep is green (4,096
+authority cases / 512 model histories), and the 152-mutant W-14 lane has zero
+survivors/timeouts; independent-context re-review remains before merge. Closes
+RF-19/RF-20/RF-29–RF-32 and P16 when merged. *Provenance: 2026-07-12
+cryptographic mechanism audit + 2026-07-13 independent review.*
 
-**W-14 — typed object application + verified restore preparation.** One
-expected-prefix/kind/signature boundary for every authority-bearing object;
-update branch/revert/parent consumers; verify and stage every CAS dependency
-before live mutation. Negative contracts leave all protected stores unchanged.
-Closes RF-19/RF-20. *Provenance: 2026-07-12 cryptographic mechanism audit.*
+## Queued (ordered)
 
 **W-20 — kernel security protocol pass (spec v0.8).** Owner: operator +
 agent. Write the operational stratum under the schema spec as one
@@ -205,9 +217,6 @@ decision, not by drift. From the 2026-07-10 review sessions:
   conflict incidence).
 - **R2 read-authority family** — before the first `external_reach: live`
   tool (ADR 0005 binds the shape; dogfooding graduation criterion).
-- **Crash-atomic multi-root commit** — production/live-egress release gate;
-  authenticated trace order/head moved to queued W-15 after SI-25 separated
-  its cryptographic protocol from the state-commit protocol.
 - **Broker-outage loud fail-open + `on_broker_outage`** — live-egress
   integration.
 - **Durable external-effect protocol** — trigger: the first tool that
@@ -218,8 +227,8 @@ decision, not by drift. From the 2026-07-10 review sessions:
   rediscovered piecemeal at first egress:
   `effect_intent → authority reservation → dispatch (idempotency key) →
   effect receipt → state commit → completion receipt`. Its pieces already
-  live in: crash-atomic multi-root commit (parked, above), broker-outage
-  posture (parked, above), effect receipts (candidate), and durable
+  live in: W-14's local multi-root state transaction, broker-outage posture
+  (parked, above), effect receipts (candidate), and durable
   call-identity/idempotency (scalability analysis, "broker availability
   and in-flight effects"). Surfaced by the 2026-07-10 design review as a
   distinct synthesis; filed 2026-07-11 so first-egress work starts from

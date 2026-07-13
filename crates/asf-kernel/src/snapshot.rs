@@ -6,8 +6,9 @@
 //! nothing is in flight (brief §4), "atomic multi-root capture" degenerates
 //! to: collect each store's current root, record the tuple in one manifest.
 //! Restore is prepare-all-then-commit-all: every store's plan is validated
-//! first (tree parse + CAS presence; any failure aborts with stores
-//! untouched), then committed. Sqlite commits are staging renames; fs
+//! first (tree parse + CAS integrity, with immutable verified bytes staged;
+//! any failure aborts with stores untouched), then committed. Sqlite commits
+//! are staging renames; fs
 //! commits apply IN PLACE (RF-10) — only differing files are written, so
 //! unchanged files keep their mtimes/inodes and a promotion touches
 //! exactly what it changed.
@@ -21,6 +22,8 @@ use crate::canon::sha256_hex;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -47,6 +50,8 @@ pub enum SnapError {
     UnsafePath { root: String, path: String },
     #[error("store root {0} does not exist")]
     MissingRoot(PathBuf),
+    #[error("staging path {0} no longer names the exclusively created file")]
+    StagingSubstituted(PathBuf),
 }
 
 fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> SnapError + '_ {
@@ -411,8 +416,10 @@ pub struct PreparedRestore {
 }
 
 enum RestorePlan {
-    /// Whole-file swap via a staging path (sqlite): materialize, rename.
-    Swap { staging: PathBuf },
+    /// Whole-file swap (sqlite). Preparation retains the CAS-verified bytes,
+    /// never a mutable staging pathname; commit creates its own exclusive,
+    /// unpredictable temporary file and rehashes it immediately before rename.
+    Swap { root: String, content: Vec<u8> },
     /// In-place fs apply (RF-10): write only files whose content differs,
     /// delete files absent from the tree, prune empty dirs. Unchanged
     /// files keep their mtimes and inodes — a promotion touches exactly
@@ -425,12 +432,41 @@ struct FsEntry {
     rel: String,
     hash: String,
     mode: String,
+    content: Vec<u8>,
 }
 
-/// Prepare a store's restore to `root`. All tree parsing and CAS presence
-/// checks happen here, so a multi-store restore that is going to fail does
-/// so before ANY store is touched (the prepare-all-then-commit-all
-/// contract behind coherent revert).
+fn w14_stage_verified_blob(cas: &Cas, hash: &str) -> Result<Vec<u8>, SnapError> {
+    cas.get(hash)
+}
+
+fn w14_prepare_verified_fs_entries(cas: &Cas, root: &str) -> Result<Vec<FsEntry>, SnapError> {
+    let tree = load_tree_object(cas, root)?;
+    let raw = tree["entries"]
+        .as_array()
+        .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
+    let mut entries = Vec::with_capacity(raw.len());
+    for e in raw {
+        let hash = e["hash"]
+            .as_str()
+            .ok_or_else(|| SnapError::MalformedTree(root.into()))?
+            .to_string();
+        entries.push(FsEntry {
+            rel: e["path"]
+                .as_str()
+                .ok_or_else(|| SnapError::MalformedTree(root.into()))?
+                .to_string(),
+            content: w14_stage_verified_blob(cas, &hash)?,
+            hash,
+            mode: e["mode"].as_str().unwrap_or("644").to_string(),
+        });
+    }
+    Ok(entries)
+}
+
+/// Prepare a store's restore to `root`. All tree parsing and every referenced
+/// CAS object's hash verification happen here. Filesystem bytes are retained
+/// in the prepared plan, so neither corruption discovered late nor a
+/// prepare/commit substitution can cause partial live mutation (RF-20/W-14).
 pub fn prepare_restore(
     cas: &Cas,
     spec: &StoreSpec,
@@ -438,55 +474,19 @@ pub fn prepare_restore(
 ) -> Result<PreparedRestore, SnapError> {
     match spec.kind {
         StoreKind::Fs => {
-            let tree = load_tree_object(cas, root)?;
-            let raw = tree["entries"]
-                .as_array()
-                .ok_or_else(|| SnapError::MalformedTree(root.into()))?;
-            let mut entries = Vec::with_capacity(raw.len());
-            for e in raw {
-                let entry = FsEntry {
-                    rel: e["path"]
-                        .as_str()
-                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?
-                        .to_string(),
-                    hash: e["hash"]
-                        .as_str()
-                        .ok_or_else(|| SnapError::MalformedTree(root.into()))?
-                        .to_string(),
-                    mode: e["mode"].as_str().unwrap_or("644").to_string(),
-                };
-                if !cas.has(&entry.hash) {
-                    return Err(SnapError::MissingBlob(entry.hash));
-                }
-                entries.push(entry);
-            }
+            let entries = w14_prepare_verified_fs_entries(cas, root)?;
             Ok(PreparedRestore {
                 spec: spec.clone(),
                 plan: RestorePlan::FsInPlace { entries },
             })
         }
         StoreKind::Sqlite => {
-            let parent = spec
-                .path
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from("."));
-            let staging = parent.join(format!(
-                ".asf-staging-{}-{}",
-                spec.path.file_name().unwrap_or_default().to_string_lossy(),
-                &root.strip_prefix("sha256:").unwrap_or(root)[..12],
-            ));
-            if staging.exists() {
-                if staging.is_dir() {
-                    fs::remove_dir_all(&staging).map_err(io_err(&staging))?;
-                } else {
-                    fs::remove_file(&staging).map_err(io_err(&staging))?;
-                }
-            }
-            materialize_sqlite(cas, root, &staging)?;
             Ok(PreparedRestore {
                 spec: spec.clone(),
-                plan: RestorePlan::Swap { staging },
+                plan: RestorePlan::Swap {
+                    root: root.to_string(),
+                    content: w14_stage_verified_blob(cas, root)?,
+                },
             })
         }
     }
@@ -498,8 +498,8 @@ pub fn commit_restore(cas: &Cas, prepared: PreparedRestore) -> Result<(), SnapEr
     let live = &prepared.spec.path;
     match prepared.plan {
         RestorePlan::FsInPlace { entries } => apply_fs_in_place(cas, live, &entries)?,
-        RestorePlan::Swap { staging } => {
-            fs::rename(&staging, live).map_err(io_err(live))?;
+        RestorePlan::Swap { root, content } => {
+            write_atomic_verified(live, &content, &root, None)?;
             // A restored image must not be polluted by a stale WAL/SHM.
             for ext in ["-wal", "-shm"] {
                 let side = PathBuf::from(format!("{}{}", live.display(), ext));
@@ -507,6 +507,133 @@ pub fn commit_restore(cas: &Cas, prepared: PreparedRestore) -> Result<(), SnapEr
                     fs::remove_file(&side).map_err(io_err(&side))?;
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn random_sibling(target: &Path) -> PathBuf {
+    let mut nonce = [0u8; 16];
+    use rand::RngCore;
+    rand::rngs::OsRng.fill_bytes(&mut nonce);
+    target.with_file_name(format!(
+        ".asf-tmp-{}-{}",
+        target.file_name().unwrap_or_default().to_string_lossy(),
+        hex::encode(nonce),
+    ))
+}
+
+fn sync_directory(path: &Path) -> Result<(), SnapError> {
+    let directory = fs::File::open(path).map_err(io_err(path))?;
+    directory.sync_all().map_err(io_err(path))
+}
+
+/// Publish bytes through an exclusively created sibling, then rehash the
+/// pathname immediately before the atomic rename. The expected hash is the
+/// already-verified CAS address retained in the prepared plan.
+fn write_atomic_verified(
+    target: &Path,
+    content: &[u8],
+    expected_hash: &str,
+    mode: Option<&str>,
+) -> Result<(), SnapError> {
+    write_atomic_verified_with_hook(target, content, expected_hash, mode, &mut |_| Ok(()))
+}
+
+fn write_atomic_verified_with_hook(
+    target: &Path,
+    content: &[u8],
+    expected_hash: &str,
+    mode: Option<&str>,
+    before_verify: &mut dyn FnMut(&Path) -> Result<(), SnapError>,
+) -> Result<(), SnapError> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(io_err(parent))?;
+    let tmp = random_sibling(target);
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(&tmp).map_err(io_err(&tmp))?;
+    if let Err(error) = file.write_all(content).map_err(io_err(&tmp)) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+    #[cfg(unix)]
+    if let Some(mode) = mode {
+        use std::os::unix::fs::PermissionsExt;
+        let bits = if mode == "755" { 0o755 } else { 0o644 };
+        file.set_permissions(fs::Permissions::from_mode(bits))
+            .map_err(io_err(&tmp))?;
+    }
+    file.sync_all().map_err(io_err(&tmp))?;
+    before_verify(&tmp)?;
+    file.rewind().map_err(io_err(&tmp))?;
+    let mut staged = Vec::new();
+    file.read_to_end(&mut staged).map_err(io_err(&tmp))?;
+    let observed = sha256_hex(&staged);
+    if observed != expected_hash {
+        let _ = fs::remove_file(&tmp);
+        return Err(SnapError::HashMismatch {
+            expected: expected_hash.to_string(),
+            observed,
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let handle = file.metadata().map_err(io_err(&tmp))?;
+        let path = fs::symlink_metadata(&tmp).map_err(io_err(&tmp))?;
+        if path.file_type().is_symlink() {
+            let _ = fs::remove_file(&tmp);
+            return Err(SnapError::StagingSubstituted(tmp));
+        }
+        if handle.ino() != path.ino() {
+            let _ = fs::remove_file(&tmp);
+            return Err(SnapError::StagingSubstituted(tmp));
+        }
+    }
+    fs::rename(&tmp, target).map_err(io_err(target))?;
+    drop(file);
+    sync_directory(parent)?;
+    Ok(())
+}
+
+/// Durably flush one restored store before its linked event transaction can
+/// commit. This closes the crash window where the journal could be removed
+/// while renamed store content was still only in volatile cache.
+pub fn sync_store(spec: &StoreSpec) -> Result<(), SnapError> {
+    match spec.kind {
+        StoreKind::Sqlite => {
+            fs::File::open(&spec.path)
+                .map_err(io_err(&spec.path))?
+                .sync_all()
+                .map_err(io_err(&spec.path))?;
+            sync_directory(spec.path.parent().unwrap_or_else(|| Path::new(".")))?;
+        }
+        StoreKind::Fs => {
+            for entry in WalkDir::new(&spec.path).contents_first(true) {
+                let entry = entry.map_err(|error| SnapError::Io {
+                    path: spec.path.clone(),
+                    source: error.into(),
+                })?;
+                if entry.file_type().is_file() {
+                    fs::File::open(entry.path())
+                        .map_err(io_err(entry.path()))?
+                        .sync_all()
+                        .map_err(io_err(entry.path()))?;
+                }
+                if entry.file_type().is_dir() {
+                    fs::File::open(entry.path())
+                        .map_err(io_err(entry.path()))?
+                        .sync_all()
+                        .map_err(io_err(entry.path()))?;
+                }
+            }
+            sync_directory(spec.path.parent().unwrap_or_else(|| Path::new(".")))?;
         }
     }
     Ok(())
@@ -525,7 +652,7 @@ fn apply_fs_in_place(cas: &Cas, root: &Path, entries: &[FsEntry]) -> Result<(), 
 /// Production supplies a no-op hook; unit tests can fail after mutation N and
 /// verify that replay converges without encoding sleeps or permission tricks.
 fn apply_fs_in_place_with_hook(
-    cas: &Cas,
+    _cas: &Cas,
     root: &Path,
     entries: &[FsEntry],
     before_mutation: &mut dyn FnMut(&Path) -> Result<(), SnapError>,
@@ -570,18 +697,7 @@ fn apply_fs_in_place_with_hook(
             fs::create_dir_all(p).map_err(io_err(p))?;
         }
         before_mutation(&target)?;
-        let tmp = target.with_file_name(format!(
-            ".asf-tmp-{}",
-            target.file_name().unwrap_or_default().to_string_lossy()
-        ));
-        fs::write(&tmp, cas.get(&e.hash)?).map_err(io_err(&tmp))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = if e.mode == "755" { 0o755 } else { 0o644 };
-            fs::set_permissions(&tmp, fs::Permissions::from_mode(mode)).map_err(io_err(&tmp))?;
-        }
-        fs::rename(&tmp, &target).map_err(io_err(&target))?;
+        write_atomic_verified(&target, &e.content, &e.hash, Some(&e.mode))?;
     }
 
     // Pass 3: prune dirs the deletions emptied (never the root, never
@@ -784,6 +900,110 @@ mod tests {
         // Bogus root: prepare fails, live content untouched.
         assert!(prepare_restore(&cas, &spec, "sha256:deadbeefdeadbeef").is_err());
         assert_eq!(fs::read_to_string(vault.join("a.md")).unwrap(), "live");
+    }
+
+    #[test]
+    fn w14_prepared_fs_restore_commits_only_staged_verified_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let desired = tmp.path().join("desired");
+        let live = tmp.path().join("live");
+        write(&desired.join("kept.md"), "verified desired bytes");
+        write(&live.join("kept.md"), "old live bytes");
+        write(&live.join("obsolete.md"), "delete only after prepare");
+
+        let root = capture_fs(&cas, &desired).unwrap();
+        let tree = load_tree_object(&cas, &root).unwrap();
+        let blob = tree["entries"][0]["hash"].as_str().unwrap();
+        let prepared = prepare_restore(&cas, &fs_spec(&live), &root).unwrap();
+
+        // After prepare, commit must consume the immutable verified bytes in
+        // the plan rather than re-reading attacker-controlled CAS storage.
+        fs::write(cas.blob_path(blob).unwrap(), b"substituted after prepare").unwrap();
+        commit_restore(&cas, prepared).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(live.join("kept.md")).unwrap(),
+            "verified desired bytes"
+        );
+        assert!(!live.join("obsolete.md").exists());
+    }
+
+    #[test]
+    fn w14_prepared_sqlite_restore_commits_only_retained_verified_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cas = Cas::open(tmp.path().join("cas")).unwrap();
+        let desired = tmp.path().join("desired.db");
+        let live = tmp.path().join("live.db");
+        Connection::open(&desired)
+            .unwrap()
+            .execute_batch("CREATE TABLE facts (value TEXT); INSERT INTO facts VALUES ('verified');")
+            .unwrap();
+        Connection::open(&live)
+            .unwrap()
+            .execute_batch("CREATE TABLE facts (value TEXT); INSERT INTO facts VALUES ('old');")
+            .unwrap();
+        let spec = StoreSpec {
+            store: "db:memory".into(),
+            tier: 1,
+            kind: StoreKind::Sqlite,
+            path: live.clone(),
+        };
+        let root = capture_sqlite(&cas, &desired).unwrap();
+        let prepared = prepare_restore(&cas, &spec, &root).unwrap();
+
+        // CAS substitution and the old predictable staging pathname are both
+        // attacker-controlled after prepare. Neither is a commit input now.
+        fs::write(cas.blob_path(&root).unwrap(), b"attacker-substituted-image").unwrap();
+        let old_staging = live.parent().unwrap().join(format!(
+            ".asf-staging-{}-{}",
+            live.file_name().unwrap().to_string_lossy(),
+            &root.strip_prefix("sha256:").unwrap()[..12],
+        ));
+        fs::write(old_staging, b"attacker-controlled-old-staging-path").unwrap();
+        commit_restore(&cas, prepared).unwrap();
+
+        let installed: String = Connection::open(&live)
+            .unwrap()
+            .query_row("SELECT value FROM facts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(installed, "verified");
+    }
+
+    #[test]
+    fn w14_atomic_publication_rejects_staging_inode_substitution() {
+        let tmp = tempfile::tempdir().unwrap();
+        let verified = b"verified-new-state";
+        for variant in ["file", "symlink"] {
+            let target = tmp.path().join(format!("live-{variant}.db"));
+            fs::write(&target, b"protected-old-state").unwrap();
+            let attacker = tmp.path().join(format!("attacker-{variant}"));
+            fs::write(&attacker, b"attacker-substituted-inode").unwrap();
+            let result = write_atomic_verified_with_hook(
+                &target,
+                verified,
+                &sha256_hex(verified),
+                None,
+                &mut |staging| {
+                    fs::remove_file(staging).unwrap();
+                    if variant == "symlink" {
+                        #[cfg(unix)]
+                        std::os::unix::fs::symlink(&attacker, staging).unwrap();
+                        #[cfg(not(unix))]
+                        fs::write(staging, b"attacker-substituted-inode").unwrap();
+                    } else {
+                        fs::write(staging, b"attacker-substituted-inode").unwrap();
+                    }
+                    Ok(())
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(
+                fs::read(&target).unwrap(),
+                b"protected-old-state",
+                "a substituted staging {variant} reached the live target"
+            );
+        }
     }
 
     #[test]

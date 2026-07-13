@@ -17,7 +17,7 @@
 
 use asf_kernel::kernel::Fabric;
 use asf_kernel::payload::PayloadRef;
-use asf_kernel::snapshot::{StoreKind, StoreSpec};
+use asf_kernel::snapshot::{self, StoreKind, StoreSpec};
 use asf_kernel::{canon, trace};
 use rusqlite::Connection;
 use serde_json::json;
@@ -83,6 +83,26 @@ fn read_memory_facts(db: &Path) -> Vec<String> {
     let mut stmt = conn.prepare("SELECT fact FROM memories ORDER BY id").unwrap();
     let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
     rows.collect::<Result<_, _>>().unwrap()
+}
+
+fn read_fs_bytes(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    walkdir::WalkDir::new(root)
+        .sort_by_file_name()
+        .into_iter()
+        .map(Result::unwrap)
+        .filter(|entry| entry.file_type().is_file())
+        .map(|entry| {
+            (
+                entry
+                    .path()
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                fs::read(entry.path()).unwrap(),
+            )
+        })
+        .collect()
 }
 
 /// Boilerplate: register principals + channel, capture intent, first manifest.
@@ -316,6 +336,220 @@ fn revert_is_all_or_nothing() {
     // …and NEITHER store may have been touched (prepare-all-then-swap-all).
     assert_eq!(fs::read_to_string(w.vault.join("index.md")).unwrap(), "mutated");
     assert_eq!(read_memory_facts(&w.memory_db).len(), 2);
+}
+
+#[test]
+fn w14_unverified_manifest_cannot_extend_lineage_or_mutate_state() {
+    let mut w = setup();
+    let (human, agent, intent) = boot(&mut w);
+    let step = w
+        .fabric
+        .step_boundary(&human, &agent, &intent, behavior_v1())
+        .unwrap();
+    let branch = w.fabric.create_branch(&step.manifest).unwrap();
+    fs::write(branch["fs:vault"].join("branch-sentinel.md"), "keep me").unwrap();
+
+    // Build a valid alternative tree, then splice its root into the stored
+    // manifest without the fabric signature. Every manifest consumer must
+    // reject this same row before it can extend lineage or restore bytes.
+    let attacker = w._tmp.path().join("attacker-tree");
+    fs::create_dir_all(&attacker).unwrap();
+    fs::write(attacker.join("attacker.md"), "must never become live").unwrap();
+    let attacker_root = snapshot::capture(
+        &w.fabric.cas,
+        &StoreSpec {
+            store: "fs:vault".into(),
+            tier: 1,
+            kind: StoreKind::Fs,
+            path: attacker,
+        },
+    )
+    .unwrap();
+    let mut manifest = trace::get_object(&w.fabric.conn, &step.manifest).unwrap();
+    let vault_root = manifest["state"]["roots"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|root| root["store"] == "fs:vault")
+        .unwrap();
+    vault_root["root"] = json!(attacker_root);
+    w.fabric
+        .conn
+        .execute(
+            "UPDATE objects SET raw = ?2 WHERE id = ?1",
+            rusqlite::params![step.manifest, serde_json::to_string(&manifest).unwrap()],
+        )
+        .unwrap();
+
+    let objects_before: i64 = w
+        .fabric
+        .conn
+        .query_row("SELECT COUNT(*) FROM objects", [], |row| row.get(0))
+        .unwrap();
+    let events_before: i64 = w
+        .fabric
+        .conn
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+    assert!(
+        w.fabric
+            .step_boundary(&human, &agent, &intent, behavior_v1())
+            .is_err(),
+        "an unverified parent must not extend the manifest lineage"
+    );
+    assert_eq!(
+        w.fabric
+            .conn
+            .query_row("SELECT COUNT(*) FROM objects", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        objects_before,
+        "failed lineage extension stored an object"
+    );
+    assert_eq!(
+        w.fabric
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        events_before,
+        "failed lineage extension appended an event"
+    );
+
+    assert!(w.fabric.create_branch(&step.manifest).is_err());
+    assert_eq!(
+        fs::read_to_string(branch["fs:vault"].join("branch-sentinel.md")).unwrap(),
+        "keep me"
+    );
+    assert!(!branch["fs:vault"].join("attacker.md").exists());
+
+    fs::write(w.vault.join("index.md"), "live mutation").unwrap();
+    fs::write(w.vault.join("live-only.md"), "must survive").unwrap();
+    {
+        let conn = Connection::open(&w.memory_db).unwrap();
+        conn.execute("INSERT INTO memories (fact) VALUES ('live mutation')", [])
+            .unwrap();
+    }
+    let vault_before_revert = read_fs_bytes(&w.vault);
+    let memory_before_revert = fs::read(&w.memory_db).unwrap();
+    let events_before_revert: i64 = w
+        .fabric
+        .conn
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+    assert!(w.fabric.revert_to(&step.manifest).is_err());
+    assert_eq!(
+        w.fabric
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        events_before_revert,
+        "a rejected unverified revert appended drift or revert evidence"
+    );
+    assert_eq!(read_fs_bytes(&w.vault), vault_before_revert);
+    assert_eq!(fs::read(&w.memory_db).unwrap(), memory_before_revert);
+    assert_eq!(
+        fs::read_to_string(w.vault.join("index.md")).unwrap(),
+        "live mutation"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("live-only.md")).unwrap(),
+        "must survive"
+    );
+    assert!(!w.vault.join("attacker.md").exists());
+    assert_eq!(read_memory_facts(&w.memory_db).len(), 2);
+}
+
+#[test]
+fn w14_corrupt_referenced_blob_prevents_revert_before_live_mutation() {
+    let mut w = setup();
+    let (human, agent, intent) = boot(&mut w);
+    let step = w
+        .fabric
+        .step_boundary(&human, &agent, &intent, behavior_v1())
+        .unwrap();
+    let manifest = trace::get_object(&w.fabric.conn, &step.manifest).unwrap();
+    let vault_root = manifest["state"]["roots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|root| root["store"] == "fs:vault")
+        .unwrap()["root"]
+        .as_str()
+        .unwrap();
+    let tree = snapshot::load_tree_object(&w.fabric.cas, vault_root).unwrap();
+    let index_blob = tree["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["path"] == "index.md")
+        .unwrap()["hash"]
+        .as_str()
+        .unwrap();
+    let raw_hash = index_blob.strip_prefix("sha256:").unwrap();
+    let blob_path = w
+        ._tmp
+        .path()
+        .join("fabric/cas")
+        .join(&raw_hash[..2])
+        .join(raw_hash);
+    fs::write(blob_path, "corrupt but still present").unwrap();
+
+    fs::write(w.vault.join("index.md"), "live mutation").unwrap();
+    fs::write(w.vault.join("live-only.md"), "must survive").unwrap();
+    {
+        let conn = Connection::open(&w.memory_db).unwrap();
+        conn.execute("INSERT INTO memories (fact) VALUES ('live mutation')", [])
+            .unwrap();
+    }
+    let vault_before_revert = read_fs_bytes(&w.vault);
+    let memory_before_revert = fs::read(&w.memory_db).unwrap();
+
+    assert!(w.fabric.revert_to(&step.manifest).is_err());
+    assert_eq!(read_fs_bytes(&w.vault), vault_before_revert);
+    assert_eq!(fs::read(&w.memory_db).unwrap(), memory_before_revert);
+    assert_eq!(
+        fs::read_to_string(w.vault.join("index.md")).unwrap(),
+        "live mutation"
+    );
+    assert_eq!(
+        fs::read_to_string(w.vault.join("live-only.md")).unwrap(),
+        "must survive"
+    );
+    assert_eq!(read_memory_facts(&w.memory_db).len(), 2);
+}
+
+#[test]
+fn w14_revert_event_append_failure_precedes_every_live_mutation() {
+    let mut w = setup();
+    let (human, agent, intent) = boot(&mut w);
+    let step = w
+        .fabric
+        .step_boundary(&human, &agent, &intent, behavior_v1())
+        .unwrap();
+    fs::write(w.vault.join("index.md"), "live state must survive").unwrap();
+    fs::write(w.vault.join("live-only.md"), "sentinel").unwrap();
+    Connection::open(&w.memory_db)
+        .unwrap()
+        .execute("INSERT INTO memories (fact) VALUES ('live state')", [])
+        .unwrap();
+    let vault_before = read_fs_bytes(&w.vault);
+    let memory_before = read_memory_facts(&w.memory_db);
+    w.fabric
+        .conn
+        .execute_batch(
+            "CREATE TEMP TRIGGER fail_w14_revert_event
+             BEFORE INSERT ON events WHEN NEW.kind = 'revert'
+             BEGIN SELECT RAISE(ABORT, 'injected revert append failure'); END;",
+        )
+        .unwrap();
+
+    assert!(w.fabric.revert_to(&step.manifest).is_err());
+    assert_eq!(read_fs_bytes(&w.vault), vault_before);
+    assert_eq!(read_memory_facts(&w.memory_db), memory_before);
+    assert!(w.vault.join("live-only.md").exists());
+    assert!(trace::all_events(&w.fabric.conn)
+        .unwrap()
+        .iter()
+        .all(|event| event.kind != "revert"));
 }
 
 /// M8 (A20): revert consumes live state like a merge does — the fourth

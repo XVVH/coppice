@@ -15,7 +15,7 @@
 
 use crate::canon::{self, CanonError};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Value};
 
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +42,20 @@ pub enum TraceError {
     LedgerIntegrity(String),
     #[error("object {0} not found")]
     ObjectNotFound(String),
+    #[error("object row {requested} contains signed object {signed} (RF-19; fail closed)")]
+    ObjectIdMismatch { requested: String, signed: String },
+    #[error("object {id} has prefix {actual}, expected {expected} (RF-19; fail closed)")]
+    ObjectPrefixMismatch {
+        id: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("object {id} has stored kind {actual}, expected {expected} (RF-19; fail closed)")]
+    ObjectKindMismatch {
+        id: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Spec §6 event kinds, plus Stage-1 extensions flagged as SI-11:
@@ -145,10 +159,27 @@ pub fn append(
     body: Value,
     at: &str,
 ) -> Result<Appended, TraceError> {
+    let tx = conn.transaction()?;
+    let appended = append_in_tx(&tx, sk, span, manifest, kind, body, at)?;
+    tx.commit()?;
+    Ok(appended)
+}
+
+/// Append within a caller-owned SQLite transaction. State-changing callers
+/// use this to make the signed event, expected-root tuple, and mutable caches
+/// one database commit; the caller remains responsible for committing.
+pub fn append_in_tx(
+    tx: &Transaction<'_>,
+    sk: &SigningKey,
+    span: &str,
+    manifest: Option<&str>,
+    kind: &str,
+    body: Value,
+    at: &str,
+) -> Result<Appended, TraceError> {
     if !EVENT_KINDS.contains(&kind) {
         return Err(TraceError::UnknownKind(kind.into()));
     }
-    let tx = conn.transaction()?;
     let tip: Option<(String, i64)> = tx
         .query_row(
             "SELECT id, seq FROM events WHERE span = ?1 ORDER BY seq DESC LIMIT 1",
@@ -191,7 +222,6 @@ pub fn append(
         ],
     )?;
     let offset = tx.last_insert_rowid();
-    tx.commit()?;
     Ok(Appended {
         id,
         offset,
@@ -719,6 +749,9 @@ pub fn put_object(
     Ok(id)
 }
 
+/// Parse a stored object without establishing authority. This is for
+/// diagnostics, demonstrations, and adversarial test setup only; production
+/// consumers that apply object fields use [`load_verified_object`].
 pub fn get_object(conn: &Connection, id: &str) -> Result<Value, TraceError> {
     let raw = conn.query_row("SELECT raw FROM objects WHERE id = ?1", [id], |r| {
         r.get::<_, String>(0)
@@ -726,6 +759,78 @@ pub fn get_object(conn: &Connection, id: &str) -> Result<Value, TraceError> {
     .optional()?
     .ok_or_else(|| TraceError::ObjectNotFound(id.into()))?;
     Ok(canon::parse_fabric_json(&raw)?)
+}
+
+fn w14_object_id_matches(requested: &str, signed: &str) -> bool {
+    requested == signed
+}
+
+fn w14_object_prefix_matches(signed: &str, expected: &str) -> bool {
+    signed.split_once(':').map(|(prefix, _)| prefix) == Some(expected)
+}
+
+fn w14_object_kind_matches(stored: &str, expected: &str) -> bool {
+    stored == expected
+}
+
+/// Load an authority-bearing fabric object through one typed verification
+/// boundary (RF-19/W-14).
+///
+/// The raw object must verify under `vk`, its signed id must equal the row id
+/// requested by the caller, and both the signed id namespace and the unsigned
+/// materialized `kind` column must match the caller's expected type. No caller
+/// may apply roots, caveats, tool metadata, or lineage fields before this
+/// function returns successfully.
+pub fn load_verified_object(
+    conn: &Connection,
+    id: &str,
+    expected_prefix: &str,
+    expected_kind: &str,
+    vk: &VerifyingKey,
+) -> Result<Value, TraceError> {
+    let (stored_kind, raw): (String, String) = conn
+        .query_row(
+            "SELECT kind, raw FROM objects WHERE id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| TraceError::ObjectNotFound(id.into()))?;
+    let object = canon::parse_fabric_json(&raw)?;
+
+    // Verify signed raw before trusting or applying either its fields or the
+    // denormalized row kind. A valid object of the wrong type is still inert
+    // at this caller boundary.
+    canon::verify(&object, vk)?;
+    let signed_id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or(CanonError::MissingField("id"))?;
+    if !w14_object_id_matches(id, signed_id) {
+        return Err(TraceError::ObjectIdMismatch {
+            requested: id.into(),
+            signed: signed_id.into(),
+        });
+    }
+    let actual_prefix = signed_id
+        .split_once(':')
+        .map(|(prefix, _)| prefix)
+        .unwrap_or_default();
+    if !w14_object_prefix_matches(signed_id, expected_prefix) {
+        return Err(TraceError::ObjectPrefixMismatch {
+            id: id.into(),
+            expected: expected_prefix.into(),
+            actual: actual_prefix.into(),
+        });
+    }
+    if !w14_object_kind_matches(&stored_kind, expected_kind) {
+        return Err(TraceError::ObjectKindMismatch {
+            id: id.into(),
+            expected: expected_kind.into(),
+            actual: stored_kind,
+        });
+    }
+    Ok(object)
 }
 
 pub fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>, TraceError> {
@@ -1181,5 +1286,118 @@ mod tests {
         conn.execute_batch("DROP TRIGGER events_append_only_d; DELETE FROM events WHERE seq = 1;")
             .unwrap();
         assert!(verify_span(&conn, &sk.verifying_key(), &s).is_err());
+    }
+
+    #[test]
+    fn w14_verified_object_accepts_each_expected_signed_type() {
+        let (conn, sk) = setup();
+        for (prefix, kind) in [
+            ("man", "manifest"),
+            ("tool", "tool"),
+            ("cap", "capability"),
+            ("chan", "channel"),
+        ] {
+            let mut body = Map::new();
+            body.insert("marker".into(), Value::String(kind.into()));
+            let sealed = canon::seal(prefix, body, &sk).unwrap();
+            let id = put_object(&conn, kind, &sealed, "t").unwrap();
+            let loaded = load_verified_object(
+                &conn,
+                &id,
+                prefix,
+                kind,
+                &sk.verifying_key(),
+            )
+            .unwrap();
+            assert_eq!(loaded["id"], id);
+            assert_eq!(loaded["marker"], kind);
+        }
+    }
+
+    #[test]
+    fn w14_verified_object_rejects_wrong_id_prefix_kind_signature_or_key() {
+        let (conn, sk) = setup();
+        let mut manifest_body = Map::new();
+        manifest_body.insert("marker".into(), Value::String("manifest".into()));
+        let manifest = canon::seal("man", manifest_body, &sk).unwrap();
+        let manifest_id = put_object(&conn, "manifest", &manifest, "t").unwrap();
+
+        assert!(matches!(
+            load_verified_object(
+                &conn,
+                &manifest_id,
+                "cap",
+                "manifest",
+                &sk.verifying_key(),
+            ),
+            Err(TraceError::ObjectPrefixMismatch { .. })
+        ));
+
+        conn.execute(
+            "UPDATE objects SET kind = 'capability' WHERE id = ?1",
+            [&manifest_id],
+        )
+        .unwrap();
+        assert!(matches!(
+            load_verified_object(
+                &conn,
+                &manifest_id,
+                "man",
+                "manifest",
+                &sk.verifying_key(),
+            ),
+            Err(TraceError::ObjectKindMismatch { .. })
+        ));
+        conn.execute(
+            "UPDATE objects SET kind = 'manifest' WHERE id = ?1",
+            [&manifest_id],
+        )
+        .unwrap();
+
+        let other_key = SigningKey::generate(&mut OsRng);
+        assert!(load_verified_object(
+            &conn,
+            &manifest_id,
+            "man",
+            "manifest",
+            &other_key.verifying_key(),
+        )
+        .is_err());
+
+        let mut capability_body = Map::new();
+        capability_body.insert("marker".into(), Value::String("capability".into()));
+        let capability = canon::seal("cap", capability_body, &sk).unwrap();
+        let capability_id = put_object(&conn, "capability", &capability, "t").unwrap();
+        let capability_raw = serde_json::to_string(&Value::Object(capability)).unwrap();
+        conn.execute(
+            "UPDATE objects SET raw = ?2 WHERE id = ?1",
+            params![manifest_id, capability_raw],
+        )
+        .unwrap();
+        assert!(matches!(
+            load_verified_object(
+                &conn,
+                &manifest_id,
+                "man",
+                "manifest",
+                &sk.verifying_key(),
+            ),
+            Err(TraceError::ObjectIdMismatch { requested, signed })
+                if requested == manifest_id && signed == capability_id
+        ));
+
+        conn.execute(
+            "UPDATE objects SET raw = replace(raw, 'capability', 'widened') WHERE id = ?1",
+            [&capability_id],
+        )
+        .unwrap();
+        assert!(load_verified_object(
+            &conn,
+            &capability_id,
+            "cap",
+            "capability",
+            &sk.verifying_key(),
+        )
+        .is_err());
     }
 }

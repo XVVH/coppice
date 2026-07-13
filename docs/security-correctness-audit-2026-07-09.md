@@ -42,8 +42,10 @@ production security boundary. At the audited commit, several central claims did
 not hold end-to-end. Commit `5350010` closes the identified untraced-promotion
 path, immutable approval scope, mutable approval-authority lookup, current tool
 registration consumption, and content-reference integrity gaps. Forensic
-crypto-shredding, authenticated human authority, trace head anchoring, and
-crash-atomic multi-root state changes remain outstanding graduation work.
+crypto-shredding, authenticated human authority, and trace head anchoring
+remain outstanding graduation work. Crash-atomic local multi-root state change
+is now under W-14 remediation/review (RF-30/P16); this historical audit no
+longer owns its current status.
 
 The current same-Unix-user trust boundary and cooperative-agent posture are
 intentional dogfooding constraints, not accidental implementation drift. They

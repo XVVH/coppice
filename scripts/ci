@@ -107,6 +107,24 @@ run_mutation() {
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
 
+    heading "W-14 typed-object and verified-restore mutation tests"
+    # Stable boundaries for typed objects, signed decision authority,
+    # immutable FS/SQLite preparation, exact parked-candidate approval,
+    # recoverable multi-root commit, and current-authority advertisement.
+    # Consumer negatives prove no branch, approval, dispatch, advertised
+    # surface, promotion, or live-store effect crosses a killed predicate.
+    cargo mutants \
+        -f crates/asf-cli/src/proxy.rs \
+        -f crates/asf-kernel/src/broker.rs \
+        -f crates/asf-kernel/src/kernel.rs \
+        -f crates/asf-kernel/src/trace.rs \
+        -f crates/asf-kernel/src/snapshot.rs \
+        -f crates/asf-kernel/src/tools.rs \
+        -F '(load_verified_object|append_in_tx|w14_(object_id_matches|object_prefix_matches|object_kind_matches|stage_verified_blob|prepare_verified_fs_entries|decision_authority|reserve_signed_checks|pending_escalation|required_approval_strength|require_approval_strength|promotion_binding|verify_promotion_candidate)|write_atomic_verified|sync_store|commit_state_change|recover_pending_state_change|state_change_(journal_value|event_roots)|publish_state_change_journal|remove_state_change_journal|recovery_roots|current_advertisable_capability|filter_tools_result|check_min_auth_for_manifest|registered_tools)' \
+        -j 3 \
+        --minimum-test-timeout 30 \
+        --timeout-multiplier 4
+
     heading "authority-evaluation and promotion-policy mutation tests"
     cargo mutants \
         -f crates/asf-kernel/src/evaluate.rs \

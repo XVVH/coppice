@@ -4,8 +4,10 @@
 //! signed by the emitting component (Stage 1: the fabric key, SI-3). The
 //! global rowid is the substrate offset used by `captured_before` (§3.1) and
 //! `trace.substrate_offset` (§3). Append-only is enforced in-database with
-//! triggers; verification recomputes ids and signatures from raw bytes, so
-//! any post-hoc edit is detectable even if the triggers are bypassed.
+//! triggers; verification recomputes ids/signatures and cross-checks every
+//! materialized selector, so edits to retained signed rows are detectable even
+//! if triggers are bypassed. SI-25/RF-13 track tail/whole-span deletion,
+//! rollback, and authenticated global order/head.
 //!
 //! The substrate also stores fabric objects (principals, channels, intents,
 //! manifests) — brief §5.1 counts these among the records the fabric itself
@@ -30,6 +32,12 @@ pub enum TraceError {
         seq: i64,
         detail: String,
     },
+    #[error("signed event {id} has malformed `{field}`")]
+    MalformedEventField { id: String, field: &'static str },
+    #[error(
+        "event {id} index column `{field}` disagrees with the signed object (RF-16; fail closed)"
+    )]
+    EventIndexMismatch { id: String, field: &'static str },
     #[error("object {0} not found")]
     ObjectNotFound(String),
 }
@@ -204,6 +212,96 @@ pub struct EventRow {
     pub raw: Value,
 }
 
+/// An event whose signed raw object has been verified and whose every
+/// denormalized SQLite column agrees with that object.
+///
+/// `offset` remains substrate metadata until SI-25 defines authenticated
+/// global order. Every other field below is sourced from signed `raw`, never
+/// from the row index. Authority consumers accept this type, not `EventRow`.
+#[derive(Debug, Clone)]
+pub struct VerifiedEvent {
+    pub offset: i64,
+    pub id: String,
+    pub span: String,
+    pub seq: i64,
+    pub prev: Option<String>,
+    pub manifest: Option<String>,
+    pub at: String,
+    pub kind: String,
+    pub raw: Value,
+}
+
+/// One SQLite statement snapshot of the event rows and the head observed by
+/// that exact statement. The head is still unsigned pending SI-25, but it
+/// cannot race ahead of the event set used to reconstruct decision-time
+/// authority.
+#[derive(Debug, Clone)]
+pub struct VerifiedEventSnapshot {
+    pub events: Vec<VerifiedEvent>,
+    pub head: i64,
+}
+
+fn signed_string(raw: &Value, event_id: &str, field: &'static str) -> Result<String, TraceError> {
+    raw.get(field)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| TraceError::MalformedEventField { id: event_id.to_string(), field })
+}
+
+fn signed_optional_string(
+    raw: &Value,
+    event_id: &str,
+    field: &'static str,
+) -> Result<Option<String>, TraceError> {
+    match raw.get(field) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        _ => Err(TraceError::MalformedEventField { id: event_id.to_string(), field }),
+    }
+}
+
+/// RF-16's stable enforcement boundary: verify signed raw first, then prove
+/// that every materialized selector agrees. Keep the comparisons explicit so
+/// the targeted mutation lane can mutate and kill each field independently.
+fn verified_event_from_row(row: &EventRow, vk: &VerifyingKey) -> Result<VerifiedEvent, TraceError> {
+    canon::verify(&row.raw, vk)?;
+    let id = signed_string(&row.raw, &row.id, "id")?;
+    let span = signed_string(&row.raw, &id, "span")?;
+    let seq = row.raw.get("seq").and_then(Value::as_i64).ok_or_else(|| {
+        TraceError::MalformedEventField { id: id.clone(), field: "seq" }
+    })?;
+    let prev = signed_optional_string(&row.raw, &id, "prev")?;
+    let manifest = signed_optional_string(&row.raw, &id, "manifest")?;
+    let at = signed_string(&row.raw, &id, "at")?;
+    let kind = signed_string(&row.raw, &id, "kind")?;
+
+    if row.id != id {
+        return Err(TraceError::EventIndexMismatch { id, field: "id" });
+    }
+    if row.span != span {
+        return Err(TraceError::EventIndexMismatch { id, field: "span" });
+    }
+    if row.seq != seq {
+        return Err(TraceError::EventIndexMismatch { id, field: "seq" });
+    }
+    if row.prev != prev {
+        return Err(TraceError::EventIndexMismatch { id, field: "prev" });
+    }
+    if row.manifest != manifest {
+        return Err(TraceError::EventIndexMismatch { id, field: "manifest" });
+    }
+    if row.at != at {
+        return Err(TraceError::EventIndexMismatch { id, field: "at" });
+    }
+    if row.kind != kind {
+        return Err(TraceError::EventIndexMismatch { id, field: "kind" });
+    }
+
+    Ok(VerifiedEvent {
+        offset: row.offset, id, span, seq, prev, manifest, at, kind, raw: row.raw.clone(),
+    })
+}
+
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
     Ok(EventRow {
         offset: row.get(0)?,
@@ -250,20 +348,90 @@ pub fn event_at_offset(
     .map_err(TraceError::from)
 }
 
-/// Events of the given kinds in offset order — the cheap fetch for the
-/// A22/§5.4 authority view at decision time. The gate feeds the same view
-/// builders from `all_events` over verified spans; pre-filtering by kind
-/// yields identical maps because the builders filter by kind anyway.
-pub fn events_of_kinds(
+fn verify_verified_chain(span: &str, events: &[&VerifiedEvent]) -> Result<(), TraceError> {
+    let mut ordered = events.to_vec();
+    ordered.sort_by_key(|event| event.seq);
+    let mut expected_prev: Option<&str> = None;
+    for (index, event) in ordered.iter().enumerate() {
+        let fail = |detail: String| TraceError::ChainBroken {
+            span: span.to_string(), seq: event.seq, detail,
+        };
+        if event.seq != index as i64 {
+            return Err(fail(format!("expected seq {index}, found {}", event.seq)));
+        }
+        if event.prev.as_deref() != expected_prev {
+            return Err(fail(format!(
+                "prev {:?} != expected {:?}", event.prev, expected_prev
+            )));
+        }
+        expected_prev = Some(&event.id);
+    }
+    Ok(())
+}
+
+/// Build the signed event materialized view used by authority consumers.
+///
+/// Rows whose raw object does not verify under `vk` contribute no authority
+/// (A22's unsigned-row rule). Once raw DOES verify, any disagreement with its
+/// row selectors is a structural failure rather than an ignorable anomaly — a
+/// signed revoke can otherwise be concealed by changing only `kind`/`span`
+/// (RF-16). All signature-verified spans are then checked for contiguous
+/// sequence and prev linkage. SI-25 remains responsible for an expected global
+/// head, tail/whole-span deletion, rollback, and authenticated `offset`.
+fn w11_observed_head(rows: &[EventRow]) -> i64 {
+    rows.last().map(|row| row.offset).unwrap_or(0)
+}
+
+fn verified_snapshot_from_rows(
+    rows: Vec<EventRow>,
+    vk: &VerifyingKey,
+) -> Result<VerifiedEventSnapshot, TraceError> {
+    // `all_events` returns one SQLite statement snapshot ordered by offset.
+    // Deriving head from those same rows eliminates the events/head TOCTOU
+    // without claiming that offset itself is authenticated (SI-25).
+    let head = w11_observed_head(&rows);
+    let mut verified = Vec::new();
+    for row in rows {
+        match verified_event_from_row(&row, vk) {
+            Ok(event) => verified.push(event),
+            Err(TraceError::Canon(_)) => {
+                // A wholly unsigned/foreign row moves no authority. Relevant
+                // span verifiers remain strict, so inserting one into a live
+                // chain fails at the gate rather than being laundered away.
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    let mut spans: std::collections::BTreeMap<String, Vec<&VerifiedEvent>> =
+        std::collections::BTreeMap::new();
+    for event in &verified {
+        spans.entry(event.span.clone()).or_default().push(event);
+    }
+    for (span, events) in spans {
+        verify_verified_chain(&span, &events)?;
+    }
+    Ok(VerifiedEventSnapshot {
+        events: verified,
+        head,
+    })
+}
+
+/// Build one consistent retained-row event view and its observed head.
+pub fn verified_event_snapshot(
     conn: &Connection,
-    kinds: &[&str],
-) -> Result<Vec<EventRow>, TraceError> {
-    let ph = kinds.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {EVENT_COLS} FROM events WHERE kind IN ({ph}) ORDER BY offset"
-    ))?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(kinds.iter()), row_to_event)?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    vk: &VerifyingKey,
+) -> Result<VerifiedEventSnapshot, TraceError> {
+    verified_snapshot_from_rows(all_events(conn)?, vk)
+}
+
+/// Build the signed event materialized view used by consumers that do not
+/// also need the decision-time observed head.
+pub fn verified_events(
+    conn: &Connection,
+    vk: &VerifyingKey,
+) -> Result<Vec<VerifiedEvent>, TraceError> {
+    Ok(verified_event_snapshot(conn, vk)?.events)
 }
 
 /// Verify a span's chain end-to-end: seq contiguity from 0, prev-linkage,
@@ -274,39 +442,18 @@ pub fn verify_span(
     vk: &VerifyingKey,
     span: &str,
 ) -> Result<usize, TraceError> {
-    let events = events_in_span(conn, span)?;
-    let mut expected_prev: Option<String> = None;
-    for (i, ev) in events.iter().enumerate() {
-        let fail = |detail: String| TraceError::ChainBroken {
-            span: span.into(),
-            seq: ev.seq,
-            detail,
-        };
-        if ev.seq != i as i64 {
-            return Err(fail(format!("expected seq {i}, found {}", ev.seq)));
-        }
-        // prev-link: the raw object's prev must equal the previous event id.
-        let raw_prev = ev.raw.get("prev").cloned().unwrap_or(Value::Null);
-        let want = expected_prev
-            .as_ref()
-            .map(|p| Value::String(p.clone()))
-            .unwrap_or(Value::Null);
-        if raw_prev != want {
-            return Err(fail(format!("prev {raw_prev} != expected {want}")));
-        }
-        // Row columns must agree with the signed raw object (a tampered
-        // index column can't misrepresent the chain).
-        if ev.raw.get("span").and_then(Value::as_str) != Some(span)
-            || ev.raw.get("seq").and_then(Value::as_i64) != Some(ev.seq)
-            || ev.raw.get("kind").and_then(Value::as_str) != Some(ev.kind.as_str())
-            || ev.raw.get("id").and_then(Value::as_str) != Some(ev.id.as_str())
-        {
-            return Err(fail("index columns disagree with signed object".into()));
-        }
-        canon::verify(&ev.raw, vk).map_err(|e| fail(e.to_string()))?;
-        expected_prev = Some(ev.id.clone());
-    }
-    Ok(events.len())
+    let rows = events_in_span(conn, span)?;
+    let verified = rows.iter().map(|row| {
+        verified_event_from_row(row, vk).map_err(|error| match error {
+            TraceError::Canon(canon) => TraceError::ChainBroken {
+                span: span.to_string(), seq: row.seq, detail: canon.to_string(),
+            },
+            other => other,
+        })
+    }).collect::<Result<Vec<_>, _>>()?;
+    let refs = verified.iter().collect::<Vec<_>>();
+    verify_verified_chain(span, &refs)?;
+    Ok(verified.len())
 }
 
 // ---- objects ----------------------------------------------------------
@@ -467,6 +614,85 @@ mod tests {
         .unwrap();
         let err = verify_span(&conn, &sk.verifying_key(), &s).unwrap_err();
         assert!(matches!(err, TraceError::ChainBroken { seq: 1, .. }));
+    }
+
+    #[test]
+    fn signed_event_index_mismatch_is_rejected_for_every_materialized_field() {
+        // RF-16: once raw verifies, no denormalized selector may disagree.
+        // Each case gets a fresh chain so one mutation cannot mask another.
+        let cases = [
+            ("id", "id = 'evt:index-tamper'"),
+            ("span", "span = 'span:index-tamper'"),
+            ("seq", "seq = 9"),
+            ("prev", "prev = 'evt:index-tamper'"),
+            ("manifest", "manifest = 'man:index-tamper'"),
+            ("at", "at = 't-index-tamper'"),
+            ("kind", "kind = 'grant'"),
+        ];
+
+        for (field, assignment) in cases {
+            let (mut conn, sk) = setup();
+            let span = new_span();
+            append(
+                &mut conn,
+                &sk,
+                &span,
+                Some("man:original"),
+                "revoke",
+                serde_json::json!({"capability":"cap:x", "reason":"test"}),
+                "t-original",
+            )
+            .unwrap();
+            conn.execute_batch(&format!(
+                "DROP TRIGGER events_append_only_u; UPDATE events SET {assignment} WHERE offset = 1;"
+            ))
+            .unwrap();
+
+            match verified_events(&conn, &sk.verifying_key()) {
+                Err(TraceError::EventIndexMismatch { field: observed, .. }) => {
+                    assert_eq!(observed, field)
+                }
+                other => panic!("{field} mismatch must fail at verified-event boundary: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn verified_snapshot_head_stays_with_the_rows_it_observed() {
+        let (mut conn, sk) = setup();
+        let span = new_span();
+        let first = append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":1}),
+            "t1",
+        )
+        .unwrap();
+
+        // Capture the exact rows a SQLite SELECT observed, then model a
+        // concurrent commit before authority asks for its decision offset.
+        let observed_rows = all_events(&conn).unwrap();
+        let later = append(
+            &mut conn,
+            &sk,
+            &span,
+            None,
+            "snapshot",
+            serde_json::json!({"n":2}),
+            "t2",
+        )
+        .unwrap();
+        let snapshot = verified_snapshot_from_rows(observed_rows, &sk.verifying_key()).unwrap();
+
+        assert_eq!(snapshot.head, first.offset);
+        assert_eq!(snapshot.events.len(), 1);
+        assert!(
+            snapshot.head < later.offset,
+            "a later commit must not race the observed head ahead of its event set"
+        );
     }
 
     #[test]

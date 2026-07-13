@@ -422,6 +422,95 @@ interim multi-user boundary.
 
 ---
 
+## RF-16 — unsigned event indexes can conceal signed revocation and alter replay clocks — fixed (452c9bc, W-11)
+
+**Severity: high under the current no-actuation posture; critical before live
+egress. Direction: FAIL-OPEN.** Found and reproduced in the 2026-07-12
+cryptographic mechanism audit. `events_of_kinds` filters on the unsigned
+SQLite `kind` column before verification; the A22 view branches on that row
+value while verifying a separate signed `raw` object. Decision-time liveness
+does not first establish a fully verified event set. Gate replay additionally
+uses the unsigned row `at`, which `verify_span` does not cross-check.
+
+**Reproduction:** append a valid signed revoke, bypass the append-only trigger,
+then change only its row `kind` to `grant` and `span` to another span. Signed
+`raw` is unchanged and no signing key is used. `Broker::propose_call` returns
+`Allowed` after the revoke. Moving a tail row also leaves the shortened
+substrate chain internally valid because no expected head is anchored.
+
+**Fix:** decode a `VerifiedEvent` from signed `raw`; require every materialized
+column to agree before any filtering; derive authority and replay time only
+from verified fields; evaluate against one verified, transactionally
+consistent view. Add the full index-column adversary matrix and targeted A22
+mutations. SI-25/RF-13 remain the larger global-order and rollback fix.
+
+**Remediation:** `452c9bc` derives authority inputs through
+`VerifiedEvent`: signed raw is verified first, all materialized columns
+except the explicitly unsigned global `offset` must agree, and authority,
+tool registration, ledger explanation, and gate branch-tip selection consume
+the verified view. The combined concealment reproduction now denies
+structurally without creating a dispatch ticket or escalation; the seven-field
+matrix and targeted constructor mutation lane are green.
+
+The first independent-context review correctly returned REQUEST CHANGES on two
+additional RF-16 edges. The final implementation derives the decision head
+from the same SQLite statement snapshot as its event set, so a concurrent
+commit cannot race `O` ahead of the reconstructed view; and every within-span
+consumer touched by W-11 replays/selects by signed `seq`, including branch-tip
+selection, so swapping unsigned offsets cannot promote an older attested root.
+Protected-effect regressions cover both boundaries and the W-11 consumer
+mutation lane is green. SI-25 still owns cross-span offset authenticity,
+completeness, signature-invalid row erasure, rollback, and freshness.
+Independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS.
+The authority-review gate is satisfied; fixed by `452c9bc`.
+
+## RF-25 — signed grant parent can disagree with capability ancestry — fixed (452c9bc, W-11)
+
+**Severity: medium; latent FAIL-OPEN at the signer/conformance boundary.**
+The first W-11 independent-context review found that activation keyed grants by
+`body.capability` plus event manifest while ignoring the normative §6
+`body.parent`. A signature-valid malformed child grant could therefore
+activate against a different ancestry reconstructed from the capability object.
+The storage-only attacker cannot mint such an event, but §5.4 requires doubtful
+activation to grant nothing and G9 forbids relying on honest emission.
+
+**Current remediation:** A22 grant bindings now include the signed parent, and
+`a22_state_at` requires it to match the next capability in the verified
+ancestry exactly. Missing, null-for-child, and wrong-parent grants all deny
+before dispatch in `a22_malformed_grant_parent_cannot_activate_capability`.
+The existing targeted `a22_*` lane catches all 29 current mutants.
+Independent re-review approved the correction; fixed by `452c9bc`.
+
+## RF-26 — signed tool registration placement was not enforced — fixed (452c9bc, W-11)
+
+**Severity: medium; latent FAIL-OPEN at the signer/conformance boundary.**
+`registered_tools` previously accepted any signature-verified `register`
+event naming a tool. Section 6 instead requires registrations to live on the
+fabric-lifetime span with `manifest:null`; a malformed signed event on a
+session span or under a manifest could make its tool callable.
+
+**Current remediation:** live tool registration now requires both placement
+dimensions explicitly. The two-sided TOOL-REGISTRATION contract independently
+tests wrong-span and non-null-manifest cases and proves no protected dispatch
+occurs. The W-11 consumer mutation lane covers the placement predicate.
+Independent re-review approved the correction; fixed by `452c9bc`.
+
+## RF-27 — recovery preselection trusts unsigned promotion selectors — open
+
+**Severity: low. Direction: FAIL-CLOSED AVAILABILITY.** The W-11 independent
+re-review found that explicit `asf recover` preselection queries the
+materialized event `kind` and `manifest` columns directly when deciding
+whether a manifest already faced promotion. A storage attacker can insert or
+mutate a row to look like a promotion and make recovery skip stranded work.
+The later gate is not bypassed and no call or merge is authorized; an attacker
+with database write access already has broader denial-of-service options.
+
+**Fix:** derive the promotion-event half of the precheck from
+`VerifiedEvent` while retaining the broker-owned promotions-table half, with
+a process-level recovery negative proving the stranded branch is not skipped.
+This is a non-blocking dogfooding hardening item outside W-11's authority
+surface; schedule it with the next RF-9 recovery pass.
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

@@ -578,6 +578,119 @@ fn a22_revoked_capability_denies_structurally_and_never_escalates() {
 }
 
 #[test]
+fn a22_signed_revoke_cannot_be_concealed_by_unsigned_indexes() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    let revoke = w
+        .broker
+        .revoke_capability(&cap, "compromise", None)
+        .unwrap();
+
+    // Reproduce RF-16 exactly: keep the fabric-signed raw revoke intact but
+    // make its materialized selectors call it a grant on another span. A
+    // database writer has no signing key. The verified-event boundary must
+    // fail closed before the broker returns a dispatch ticket.
+    w.broker
+        .fabric
+        .conn
+        .execute_batch("DROP TRIGGER events_append_only_u")
+        .unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE events SET kind = 'grant', span = 'span:concealed' WHERE id = ?1",
+            [&revoke],
+        )
+        .unwrap();
+
+    let protected = w.vault.join("inbox/must-not-run.md");
+    let decision = write_call(&mut w, &cap, "inbox/must-not-run.md");
+    if matches!(&decision, Decision::Allowed { .. }) {
+        // Model the downstream dispatch edge: an Allowed verdict is exactly
+        // what would make the protected mutation occur.
+        fs::write(&protected, "dispatched").unwrap();
+    }
+    assert!(
+        !protected.exists(),
+        "the protected effect must not occur when signed/index state disagrees"
+    );
+    match decision {
+        Decision::Denied { structural: Some(reason), .. } => assert!(
+            reason.contains("index column") && reason.contains("fail closed"),
+            "{reason}"
+        ),
+        other => panic!("concealed signed revoke must deny structurally: {other:?}"),
+    }
+    assert!(
+        w.broker.list_escalations("pending").unwrap().is_empty(),
+        "structural substrate failure must not become an escalation path"
+    );
+}
+
+#[test]
+fn w11_each_signed_event_selector_mismatch_prevents_dispatch() {
+    let cases = [
+        ("id", "id = 'evt:index-tamper'"),
+        ("span", "span = 'span:index-tamper'"),
+        ("seq", "seq = 99"),
+        ("prev", "prev = 'evt:index-tamper'"),
+        ("manifest", "manifest = 'man:index-tamper'"),
+        ("at", "at = 't-index-tamper'"),
+        ("kind", "kind = 'grant'"),
+    ];
+
+    for (field, assignment) in cases {
+        let mut w = setup();
+        let cap = mint_default(&mut w);
+        let revoke = w
+            .broker
+            .revoke_capability(&cap, "compromise", None)
+            .unwrap();
+        w.broker
+            .fabric
+            .conn
+            .execute_batch("DROP TRIGGER events_append_only_u")
+            .unwrap();
+        w.broker
+            .fabric
+            .conn
+            .execute(
+                &format!("UPDATE events SET {assignment} WHERE id = ?1"),
+                [&revoke],
+            )
+            .unwrap();
+
+        let protected = w.vault.join(format!("inbox/{field}-must-not-run.md"));
+        let decision = write_call(
+            &mut w,
+            &cap,
+            &format!("inbox/{field}-must-not-run.md"),
+        );
+        if matches!(&decision, Decision::Allowed { .. }) {
+            fs::write(&protected, "dispatched").unwrap();
+        }
+        assert!(
+            !protected.exists(),
+            "{field} mismatch permitted the protected dispatch"
+        );
+        match decision {
+            Decision::Denied { structural: Some(reason), .. } => {
+                assert!(
+                    reason.contains("index column") && reason.contains(field),
+                    "{field}: {reason}"
+                );
+            }
+            other => panic!("{field} mismatch must deny structurally: {other:?}"),
+        }
+        assert!(
+            w.broker.list_escalations("pending").unwrap().is_empty(),
+            "{field} mismatch must not create an escalation path"
+        );
+    }
+}
+
+#[test]
 fn a22_child_revoke_preserves_parent_and_siblings() {
     let mut w = setup();
     let parent = mint_default(&mut w);

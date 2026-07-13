@@ -22,6 +22,24 @@ deferred; un-park trigger named). Ids are `W-n`, stable once assigned.
 
 ## In flight
 
+**W-11 — verified-event authority boundary.** Owner: current
+security-hardening session. Replace A22's trust in denormalized event indexes
+with a `VerifiedEvent` derived from signed raw; establish exact row agreement
+before filtering; use the signed replay clock; add all seven signed-materialized
+selector and combined `kind`+`span` concealment negatives; extend the
+targeted A22 mutation surface. Unsigned global `offset` is explicitly filed
+under SI-25 rather than silently claimed. This repairs RF-16 without choosing
+SI-25's global-head design. Authority surface: independent-context review
+required. *Provenance: reproduced post-revoke allow in the 2026-07-12
+cryptographic mechanism audit.*
+The first independent review returned REQUEST CHANGES: unsigned-offset
+branch-tip selection, a split events/head decision snapshot, unchecked signed
+grant parent, missing registration placement, and constructor-only negative
+evidence. All five corrections are implemented with protected-effect
+contracts and expanded mutation lanes (RF-16/RF-25/RF-26); independent
+re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS. The authority-review
+gate is satisfied; W-11 is implemented in `452c9bc` and ready to merge.
+
 **W-1 — Phase 5 dogfooding: real workflow-3 sessions.** Owner: operator.
 Drive vault-maintenance sessions through the brokered tools per
 `dogfooding.md`; track denial-FP rate, capability gaps, tripwires. First

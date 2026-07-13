@@ -38,6 +38,8 @@ ATTENUATION|negative|capability::tests::unknown_dimension_cannot_be_attenuation_
 TRACE-CHAIN|positive|trace::tests::chain_links_and_offsets_are_global
 TRACE-CHAIN|negative|trace::tests::deleting_a_middle_event_breaks_the_chain
 TRACE-CHAIN|negative|trace::tests::tamper_after_bypassing_triggers_is_detected
+TRACE-CHAIN|supporting|trace::tests::signed_event_index_mismatch_is_rejected_for_every_materialized_field
+TRACE-CHAIN|supporting|trace::tests::verified_snapshot_head_stays_with_the_rows_it_observed
 
 # Operator ledger inspection: listings expose signed event time and full
 # records; invalid inspection targets fail without creating or changing state.
@@ -53,6 +55,12 @@ GATE-REPLAY|negative|gate_rejects_undeclared_action_in_trace
 # Promotion and human-approval boundaries
 PROMOTION-GATE|positive|clean_additive_run_auto_promotes
 PROMOTION-GATE|negative|gate_rejects_branch_state_with_no_signed_tool_call_attestation
+PROMOTION-GATE|negative|w11_unsigned_offset_cannot_select_older_signed_branch_tip
+
+# A15/§6 tool liveness: only a verified registration on the fabric-lifetime
+# span with manifest:null can make a stored tool callable.
+TOOL-REGISTRATION|positive|tools::tests::conservative_defaults_applied_at_registration
+TOOL-REGISTRATION|negative|tools::tests::signed_misplaced_tool_registration_cannot_dispatch
 APPROVAL|positive|escalation_batch_approval_cycle
 APPROVAL|negative|denied_escalation_does_not_authorize_retry
 C2|positive|approval_racing_retry_preserves_one_bounded_use
@@ -76,6 +84,9 @@ A22|positive|a22_child_revoke_leaves_parent_promotable
 A22|positive|a22_parked_promotion_of_pre_revoke_work_remains_approvable
 A22|positive|a22_unsigned_revocation_row_moves_nothing
 A22|negative|a22_revoked_capability_denies_structurally_and_never_escalates
+A22|negative|a22_signed_revoke_cannot_be_concealed_by_unsigned_indexes
+A22|negative|w11_each_signed_event_selector_mismatch_prevents_dispatch
+A22|negative|a22_malformed_grant_parent_cannot_activate_capability
 A22|negative|a22_effect_recorded_after_revoke_fails_gate
 A22|negative|a22_inflight_ticket_recorded_after_revoke_strands_branch
 A22|negative|a22_ancestor_revoke_closes_cross_manifest_child

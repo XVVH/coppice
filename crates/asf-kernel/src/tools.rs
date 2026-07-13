@@ -110,23 +110,24 @@ pub fn register(
 
 /// Look up a registered action. `tool_ref` is the registered tool name
 /// (e.g. "tool:vault@1.0"). Absent tool or action → error (uncallable).
+fn w11_live_tool_registration(event: &trace::VerifiedEvent, substrate_span: &str) -> bool {
+    event.kind == "register"
+        && event.span == substrate_span
+        && event.manifest.is_none()
+        && event.raw["body"]["object_kind"] == "tool"
+}
+
 fn registered_tools(
     conn: &rusqlite::Connection,
     fabric_vk: &VerifyingKey,
 ) -> Result<Vec<Value>, ToolError> {
-    let events = trace::all_events(conn)?;
-    let spans: BTreeSet<String> = events
-        .iter()
-        .filter(|e| e.kind == "register" && e.raw["body"]["object_kind"] == "tool")
-        .map(|e| e.span.clone())
-        .collect();
-    for span in spans {
-        trace::verify_span(conn, fabric_vk, &span)?;
-    }
+    let events = trace::verified_events(conn, fabric_vk)?;
+    let substrate_span = trace::meta_get(conn, "substrate_span")?
+        .ok_or_else(|| ToolError::Malformed("fabric substrate span is missing".into()))?;
 
     let live: BTreeSet<String> = events
         .iter()
-        .filter(|e| e.kind == "register" && e.raw["body"]["object_kind"] == "tool")
+        .filter(|event| w11_live_tool_registration(event, &substrate_span))
         .filter_map(|e| e.raw["body"]["object"].as_str().map(str::to_string))
         .collect();
 
@@ -211,7 +212,9 @@ mod tests {
     fn setup() -> (rusqlite::Connection, SigningKey, String) {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         trace::init(&conn).unwrap();
-        (conn, SigningKey::generate(&mut OsRng), trace::new_span())
+        let span = trace::new_span();
+        trace::meta_set(&conn, "substrate_span", &span).unwrap();
+        (conn, SigningKey::generate(&mut OsRng), span)
     }
 
     fn vault_actions() -> Value {
@@ -312,5 +315,55 @@ mod tests {
             "note.read"
         )
         .is_err());
+    }
+
+    #[test]
+    fn signed_misplaced_tool_registration_cannot_dispatch() {
+        // §6 requires both placement dimensions independently: the
+        // fabric-lifetime span AND manifest:null.
+        for (case, wrong_span, manifest) in [
+            ("wrong span", true, None),
+            ("non-null manifest", false, Some("man:misplaced")),
+        ] {
+            let (mut conn, sk, substrate_span) = setup();
+            let mut body = Map::new();
+            body.insert("tool".into(), json!("tool:misplaced@1"));
+            body.insert("actions".into(), normalize_actions(&vault_actions()).unwrap());
+            body.insert("registered_at".into(), json!("t0"));
+            let sealed = canon::seal("tool", body, &sk).unwrap();
+            let id = trace::put_object(&conn, "tool", &sealed, "t0").unwrap();
+            let event_span = if wrong_span {
+                trace::new_span()
+            } else {
+                substrate_span.clone()
+            };
+            trace::append(
+                &mut conn,
+                &sk,
+                &event_span,
+                manifest,
+                "register",
+                json!({ "object": id, "object_kind": "tool" }),
+                "t0",
+            )
+            .unwrap();
+
+            let tmp = tempfile::tempdir().unwrap();
+            let protected = tmp.path().join("must-not-dispatch");
+            if lookup_action(
+                &conn,
+                &sk.verifying_key(),
+                "tool:misplaced@1",
+                "note.write",
+            )
+            .is_ok()
+            {
+                std::fs::write(&protected, "dispatched").unwrap();
+            }
+            assert!(
+                !protected.exists(),
+                "{case}: a misplaced signed registration made the protected tool callable"
+            );
+        }
     }
 }

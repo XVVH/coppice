@@ -84,7 +84,7 @@ fn setup() -> World {
         StoreSpec { store: "fs:vault".into(), tier: 1, kind: StoreKind::Fs, path: vault.clone() },
         StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db },
     ];
-    let mut fabric = Fabric::open(tmp.path().join("fabric"), stores).unwrap();
+    let mut fabric = Fabric::initialize(tmp.path().join("fabric"), stores).unwrap();
     let human = fabric.register_principal("human", "josh", "01", None).unwrap();
     let agent = fabric.register_principal("agent", "hermes", "02", Some(&human)).unwrap();
     let chan = fabric
@@ -484,7 +484,7 @@ fn attenuation_rechecks_m1_for_the_child_manifest() {
         .find(|s| s.store == "fs:vault")
         .unwrap()
         .clone();
-    let mut subset = Fabric::open(&home, vec![vault_only]).unwrap();
+    let mut subset = Fabric::open_existing_with_stores(&home, vec![vault_only]).unwrap();
     let child_manifest = subset
         .step_boundary(
             &w.human,

@@ -15,7 +15,7 @@ fn initialized_home(root: &Path) -> PathBuf {
         kind: StoreKind::Fs,
         path: vault,
     }];
-    let mut fabric = Fabric::open(home.join("fabric"), stores).unwrap();
+    let mut fabric = Fabric::initialize(home.join("fabric"), stores).unwrap();
     let key = "01".repeat(32);
     let human = fabric.register_principal("human", "operator", &key, None).unwrap();
     let agent = fabric

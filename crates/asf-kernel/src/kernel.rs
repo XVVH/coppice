@@ -35,6 +35,8 @@ pub enum KernelError {
     Db(#[from] rusqlite::Error),
     #[error("fabric is not initialized at {home}: expected database {database}")]
     NotInitialized { home: PathBuf, database: PathBuf },
+    #[error("refusing to initialize over existing or partial fabric home {home}")]
+    AlreadyInitialized { home: PathBuf },
     #[error(
         "sqlite runtime {observed} is below conservative safe floor {minimum}; its version does not prove inclusion of the WAL-reset corruption fix (RF-21)"
     )]
@@ -61,6 +63,111 @@ fn require_safe_sqlite_version(observed: i32) -> Result<(), KernelError> {
         return Err(KernelError::UnsafeSqliteVersion {
             observed,
             minimum: MIN_SAFE_SQLITE_VERSION,
+        });
+    }
+    Ok(())
+}
+
+fn w13_prepare_new_home(path: &Path) -> Result<(), KernelError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = path.file_name().ok_or_else(|| snapshot::SnapError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "fabric home has no final path component",
+        ),
+    })?;
+    std::fs::create_dir_all(parent).map_err(|source| snapshot::SnapError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let mut existing = None;
+    for entry in std::fs::read_dir(parent).map_err(|source| snapshot::SnapError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| snapshot::SnapError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+        if entry.file_name() == name {
+            existing = Some(entry);
+            break;
+        }
+    }
+    if let Some(entry) = existing {
+        if !entry.file_type().map_err(|source| snapshot::SnapError::Io {
+            path: entry.path(),
+            source,
+        })?.is_dir()
+            || std::fs::read_dir(entry.path())
+                .map_err(|source| snapshot::SnapError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                })?
+                .next()
+                .is_some()
+        {
+            return Err(KernelError::AlreadyInitialized {
+                home: path.to_path_buf(),
+            });
+        }
+    } else {
+        std::fs::create_dir(path).map_err(|source| snapshot::SnapError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        #[cfg(unix)]
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|source| snapshot::SnapError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(
+            |source| snapshot::SnapError::Io {
+                path: path.to_path_buf(),
+                source,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn w13_validate_existing_fabric_home(
+    home: &Path,
+    database: &Path,
+) -> Result<(), KernelError> {
+    let home_metadata = std::fs::symlink_metadata(home).map_err(|_| {
+        KernelError::NotInitialized {
+            home: home.to_path_buf(),
+            database: database.to_path_buf(),
+        }
+    })?;
+    if !home_metadata.is_dir() {
+        return Err(KernelError::NotInitialized {
+            home: home.to_path_buf(),
+            database: database.to_path_buf(),
+        });
+    }
+
+    let database_metadata = std::fs::symlink_metadata(database).map_err(|_| {
+        KernelError::NotInitialized {
+            home: home.to_path_buf(),
+            database: database.to_path_buf(),
+        }
+    })?;
+    if !database_metadata.is_file() {
+        return Err(KernelError::NotInitialized {
+            home: home.to_path_buf(),
+            database: database.to_path_buf(),
         });
     }
     Ok(())
@@ -117,35 +224,27 @@ pub enum AuthorityMode {
 }
 
 impl Fabric {
-    /// Open (or create) a fabric home at `dir`, coordinating `stores`.
+    /// Explicitly initialize a new fabric home at `dir`, coordinating
+    /// `stores`. Refuses any existing or partially initialized home.
     /// Layout: `dir/fabric.db`, `dir/cas/`, `dir/keys/`.
-    pub fn open(dir: impl AsRef<Path>, stores: Vec<StoreSpec>) -> Result<Self, KernelError> {
-        Self::open_with_sqlite_version(dir, stores, rusqlite::version_number())
+    pub fn initialize(dir: impl AsRef<Path>, stores: Vec<StoreSpec>) -> Result<Self, KernelError> {
+        Self::initialize_with_sqlite_version(dir, stores, rusqlite::version_number())
     }
 
     /// Test seam for the fail-before-effects SQLite version gate. Production
-    /// always supplies `rusqlite::version_number()` through [`Self::open`].
-    fn open_with_sqlite_version(
+    /// always supplies `rusqlite::version_number()` through [`Self::initialize`].
+    fn initialize_with_sqlite_version(
         dir: impl AsRef<Path>,
         stores: Vec<StoreSpec>,
         sqlite_version: i32,
     ) -> Result<Self, KernelError> {
         require_safe_sqlite_version(sqlite_version)?;
         let dir = dir.as_ref();
-        std::fs::create_dir_all(dir).map_err(|source| snapshot::SnapError::Io {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(
-                |source| snapshot::SnapError::Io {
-                    path: dir.to_path_buf(),
-                    source,
-                },
-            )?;
-        }
+        w13_prepare_new_home(dir)?;
+        let keystore = Keystore::initialize(dir.join("keys"))?;
+        let fabric_sk = keystore.signing_key(Role::Fabric)?;
+        let user_sk = keystore.signing_key(Role::UserRoot)?;
+        let kek = keystore.kek()?;
         let conn = Connection::open(dir.join("fabric.db"))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         trace::init(&conn)?;
@@ -157,19 +256,9 @@ impl Fabric {
                 since_offset INTEGER NOT NULL
             );",
         )?;
-        let keystore = Keystore::open(dir.join("keys"))?;
-        let fabric_sk = keystore.signing_key(Role::Fabric)?;
-        let user_sk = keystore.signing_key(Role::UserRoot)?;
-        let kek = keystore.kek()?;
         let cas = Cas::open(dir.join("cas"))?;
-        let substrate_span = match trace::meta_get(&conn, "substrate_span")? {
-            Some(s) => s,
-            None => {
-                let s = trace::new_span();
-                trace::meta_set(&conn, "substrate_span", &s)?;
-                s
-            }
-        };
+        let substrate_span = trace::new_span();
+        trace::meta_set(&conn, "substrate_span", &substrate_span)?;
         // Persist store specs so operator tools can reopen this home
         // without re-supplying the topology (asf revert/ledger/stats).
         let stores_json = serde_json::to_string(
@@ -201,49 +290,73 @@ impl Fabric {
     /// Reopen an existing fabric home using the store topology persisted
     /// at first open. Errors if the home was never initialized.
     pub fn open_existing(dir: impl AsRef<Path>) -> Result<Self, KernelError> {
-        let dir = dir.as_ref();
+        Self::open_existing_impl(dir.as_ref(), None)
+    }
+
+    /// Reopen an existing home with an explicitly supplied runtime store
+    /// view. This never rewrites the persisted topology and exists for
+    /// callers constructing a deliberately narrower manifest view.
+    pub fn open_existing_with_stores(
+        dir: impl AsRef<Path>,
+        stores: Vec<StoreSpec>,
+    ) -> Result<Self, KernelError> {
+        Self::open_existing_impl(dir.as_ref(), Some(stores))
+    }
+
+    fn open_existing_impl(
+        dir: &Path,
+        stores_override: Option<Vec<StoreSpec>>,
+    ) -> Result<Self, KernelError> {
+        require_safe_sqlite_version(rusqlite::version_number())?;
         let database = dir.join("fabric.db");
-        match std::fs::metadata(&database) {
-            Ok(metadata) if metadata.is_file() => {}
-            Ok(_) => {
-                return Err(KernelError::NotInitialized {
-                    home: dir.to_path_buf(),
-                    database,
-                });
-            }
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-                return Err(KernelError::NotInitialized {
-                    home: dir.to_path_buf(),
-                    database,
-                });
-            }
-            Err(source) => {
-                return Err(snapshot::SnapError::Io {
-                    path: database,
-                    source,
-                }
-                .into());
-            }
-        }
+        w13_validate_existing_fabric_home(dir, &database)?;
+        // Validate all home-lifetime identity material before SQLite is
+        // opened. Missing or malformed authority therefore cannot create
+        // WAL sidecars, replacement keys, or any other protected effect.
+        let keystore = Keystore::open_existing(dir.join("keys"))?;
+        let fabric_sk = keystore.signing_key(Role::Fabric)?;
+        let user_sk = keystore.signing_key(Role::UserRoot)?;
+        let kek = keystore.kek()?;
         let conn = Connection::open(database)?;
-        let raw = trace::meta_get(&conn, "stores")?
-            .ok_or_else(|| KernelError::UnknownStore("no stores recorded in this home".into()))?;
-        drop(conn);
-        let specs: Vec<Value> = serde_json::from_str(&raw).expect("stored specs are valid JSON");
-        let stores = specs
-            .iter()
-            .map(|s| StoreSpec {
-                store: s["store"].as_str().unwrap_or_default().to_string(),
-                tier: s["tier"].as_u64().unwrap_or(1) as u8,
-                kind: if s["kind"] == "sqlite" {
-                    crate::snapshot::StoreKind::Sqlite
-                } else {
-                    crate::snapshot::StoreKind::Fs
-                },
-                path: std::path::PathBuf::from(s["path"].as_str().unwrap_or_default()),
-            })
-            .collect();
-        Self::open(dir, stores)
+        let stores = match stores_override {
+            Some(stores) => stores,
+            None => {
+                let raw = trace::meta_get(&conn, "stores")?.ok_or_else(|| {
+                    KernelError::UnknownStore("no stores recorded in this home".into())
+                })?;
+                let specs: Vec<Value> = serde_json::from_str(&raw)
+                    .map_err(|error| KernelError::MalformedManifest("stores".into(), error.to_string()))?;
+                specs
+                    .iter()
+                    .map(|s| StoreSpec {
+                        store: s["store"].as_str().unwrap_or_default().to_string(),
+                        tier: s["tier"].as_u64().unwrap_or(1) as u8,
+                        kind: if s["kind"] == "sqlite" {
+                            crate::snapshot::StoreKind::Sqlite
+                        } else {
+                            crate::snapshot::StoreKind::Fs
+                        },
+                        path: std::path::PathBuf::from(s["path"].as_str().unwrap_or_default()),
+                    })
+                    .collect()
+            }
+        };
+        let substrate_span = trace::meta_get(&conn, "substrate_span")?.ok_or_else(|| {
+            KernelError::MalformedManifest("fabric-home".into(), "missing substrate span".into())
+        })?;
+        let cas = Cas::open_existing(dir.join("cas"))?;
+        Ok(Self {
+            conn,
+            cas,
+            kek,
+            stores,
+            keystore,
+            fabric_sk,
+            user_sk,
+            substrate_span,
+            home: dir.to_path_buf(),
+            branch: None,
+        })
     }
 
     /// Fork a manifest's state into a working branch (brief §3 principle 2:
@@ -1152,6 +1265,198 @@ pub struct Explanation {
 mod tests {
     use super::*;
 
+    fn tree_bytes(root: &Path) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+        fn visit(
+            root: &Path,
+            path: &Path,
+            out: &mut std::collections::BTreeMap<PathBuf, Option<Vec<u8>>>,
+        ) {
+            let relative = path.strip_prefix(root).unwrap().to_path_buf();
+            let metadata = std::fs::symlink_metadata(path).unwrap();
+            if metadata.is_dir() {
+                out.insert(relative, None);
+                let mut children: Vec<_> = std::fs::read_dir(path)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .collect();
+                children.sort();
+                for child in children {
+                    visit(root, &child, out);
+                }
+            } else {
+                out.insert(relative, Some(std::fs::read(path).unwrap()));
+            }
+        }
+
+        let mut out = std::collections::BTreeMap::new();
+        if root.exists() {
+            visit(root, root, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn initialized_fabric_reopens_with_same_home_identities() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("fabric");
+        std::fs::create_dir(&home).unwrap();
+        let fabric = Fabric::initialize(&home, vec![]).unwrap();
+        let fabric_vk = fabric.fabric_vk();
+        let user_vk = fabric
+            .keystore()
+            .verifying_key(Role::UserRoot)
+            .unwrap();
+        let kek_id = fabric.kek.kek_id.clone();
+        drop(fabric);
+
+        let reopened = Fabric::open_existing(&home).unwrap();
+        assert_eq!(reopened.fabric_vk(), fabric_vk);
+        assert_eq!(
+            reopened
+                .keystore()
+                .verifying_key(Role::UserRoot)
+                .unwrap(),
+            user_vk
+        );
+        assert_eq!(reopened.kek.kek_id, kek_id);
+    }
+
+    #[test]
+    fn existing_fabric_key_loss_fails_without_home_mutation() {
+        let tmp = tempfile::tempdir().unwrap();
+        for lost in ["fabric.ed25519", "user_root.ed25519", "owner.kek"] {
+            let home = tmp.path().join(lost);
+            drop(Fabric::initialize(&home, vec![]).unwrap());
+            std::fs::remove_file(home.join("keys").join(lost)).unwrap();
+            let before = tree_bytes(&home);
+
+            assert!(matches!(
+                Fabric::open_existing(&home),
+                Err(KernelError::Keys(crate::keys::KeyError::Missing(_)))
+            ));
+            assert_eq!(tree_bytes(&home), before);
+            assert!(!home.join("keys").join(lost).exists());
+        }
+    }
+
+    #[test]
+    fn partial_fabric_initialization_never_completes_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let database_only = tmp.path().join("database-only");
+        std::fs::create_dir(&database_only).unwrap();
+        drop(Connection::open(database_only.join("fabric.db")).unwrap());
+
+        let keys_only = tmp.path().join("keys-only");
+        std::fs::create_dir(&keys_only).unwrap();
+        Keystore::initialize(keys_only.join("keys")).unwrap();
+
+        let keys_and_empty_database = tmp.path().join("keys-and-empty-database");
+        std::fs::create_dir(&keys_and_empty_database).unwrap();
+        Keystore::initialize(keys_and_empty_database.join("keys")).unwrap();
+        drop(Connection::open(keys_and_empty_database.join("fabric.db")).unwrap());
+
+        let mixed = tmp.path().join("mixed");
+        std::fs::create_dir(&mixed).unwrap();
+        drop(Connection::open(mixed.join("fabric.db")).unwrap());
+        std::fs::create_dir(mixed.join("keys")).unwrap();
+        std::fs::write(mixed.join("keys/fabric.ed25519"), [0x33; 32]).unwrap();
+
+        for home in [
+            &database_only,
+            &keys_only,
+            &keys_and_empty_database,
+            &mixed,
+        ] {
+            let before = tree_bytes(home);
+            assert!(Fabric::initialize(home, vec![]).is_err());
+            assert!(Fabric::open_existing(home).is_err());
+            assert_eq!(tree_bytes(home), before);
+        }
+    }
+
+    #[test]
+    fn existing_fabric_missing_or_substituted_cas_fails_without_repair() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let missing = tmp.path().join("missing-cas");
+        drop(Fabric::initialize(&missing, vec![]).unwrap());
+        std::fs::remove_dir(missing.join("cas")).unwrap();
+        let before = tree_bytes(&missing);
+        assert!(Fabric::open_existing(&missing).is_err());
+        assert_eq!(tree_bytes(&missing), before);
+        assert!(!missing.join("cas").exists());
+
+        let file = tmp.path().join("file-cas");
+        drop(Fabric::initialize(&file, vec![]).unwrap());
+        std::fs::remove_dir(file.join("cas")).unwrap();
+        std::fs::write(file.join("cas"), b"not a directory").unwrap();
+        let before = tree_bytes(&file);
+        assert!(Fabric::open_existing(&file).is_err());
+        assert_eq!(tree_bytes(&file), before);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let linked = tmp.path().join("linked-cas");
+            let target = tmp.path().join("cas-target");
+            std::fs::create_dir(&target).unwrap();
+            std::fs::write(target.join("sentinel"), b"unchanged").unwrap();
+            drop(Fabric::initialize(&linked, vec![]).unwrap());
+            std::fs::remove_dir(linked.join("cas")).unwrap();
+            symlink(&target, linked.join("cas")).unwrap();
+
+            assert!(Fabric::open_existing(&linked).is_err());
+            assert!(std::fs::symlink_metadata(linked.join("cas"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(std::fs::read(target.join("sentinel")).unwrap(), b"unchanged");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fabric_home_and_database_symlinks_cannot_redirect_reopen_or_initialization() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let empty_target = tmp.path().join("empty-target");
+        let init_link = tmp.path().join("init-link");
+        std::fs::create_dir(&empty_target).unwrap();
+        symlink(&empty_target, &init_link).unwrap();
+        let before = tree_bytes(&empty_target);
+
+        assert!(matches!(
+            Fabric::initialize(&init_link, vec![]),
+            Err(KernelError::AlreadyInitialized { .. })
+        ));
+        assert_eq!(tree_bytes(&empty_target), before);
+
+        let initialized_target = tmp.path().join("initialized-target");
+        drop(Fabric::initialize(&initialized_target, vec![]).unwrap());
+        let reopen_link = tmp.path().join("reopen-link");
+        symlink(&initialized_target, &reopen_link).unwrap();
+        let before = tree_bytes(&initialized_target);
+        assert!(Fabric::open_existing(&reopen_link).is_err());
+        assert_eq!(tree_bytes(&initialized_target), before);
+
+        let database_home = tmp.path().join("database-link");
+        drop(Fabric::initialize(&database_home, vec![]).unwrap());
+        let foreign_database = tmp.path().join("foreign.db");
+        std::fs::write(&foreign_database, b"foreign sentinel").unwrap();
+        std::fs::remove_file(database_home.join("fabric.db")).unwrap();
+        symlink(&foreign_database, database_home.join("fabric.db")).unwrap();
+        let foreign_before = std::fs::read(&foreign_database).unwrap();
+
+        assert!(Fabric::open_existing(&database_home).is_err());
+        assert_eq!(std::fs::read(&foreign_database).unwrap(), foreign_before);
+        assert!(std::fs::symlink_metadata(database_home.join("fabric.db"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
     #[test]
     fn patched_sqlite_runtime_opens_fabric() {
         assert!(
@@ -1162,7 +1467,7 @@ mod tests {
         );
         let tmp = tempfile::tempdir().unwrap();
         let floor_home = tmp.path().join("exact-floor");
-        let floor = Fabric::open_with_sqlite_version(
+        let floor = Fabric::initialize_with_sqlite_version(
             &floor_home,
             vec![],
             MIN_SAFE_SQLITE_VERSION,
@@ -1172,7 +1477,7 @@ mod tests {
         drop(floor);
 
         let bundled_home = tmp.path().join("bundled-runtime");
-        let bundled = Fabric::open(&bundled_home, vec![]).unwrap();
+        let bundled = Fabric::initialize(&bundled_home, vec![]).unwrap();
         assert!(bundled_home.join("fabric.db").is_file());
         drop(bundled);
     }
@@ -1181,7 +1486,8 @@ mod tests {
     fn affected_sqlite_runtime_creates_no_fabric_state() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("must-not-exist");
-        let result = Fabric::open_with_sqlite_version(&home, vec![], MIN_SAFE_SQLITE_VERSION - 1);
+        let result =
+            Fabric::initialize_with_sqlite_version(&home, vec![], MIN_SAFE_SQLITE_VERSION - 1);
         assert!(matches!(
             result,
             Err(KernelError::UnsafeSqliteVersion { .. })

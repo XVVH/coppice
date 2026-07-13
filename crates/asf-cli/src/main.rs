@@ -263,7 +263,7 @@ fn demo(dir: &Path) -> Result<()> {
         StoreSpec { store: "fs:vault".into(), tier: 1, kind: StoreKind::Fs, path: vault.clone() },
         StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db.clone() },
     ];
-    let mut fabric = Fabric::open(dir.join("fabric"), stores)?;
+    let mut fabric = Fabric::initialize(dir.join("fabric"), stores)?;
 
     // -- principals, channel, intent ---------------------------------------
     banner("register principals + local_session channel, capture intent");

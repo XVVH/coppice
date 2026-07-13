@@ -22,15 +22,6 @@ deferred; un-park trigger named). Ids are `W-n`, stable once assigned.
 
 ## In flight
 
-**W-12 — strict JCS input domain.** Implementation ready for review: the
-spec's integer-only `|n| < 2^53` domain is enforced recursively at seal and
-verify; every raw persisted fabric-object ingress rejects duplicate names
-before `serde_json::Value` construction; G2 vectors carry the exact bounds,
-RF-17 collision, nested floats, and duplicates. Valid signed bytes are
-unchanged. RF-6/SI-26 type-domain transcript versioning remains W-6's
-publication decision. Closes RF-17/P24 on merge.
-*Provenance: 2026-07-12 cryptographic mechanism audit.*
-
 **W-1 — Phase 5 dogfooding: real workflow-3 sessions.** Owner: operator.
 Drive vault-maintenance sessions through the brokered tools per
 `dogfooding.md`; track denial-FP rate, capability gaps, tripwires. First
@@ -39,15 +30,19 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-## Queued (ordered)
+**W-13 — key continuity and explicit initialization.** Owner: agent branch
+`agent/w13-key-continuity`. New-home initialization and existing-home reopen
+are separate APIs; reopen validates the fabric key, user-root key, and owner
+KEK before opening SQLite and never generates replacements. Complete keystore
+publication is directory-atomic and parent-fsynced; partial homes fail closed;
+malformed secret storage is never treated as empty. Two-sided loss/partial-home
+matrices and the targeted `w13_*` mutation lane (35 caught, five unviable,
+zero survivors) are implemented pending review.
+Closes RF-18's immediate mechanism when merged. SI-27/W-17 remains open for
+external custody, trust anchoring, rotation, recovery, and historical
+verification. *Provenance: 2026-07-12 cryptographic mechanism audit.*
 
-**W-13 — key continuity and explicit initialization.** Separate new-home key
-creation from existing-home reopen; fail closed on missing/malformed identity
-or KEK material; fsync publication; refuse malformed secret storage; test
-partial initialization and loss without generating replacement authority.
-Closes RF-18's immediate mechanism. SI-27/W-17 owns external custody,
-rotation, recovery, and historical verification. *Provenance: 2026-07-12
-cryptographic mechanism audit.*
+## Queued (ordered)
 
 **W-14 — typed object application + verified restore preparation.** One
 expected-prefix/kind/signature boundary for every authority-bearing object;
@@ -202,6 +197,12 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-12 — strict JCS input domain** — recursively enforces the integer-only
+  `|n| < 2^53` domain at seal and verify, rejects duplicate names at every raw
+  persisted fabric-object ingress, preserves valid signed bytes, and carries
+  language-neutral boundary/collision vectors plus a protected dispatch
+  negative and 36/36 targeted mutation result. Closes RF-17/P24; RF-6/SI-26
+  remains separate. (PR #39, 2026-07-12)
 - **W-10 — patched SQLite floor** — upgraded the bundled engine from affected
   SQLite 3.46.0 to 3.53.2, enforced a conservative 3.51.3 runtime floor before
   fabric-state creation, and added a two-sided `SQLITE-ENGINE` contract plus a

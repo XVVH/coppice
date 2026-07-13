@@ -89,7 +89,7 @@ current Rust crates are not evidence of a validated cryptographic module.
 | signed tool-registration placement not enforced | RF-26, G9, W-11 | fixed in PR #36 |
 | recovery preselection trusts unsigned promotion selectors | RF-27, G7 | non-blocking fail-closed hardening |
 | JCS semantic collision | RF-17, P24, G2, W-12 | fix now |
-| missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | fix now; lifecycle design follows |
+| missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | implementation in progress; lifecycle design follows |
 | unverified manifest application | RF-19, G10, W-14 | fix now |
 | restore preflight validates presence, not bytes | RF-20, G3, W-14 | fix now |
 | bundled SQLite WAL-reset defect | RF-21, W-10 | fixed in PR #37; 4/4 floor mutants caught |
@@ -129,6 +129,31 @@ SI-25/RF-13 rather than silently interpreted.
 | registrations live on fabric-lifetime span with `manifest:null` (§6) | `w11_live_tool_registration` | `signed_misplaced_tool_registration_cannot_dispatch` checks each placement dimension |
 | substrate offset is global order (§5.4/§6) | current `VerifiedEvent.offset` remains explicitly unsigned; signed `seq` is used only within one span | SI-25/RF-13/P15 for cross-span order, completeness, and freshness |
 
+## W-13 G9 inverse conformance (§8.1, §8.2)
+
+The spec assigns key roles but contains no lifecycle protocol; SI-27 is the
+explicit filing for that absence. W-13 implements only the conservative local
+continuity boundary RF-18 permits and does not reinterpret missing material as
+rotation or recovery.
+
+| Normative edge | Enforcing line/function | Negative evidence or filing |
+|---|---|---|
+| user-root and fabric signing roles remain distinct (§8.1) | `Role`, `Keystore::signing_key`; `Fabric` loads both from required existing files | `missing_or_malformed_required_key_never_regenerates` covers both roles; positive reopen compares both identities |
+| fabric/broker key continues to sign fabric objects (§8.1) | existing `Fabric::substrate_event`, manifest/channel/non-human sealing call sites are unchanged; W-13 only changes key acquisition | existing wrong-key/tamper negatives; SI-26 remains the separate type/domain transcript question |
+| agent-instance keys sign runtime attestations (§8.1) | no M4 runtime attestation implementation exists | G3/M4 open gap; W-13 neither creates nor claims an agent-instance lifecycle |
+| org mode adds an org root (§8.1) | org mode is absent | SI-27/W-17 lifecycle design; no implementation claim |
+| payload DEKs are wrapped to the owner KEK (§8.2) | existing `Kek::new_dek`/`unwrap_dek`; W-13 requires `owner.kek` continuity on reopen | `existing_fabric_key_loss_fails_without_home_mutation` and unit loss/malformed matrix; existing DEK wrap/shred primitive test |
+| multi-actor visibility is key distribution (§8.2) | single-owner Stage-1 KEK only | SI-27/W-17 and the spec's deferred policy; RF-14 remains the cleartext/co-resident custody blocker |
+| reopening never treats loss as initialization (SI-27/RF-18 immediate boundary) | distinct `Fabric::initialize`/`open_existing`, `Keystore::initialize`/`open_existing`; `w13_prepare_new_home`, `w13_validate_existing_fabric_home`, `w13_load_required_key`, `Cas::open_existing` | database-only, keys-only, mixed partial-home, missing/malformed key, database/CAS substitution, and no-repair matrices prove no replacement/home mutation |
+| proxy runtime state is created only on explicit first initialization | `w13_open_fabric_before_runtime_state`, separate fabric/runtime entry predicates, and existing-runtime validation | missing identity creates no `memory.db`; missing existing runtime is not repaired; runtime-init failure creates no fabric identity; outer/fabric/runtime symlink targets remain unchanged |
+| credential storage parse doubt never authorizes overwrite (RF-18) | `w13_load_secret_store` + `w13_parse_secret_store` shared by get/set; atomic write parent-fsync | malformed syntax, top-level shape, non-string value, and dangling-symlink matrix preserves the original entry/bytes |
+
+Crash scope is precise: W-13 fsyncs each key, the unpublished keystore
+directory, and its parent after directory publication. The suite proves
+complete steady-state publication and fail-closed partial reopen; it does not
+yet inject hard process exit at each syscall. That remaining crash-injection
+evidence is recorded in G3 rather than claimed here.
+
 ## Verification evidence
 
 - `./scripts/ci required` passed after the independent-review corrections:
@@ -147,6 +172,15 @@ SI-25/RF-13 rather than silently interpreted.
   so W-10 additionally pins the amalgamation version and runtime floor.
 - W-10's targeted runtime-floor lane caught 4/4 mutants after its first run
   exposed and corrected a missing exact-3.51.3 positive boundary.
+- W-13's targeted proxy/initialization/key/CAS/secret-store lane tested 40
+  mutants: 35 caught, five compiler-unviable whole-function replacements, zero
+  survivors or timeouts. Its iterative runs exposed and corrected missing
+  empty-home, ordering, non-repair, path-substitution, and independently masked
+  predicate boundaries.
+- W-13's `./scripts/ci required` run passed outside the socket-restricted
+  sandbox: strict Clippy, 17 contracts with 93 registered tests and 95 frozen
+  legacy tests, all 188 workspace tests, and both demos. The deep release lane
+  passed with 4,096 authority cases and 512 model histories.
 - W-11 merged in PR #36 and W-10 merged in PR #37; the broader audit trackers
   remain local work in progress for the queued remediations.
 

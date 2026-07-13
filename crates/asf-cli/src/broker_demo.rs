@@ -29,7 +29,7 @@ pub fn run(dir: &Path) -> Result<()> {
         StoreSpec { store: "fs:vault".into(), tier: 1, kind: StoreKind::Fs, path: vault.clone() },
         StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db },
     ];
-    let mut fabric = Fabric::open(dir.join("fabric"), stores)?;
+    let mut fabric = Fabric::initialize(dir.join("fabric"), stores)?;
     let human = fabric.register_principal("human", "josh", "01", None)?;
     let agent = fabric.register_principal("agent", "hermes", "02", Some(&human))?;
     let chan = fabric.register_channel(&human, "local_session", b"tty", "local_session")?;

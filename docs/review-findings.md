@@ -661,6 +661,39 @@ a process-level recovery negative proving the stranded branch is not skipped.
 This is a non-blocking dogfooding hardening item outside W-11's authority
 surface; schedule it with the next RF-9 recovery pass.
 
+## RF-28 — operator ledger trusts or hides unverified retained rows — in progress (W-19)
+
+**Severity: medium. Direction: FAIL-OPEN OPERATOR DECEPTION.**
+`Fabric::explain` currently folds raw `EventRow` values into its narrative and
+root accounting without checking the event signature, signed/materialized
+selector agreement, or per-span chain. A storage writer can therefore make an
+unsigned or invalidly signed row claim that live state has an explaining cause,
+or alter the displayed kind, span, or time of a genuine signed event. The
+one-line W-11-era candidate replacement with `verified_events` is also
+insufficient: that authority view deliberately omits wholly unsigned or
+foreign-signed rows, which would make an operator integrity surface silently
+hide the anomaly.
+
+The edit was never part of a merged PR. PR #37 explicitly excluded it as an
+unrelated W-11 reporting-line change; the docs-only PR #38 excluded it again,
+but the local candidate was not removed or tracked. A review of every PR
+merged, opened, or updated in the preceding 24 hours (#30–#40) confirmed that
+no patch or review owned it.
+
+**Fix:** W-19 gives reporting its own integrity view. Verified events may feed
+the narrative and root accounting only when the retained view is free of
+signature, selector, parse, kind, and chain findings. It also rejects unsigned
+storage order that contradicts the already-signed within-span sequence,
+preventing a W-11-shaped stale-tip lie. Every decodable anomalous row is
+reported with enough location to inspect it, and doubt already present in the
+observed view makes the CLI exit non-zero before drift attribution or CAS
+capture can create a protected effect. SQLite type errors also fail before
+accounting, although they may prevent raw-detail rendering. The two-sided
+ledger contract and a stable targeted mutation lane cover this boundary.
+SI-25/RF-13 remain explicit for unsigned cross-span offset order, deletion,
+rollback, expected-head completeness, and freshness, including replacement
+after a diagnostic view has already been observed.
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

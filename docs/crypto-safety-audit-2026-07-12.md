@@ -88,6 +88,7 @@ current Rust crates are not evidence of a validated cryptographic module.
 | signed grant parent not bound to capability ancestry | RF-25, G9, W-11 | fixed in PR #36 |
 | signed tool-registration placement not enforced | RF-26, G9, W-11 | fixed in PR #36 |
 | recovery preselection trusts unsigned promotion selectors | RF-27, G7 | non-blocking fail-closed hardening |
+| operator ledger trusts or silently omits unverified rows | RF-28, G10, W-19 | fix in progress; SI-25 global-order/rollback residual retained |
 | JCS semantic collision | RF-17, P24, G2, W-12 | fix now |
 | missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | implementation in progress; lifecycle design follows |
 | unverified manifest application | RF-19, G10, W-14 | fix now |
@@ -154,6 +155,25 @@ complete steady-state publication and fail-closed partial reopen; it does not
 yet inject hard process exit at each syscall. That remaining crash-injection
 evidence is recorded in G3 rather than claimed here.
 
+## W-19 G9 inverse conformance (brief §3/§5.1; spec §6)
+
+W-19 changes the operator diagnostic consumer, not authority reconstruction.
+The deliberate difference is load-bearing: unsigned state remains inert in
+the authority view, but it must be visible as doubt in the ledger that tells a
+human whether history is explainable.
+
+| Normative edge | Enforcing line/function | Negative evidence or filing |
+|---|---|---|
+| the trace is append-only, signed, and hash-chained per span (§6) | existing SQLite triggers; `verified_event_from_row`; `verify_verified_chain`; W-19 invokes both for every diagnostic view and rejects storage order that contradicts signed per-span `seq` | malformed raw, invalid signature, selector mismatch, middle-delete, and signed-sequence-reorder cells in the W-19 unit/process matrices; existing TRACE-CHAIN tests |
+| event envelope fields and the closed event-kind vocabulary are signed (§6) | strict `parse_fabric_json`; `verified_event_from_row` checks all seven materialized fields; `w19_event_is_known_kind`; `w19_event_has_object_body` | W-19 unit matrix includes signed unknown kind and non-object body; selector matrix remains seven-dimensional |
+| the trace feeds audit/forensic replay and the ledger cannot silently lie (brief §3/§5.1) | `ledger_event_view` represents every retained row as either a verified event or an explicit `TraceIntegrityFinding`; `Fabric::explain` calls `w19_require_clean` before folding roots | process negative proves invalid, mismatched, malformed, and broken-chain rows fail loudly rather than produce “explained” accounting |
+| diagnostic doubt already present in the observed view creates no protected effect | CLI calls `ledger_event_view`/`w19_require_clean` before `check_drift`; `Fabric::explain` gates before `snapshot::capture` | `ledger_integrity_failure_is_loud_and_preserves_home` compares the complete home byte-for-byte after both listing and raw-detail attempts; a concurrent post-view replacement remains SI-25 freshness, not a transactionality claim |
+| decodable retained records remain inspectable (brief neutrality/exportability; PR #35 ledger contract) | `LedgerEventView.records` carries exact raw text from the same SQLite statement snapshot; clean JSON renders normally, malformed text renders escaped; process exits non-zero on any finding | each process-negative cell proves non-empty detail output plus failing status and unchanged home; incompatible SQLite storage types reject the view before accounting but may prevent raw-detail rendering |
+| register/intent/grant/revoke placement and authority semantics (§6) | unchanged W-11 `VerifiedEvent` consumers and placement predicates | W-11 conformance table and authority protected-effect matrix; W-19 neither grants nor closes authority |
+| kind-specific body semantics beyond the signed envelope (§6) | current emitters and use-specific consumers validate the fields they require; W-19 adds only the universal object-body floor | G11/W-6: no universal per-kind schema validator or language-neutral negative corpus exists yet; no stronger conformance claim |
+| structural retention and shred semantics (§6) | unchanged payload/shred implementation | SI-28/SI-29/P13 remain the explicit envelope, atomicity, generation, and forensic-erasure filings |
+| global cross-span offset order, expected head, completeness, rollback, and freshness | not claimed; W-19 labels offset/span as forensic locations, but rejects an offset order that contradicts already-signed within-span `seq` | SI-25/RF-13/P15/W-15 |
+
 ## Verification evidence
 
 - `./scripts/ci required` passed after the independent-review corrections:
@@ -181,6 +201,14 @@ evidence is recorded in G3 rather than claimed here.
   sandbox: strict Clippy, 17 contracts with 93 registered tests and 95 frozen
   legacy tests, all 188 workspace tests, and both demos. The deep release lane
   passed with 4,096 authority cases and 512 model histories.
+- W-19's final `./scripts/ci required` run passed outside the socket-restricted
+  sandbox: strict Clippy, 18 contracts with 95 registered tests and 95 frozen
+  legacy tests, all 190 workspace tests, and both demos. Its deep release lane
+  passed with 4,096 authority cases and 512 model histories.
+- W-19's targeted diagnostic-view mutation lane tested 17 mutants: 14 caught,
+  three compiler-unviable, zero survivors or timeouts. Iterative runs exposed
+  and corrected a missing middle-deletion location assertion and an unsigned
+  offset/signed-sequence accounting gap before publication.
 - W-11 merged in PR #36 and W-10 merged in PR #37; the broader audit trackers
   remain local work in progress for the queued remediations.
 

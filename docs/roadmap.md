@@ -42,6 +42,18 @@ Closes RF-18's immediate mechanism when merged. SI-27/W-17 remains open for
 external custody, trust anchoring, rotation, recovery, and historical
 verification. *Provenance: 2026-07-12 cryptographic mechanism audit.*
 
+**W-19 — integrity-aware operator ledger.** Owner: agent branch
+`codex/w19-ledger-integrity`, rebased onto `main` after W-13 merged in PR #40. The
+diff-attribution ledger accounts only from signature-verified, selector-matched,
+chain-valid events while reporting malformed, foreign-signed, selector-mismatched,
+signed-sequence-reordered, and chain-anomalous retained rows explicitly instead
+of trusting or omitting them. Integrity already present in the observed view
+preflights before drift attribution can mutate state; process-level negatives
+preserve the complete fabric home on failure. Closes
+RF-28 without claiming SI-25's authenticated global order, completeness,
+rollback, or freshness. *Provenance: disposition of the excluded W-11-era
+`Fabric::explain` candidate after PRs #35–#40 were audited, 2026-07-13.*
+
 ## Queued (ordered)
 
 **W-14 — typed object application + verified restore preparation.** One
@@ -113,7 +125,8 @@ what cannot." *Provenance: 2026-07-10 review (both reviews converged).*
 **W-6 — Conformance surface.** Machine-readable schemas, canonical JCS
 fixtures (G2's language-neutral vectors), attenuation pass/fail pairs —
 the published form of the invariant-mapped tests (testing-theory §"future
-conformance suite"). Includes: **LICENSE file** (Cargo.toml declares
+conformance suite"). Includes G11's per-kind signed-event body schemas and
+negative fixtures. Includes: **LICENSE file** (Cargo.toml declares
 Apache-2.0; no license text ships — blocked on owner: copyright holder
 name), and the F2 execution checkpoint sits on this path (spec §9: decide
 before anything is published). *Provenance: 2026-07-10 review; neutrality

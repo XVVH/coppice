@@ -5,6 +5,34 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+fn tree_bytes(root: &Path) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+    fn visit(
+        root: &Path,
+        path: &Path,
+        out: &mut std::collections::BTreeMap<PathBuf, Option<Vec<u8>>>,
+    ) {
+        let relative = path.strip_prefix(root).unwrap().to_path_buf();
+        let metadata = std::fs::symlink_metadata(path).unwrap();
+        if metadata.is_dir() {
+            out.insert(relative, None);
+            let mut children = std::fs::read_dir(path)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            children.sort();
+            for child in children {
+                visit(root, &child, out);
+            }
+        } else {
+            out.insert(relative, Some(std::fs::read(path).unwrap()));
+        }
+    }
+
+    let mut out = std::collections::BTreeMap::new();
+    visit(root, root, &mut out);
+    out
+}
+
 fn initialized_home(root: &Path) -> PathBuf {
     let home = root.join("home");
     let vault = root.join("vault");
@@ -104,4 +132,128 @@ fn ledger_rejects_uninitialized_home_and_unknown_event_without_creating_state() 
     );
     let after = std::fs::metadata(home.join("fabric/fabric.db")).unwrap().len();
     assert_eq!(before, after, "failed detail lookup must not mutate the ledger");
+}
+
+#[test]
+fn ledger_integrity_failure_is_loud_and_preserves_home() {
+    for case in [
+        "invalid-signature",
+        "selector-mismatch",
+        "malformed-raw",
+        "broken-chain",
+        "signed-sequence-reorder",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = initialized_home(tmp.path());
+        let database = home.join("fabric/fabric.db");
+        let conn = Connection::open(&database).unwrap();
+        let target_offset: i64 = conn
+            .query_row("SELECT MIN(offset) FROM events", [], |row| row.get(0))
+            .unwrap();
+
+        match case {
+            "invalid-signature" => {
+                let raw: String = conn
+                    .query_row(
+                        "SELECT raw FROM events WHERE offset = ?1",
+                        [target_offset],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let mut event: Value = serde_json::from_str(&raw).unwrap();
+                event["body"]["object_kind"] = json!("forged");
+                conn.execute_batch("DROP TRIGGER events_append_only_u;").unwrap();
+                conn.execute(
+                    "UPDATE events SET raw = ?1 WHERE offset = ?2",
+                    (serde_json::to_string(&event).unwrap(), target_offset),
+                )
+                .unwrap();
+            }
+            "selector-mismatch" => {
+                conn.execute_batch("DROP TRIGGER events_append_only_u;").unwrap();
+                conn.execute(
+                    "UPDATE events SET kind = 'grant' WHERE offset = ?1",
+                    [target_offset],
+                )
+                .unwrap();
+            }
+            "malformed-raw" => {
+                conn.execute_batch("DROP TRIGGER events_append_only_u;").unwrap();
+                conn.execute("UPDATE events SET raw = '{' WHERE offset = ?1", [target_offset])
+                    .unwrap();
+            }
+            "broken-chain" => {
+                let span: String = conn
+                    .query_row(
+                        "SELECT span FROM events GROUP BY span HAVING COUNT(*) >= 3 LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                conn.execute_batch("DROP TRIGGER events_append_only_d;").unwrap();
+                conn.execute("DELETE FROM events WHERE span = ?1 AND seq = 1", [&span])
+                    .unwrap();
+            }
+            "signed-sequence-reorder" => {
+                let span: String = conn
+                    .query_row(
+                        "SELECT span FROM events GROUP BY span HAVING COUNT(*) >= 2 LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let first: i64 = conn
+                    .query_row(
+                        "SELECT offset FROM events WHERE span = ?1 AND seq = 0",
+                        [&span],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let second: i64 = conn
+                    .query_row(
+                        "SELECT offset FROM events WHERE span = ?1 AND seq = 1",
+                        [&span],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                conn.execute_batch("DROP TRIGGER events_append_only_u;").unwrap();
+                conn.execute("UPDATE events SET offset = -1 WHERE offset = ?1", [first])
+                    .unwrap();
+                conn.execute("UPDATE events SET offset = ?1 WHERE offset = ?2", [first, second])
+                    .unwrap();
+                conn.execute("UPDATE events SET offset = ?1 WHERE offset = -1", [second])
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        drop(conn);
+
+        let before = tree_bytes(&home);
+        let offset_arg = target_offset.to_string();
+        let detail = ledger(&home, &["--event", &offset_arg]);
+        assert!(!detail.status.success(), "{case}: anomalous detail must fail");
+        assert!(
+            !detail.stdout.is_empty(),
+            "{case}: anomalous raw record must remain inspectable"
+        );
+        assert!(
+            String::from_utf8_lossy(&detail.stderr).contains("ledger integrity failure"),
+            "{case}: {}",
+            String::from_utf8_lossy(&detail.stderr)
+        );
+        assert_eq!(tree_bytes(&home), before, "{case}: detail mutated protected state");
+
+        let listing = ledger(&home, &[]);
+        assert!(!listing.status.success(), "{case}: compromised listing must fail");
+        assert!(
+            String::from_utf8_lossy(&listing.stderr).contains("ledger integrity failure"),
+            "{case}: {}",
+            String::from_utf8_lossy(&listing.stderr)
+        );
+        assert!(
+            !String::from_utf8_lossy(&listing.stdout).contains("note: drift"),
+            "{case}: integrity must preflight before drift attribution"
+        );
+        assert_eq!(tree_bytes(&home), before, "{case}: listing mutated protected state");
+    }
 }

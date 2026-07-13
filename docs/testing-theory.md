@@ -376,6 +376,23 @@ ordinary and targeted lanes were green before that review. The corrections
 therefore extend the conformance map, consumer-level contracts, and mutation
 surface rather than treating the findings as isolated lines.
 
+The PR #43 (W-14) cycle founded this discipline's intake counterpart:
+review-finding triage. All six REQUEST-CHANGES findings were remediated
+in-PR within hours; four were protocol-class — their remedies introduced
+a new persistent record (the recovery journal), a new commit point, a
+new reconstruction of authoritative state (event-derived
+meters/exemptions), or changed which source a consumer treats as
+authoritative (signed candidate binding; advertisement liveness). Those
+are unratified semantics with no written clause to be conformant to —
+exactly the condition under which independent review cannot terminate,
+since each reviewer re-derives the missing protocol and finds different
+edges. The MUST form lives in AGENTS.md: protocol-class findings file an
+SI and ratify before implementation (SI-31…SI-34 are this founding
+case's retro-filings; W-20 batches their ratification); mechanism-class
+findings — a missing or wrong predicate inside already-ratified
+semantics — remediate in-PR as before; blocking findings cite the
+written clause they enforce or they are filings, not blockers.
+
 **G10. Authenticated-storage adversary matrix (cryptographic audit,
 2026-07-12).** Treat SQLite/CAS as attacker-controlled materialized storage
 while the signing key remains unavailable. For every signed event, mutate each

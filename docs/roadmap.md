@@ -38,6 +38,38 @@ update branch/revert/parent consumers; verify and stage every CAS dependency
 before live mutation. Negative contracts leave all protected stores unchanged.
 Closes RF-19/RF-20. *Provenance: 2026-07-12 cryptographic mechanism audit.*
 
+**W-20 — kernel security protocol pass (spec v0.8).** Owner: operator +
+agent. Write the operational stratum under the schema spec as one
+ratified batch instead of five just-in-time designs. The spec's
+invariants quantify over objects no ratified protocol yet constructs
+("verified substrate prefix", "durable authorization offset", "atomic"
+multi-root restore), so independent reviews re-derive the missing
+semantics per PR — the PR #43 cycle designed three protocols inside one
+remediation (RF-29…RF-32). Ordered contents: (1) ratify SI-25 — the
+keystone every other protocol consumes; candidate is ADR 0006, recovered
+from `agent/si25-authenticated-head-design` (W-15's design half);
+(2) retro-ratify W-14's in-PR protocols — SI-31 owned-state
+transition/recovery journal, SI-33 event-derived consumable authority,
+SI-34 approval candidate binding — with PR #43's merged implementation
+as candidate; (3) SI-32 store publication / filesystem attacker model;
+(4) SI-26 with SI-28/SI-29 (type/domain transcript; payload envelope
+AAD; post-shred generations — siblings, and SI-26 gates W-6); (5) SI-27
+key lifecycle; (6) cross-cutting: a §0 posture-qualifier convention
+binding each operational claim to the P-ledger vocabulary it holds
+under, and the typed authority projection (G11/W-6 pulled forward for
+authority consumers). Closes with one independent-context composition
+review over the seams (journal freshness ↔ SI-25; AAD ↔ SI-26; rotation
+↔ historical verification) — the batch exists so the protocols compose,
+not merely each hold. Deliverables: spec v0.8 plus a companion kernel
+security profile for syscall-level mechanism; SI-25…SI-34 resolved or
+explicitly deferred with named triggers; ledgers updated. Gate:
+W-15…W-18 implementation and any new authority-surface W item wait for
+their protocol's ratification; W-14 merges first behind its
+oracle-backed independent re-review (SI-31/SI-33/SI-34 are that
+oracle); W-1 dogfooding continues unaffected. *Provenance: the
+2026-07-13 spec-cohesion analysis of the PR #43 review cycle; sequences
+the existing ratify-first clauses of W-15/W-16/W-17 as one campaign.*
+
 **W-15 — authenticated global trace head (design then implementation).**
 Ratify SI-25, then bind global order, completeness, home/epoch, export order,
 and rollback freshness with an explicit recovery story. Closes RF-13/P15's

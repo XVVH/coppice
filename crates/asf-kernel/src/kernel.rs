@@ -1161,10 +1161,20 @@ mod tests {
             MIN_SAFE_SQLITE_VERSION
         );
         let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("fabric");
-        let fabric = Fabric::open(&home, vec![]).unwrap();
-        assert!(home.join("fabric.db").is_file());
-        drop(fabric);
+        let floor_home = tmp.path().join("exact-floor");
+        let floor = Fabric::open_with_sqlite_version(
+            &floor_home,
+            vec![],
+            MIN_SAFE_SQLITE_VERSION,
+        )
+        .unwrap();
+        assert!(floor_home.join("fabric.db").is_file());
+        drop(floor);
+
+        let bundled_home = tmp.path().join("bundled-runtime");
+        let bundled = Fabric::open(&bundled_home, vec![]).unwrap();
+        assert!(bundled_home.join("fabric.db").is_file());
+        drop(bundled);
     }
 
     #[test]

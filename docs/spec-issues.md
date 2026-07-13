@@ -9,7 +9,15 @@
 > v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; SI-22 is
 > interpreted (W-2); SI-24 is resolved in **v0.7 as A22** (implementation
 > is W-8); SI-23 remains open. The 2026-07-12 cryptographic mechanism
-> audit filed **SI-25…SI-30**; new issues start at **SI-31**.
+> audit filed **SI-25…SI-30**. The 2026-07-13 spec-cohesion analysis of
+> the PR #43 (W-14) review cycle filed **SI-31…SI-34** — protocol
+> questions that cycle answered in code without ratification, re-filed
+> at the spec layer (W-20 batches their ratification; PR #43's required
+> independent re-review uses SI-31/SI-33/SI-34 as its oracle). **SI-35**
+> is the workboard domain-label question, recovered from
+> `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
+> that number) at its W-21 revival decision; new issues start at
+> **SI-36**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -21,6 +29,161 @@ interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
 
 ---
+
+## SI-35 — workboard domain labels precede domain-taxonomy governance (§4, brief §10.2) — open
+
+*Recovered 2026-07-13 from `codex/workboard-dogfood`, where it was drafted
+2026-07-10 as that branch's SI-22 — a number main had already assigned to
+the gate-clock issue (the same race SI-23's renumbering note records).
+Refiled at the W-21 revival decision with one sharpening (the W-3
+clustering note below); implementation references describe the branch and
+revalidate at rebase.*
+
+The second dogfood profile must declare a domain for every registered action,
+but the brief deliberately leaves fabric-owned domain-taxonomy governance open.
+Using the existing `files.vault` label for structured work would flatten two
+dissimilar workloads; inventing globally authoritative roots in the
+implementation would silently settle the governance problem.
+
+**Branch implementation** (`proxy.rs` on `codex/workboard-dogfood`): the
+trusted, first-party workboard profile provisionally labels SQLite task
+actions `work.tracking` and Markdown evidence actions `work.evidence`. These
+strings make registration and domain-scoped traces honest, but they are not
+ratified taxonomy roots and MUST NOT be treated as portable trust domains or
+founding precedent for third-party registrations. No StandingRules or
+TrustRecords consume them yet, so renaming before that machinery lands is
+cheap — but W-3 clusters approvals by (caveat, action-class, **domain**), so
+the labels become load-bearing as soon as workboard approvals feed
+`asf rules candidates`, well before trust compilation: resolve or explicitly
+bless the provisional labels first.
+
+**Open question for the spec/design:** what fabric-owned root taxonomy and
+extension process should registrations use, and should evidence inherit the
+work item's domain or remain a separate domain? Resolve before these labels
+feed portable rules, trust compilation, or published conformance artifacts.
+
+## SI-34 — what exactly does a human approval bind to? (§5.3, §6, C1) — open
+
+C1 gives approvals provenance (channel + auth_strength) and the §6
+`approval` body names its escalation or promotion, but no clause states
+what an approval must bind to — the identity of the exact artifact the
+human reviewed. RF-31 (PR #43) showed the consequence: a parked
+promotion's signed escalation named only a numeric promotion id while the
+mutable `promotions` row supplied the manifest and preview, so swapping
+two valid pending rows redirected a human approval to a different branch
+than the one displayed. Nothing was forged; the approval was simply never
+bound to its object.
+
+Decide the general rule once — an approval is valid only for the exact
+signed candidate presented (what-you-see-is-what-you-approve) — so every
+approval surface inherits it instead of each consumer re-deriving it:
+which fields constitute candidate identity per approval type (promotion:
+preview + branch-root tuple + manifest + policy context; escalation
+exemption: caveat + action class + uses; future rule ratification: rule +
+counterfactuals shown, R1's informed-consent lineage); whether §6
+escalation/approval bodies gain normative digest fields or the binding
+stays implementation-internal; and how policy-context versioning behaves
+(an approval granted under promotion policy N must not silently apply
+under N+1).
+
+**W-14 candidate (implemented in PR #43, not a resolution):** the
+escalation signs promotion id, manifest, canonical digest of the exact
+preview, digest of the branch-root tuple, and versioned policy context;
+approval recomputes and verifies that still-unresolved binding before
+auth-strength, drift, or merge work; the signed approval repeats the
+candidate digest and commits atomically with the promotion. Ratify,
+adjust, or supersede at W-20.
+
+## SI-33 — what is authoritative for consumed authority: meters, exemptions, approval headroom? (§5.1, §6, A9) — open
+
+§5.1 calls budgets "broker-metered" and A9/SI-13 give approvals `uses`,
+but the spec never states where consumed quantity lives or what a
+decision may trust: runtime tables or the signed substrate. RF-29
+(PR #43) showed unsigned `broker_meters`/`exemptions` rows authorizing
+dispatch — a storage writer could reset a consumed meter or inject an
+exemption and receive an Allowed ticket, with gate replay too late to
+stop credential injection or the downstream effect.
+
+The doctrine to ratify is the A15/A22 materialized-view rule extended
+from existence to consumption: consumable authority is a pure function of
+the verified event prefix plus explicitly declared in-flight
+reservations; unsigned rows are caches, never authorization inputs. To
+pin down: the reservation object itself (in-memory pending dispatch
+today; the durable external-effect protocol's reservation record before
+first egress — P22); the exact-match binding of an approval to its prior
+signed escalation (which fields; duplicate and zero-use behavior); the
+transaction boundary (approval event and cache update share one commit);
+and composition with RF-3's accepted decision-time-consumption residual
+and the gate's ledger-recount backstop. Forward-looking: W-3's rule
+health counters and TrustRecord evidence are the same doctrine's next
+consumers — ratify it once, here.
+
+**W-14 candidate (implemented in PR #43, not a resolution):** decision
+meters and exemption headroom reconstruct from verified signed
+tool_call/escalation/approval events plus pending reservations; the two
+tables are demoted to compatibility caches never read for authorization;
+signer-anomalous capability, caveat, manifest, auth-strength, zero-use,
+duplicate-binding, and cross-capability edges fail closed.
+
+## SI-32 — store publication has no defined filesystem attacker or required OS primitives (§5.3, §9 F2) — open
+
+The spec assumes content-addressed preparation and coherent restore but
+never defines the filesystem adversary those operations run against.
+RF-20's remediation (PR #43) implemented a publication discipline —
+retained verified bytes, exclusive randomized no-follow siblings, rehash
+through the retained handle, same-inode non-symlink verification
+immediately before rename, fsync of file and parent — without a written
+threat model saying what those steps must defeat, so each review
+re-derives the attacker and finds a new residue.
+
+Define the attacker in tiers and label every guarantee with the tier it
+holds under: (1) offline storage tampering between processes — CAS,
+branch, or database bytes changed while nothing runs (the same-uid
+dogfooding concern, and the backup/restore case); (2) an active
+same-privilege writer holding descriptors or hardlinks across
+prepare→publish — where no sequence of pathname checks can win and the
+honest answer is OS-enforced exclusion or containment topology (P7/W-4,
+G-ADVERSARIAL); (3) the legitimate concurrent human edit, which is not an
+attack and must land in M8 drift attribution rather than corruption or
+silent loss. State the staged-bytes rule as normative (commit consumes
+retained verified bytes and never re-reads mutable storage after
+verification); the symlink/hardlink/directory-entry rules per store kind
+(fs tree vs. SQLite file); and which publication-safety claims require
+containment before G-PUBLISH.
+
+## SI-31 — owned-state transition: "atomically" has no commit point, journal semantics, or crash matrix (§5.3) — open
+
+§5.3 makes promotion the only mutation and has revert restore all roots
+"atomically", and A20/M8 serialize gates — but no clause defines the
+operational protocol that makes those words true: the commit point, the
+record that authoritatively names the committed root tuple, journal
+freshness, retry identity, rollback-failure behavior, or any crash cell.
+RF-30 (PR #43) found promotion/revert could partially commit or mutate
+live state without its signed event; the W-14 remediation designed the
+missing protocol inside the PR. That protocol is normative semantics — it
+defines what "atomic" and "recorded" mean — and must be ratified, not
+inherited from an implementation.
+
+To ratify (W-14's candidate in parentheses, implemented in PR #43): the
+state machine (prepare forward and rollback images for every root; stage
+the signed event, expected roots, promotion status, and companion
+approval in one uncommitted SQLite transaction; publish a fabric-signed
+recovery journal; apply and fsync stores; commit the database); the
+commit point (the database commit, with the linked verified event as the
+authoritative name of the committed root tuple); recovery semantics
+(reopen rolls back when the journal's linked verified event is absent,
+rolls forward when it is present and the root tuple matches exactly;
+mistyped, wrong-version, symlink, directory, and event/manifest-misbound
+journals are rejected before any restore); ordinary-failure behavior
+(every before-root restored and fsynced, database rolled back); and the
+journal's status (W-14 keeps `state-change.pending.json`
+implementation-private rather than a §6 event kind — ratify or amend that
+choice). Owned here or by composition at W-20: journal freshness against
+database/home rollback (a replayed old journal plus an old database is
+SI-25's freshness question); rollback-failure-during-recovery outcomes;
+and the boundary with the parked durable external-effect protocol (this
+issue is Tier-1-local only). The hard-exit-at-each-syscall matrix remains
+G3 evidence work under any ratified shape.
 
 ## SI-30 — salted redaction commitments have no canonical construction or reveal semantics (§1, §8.4) — open
 
@@ -99,6 +262,23 @@ export ordering, rollback detection, checkpoint recovery, and the relationship
 to the durable external-effect dispatch record. Do not encode an anchor design
 in code until ratified; RF-16's immediate verified-row fix is compatible with
 all candidates.
+
+**Candidate awaiting ratification (ADR 0006, 2026-07-12):** add one signed
+per-home global predecessor/sequence to every new event, checkpoint its
+terminal head, and advance a monotonic anchor outside the fabric home's
+rollback domain. The candidate explicitly limits an unanchored local signed
+head to retained-row order/integrity: it cannot prove freshness after
+full-disk rollback. Production and standing-authority claims therefore
+require a qualifying remote witness or hardware monotonic anchor. The ADR
+covers append/publication crashes, home/epoch and export binding, old-image
+recovery, durable dispatch ordering, legacy migration, key-history seams,
+performance/DoS, and the G9/G10 test plan. SI-25 remains **open**; no
+candidate field or anchor policy is normative until the human choices listed
+in the ADR are ratified and integrated into the spec. Provenance note
+(2026-07-13): this ADR and a companion implementation sketch were recovered
+from `agent/si25-authenticated-head-design`, an unpushed local branch based
+before W-12/W-13/W-19/W-14 — the ADR is W-20's ratification input; the
+sketch needs rebase before W-15 implementation.
 
 ---
 

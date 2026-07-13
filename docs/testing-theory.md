@@ -376,6 +376,30 @@ ordinary and targeted lanes were green before that review. The corrections
 therefore extend the conformance map, consumer-level contracts, and mutation
 surface rather than treating the findings as isolated lines.
 
+The PR #43 (W-14) cycle founded this discipline's intake counterpart:
+review-finding triage. All six REQUEST-CHANGES findings were remediated
+in-PR within hours; three were protocol-class — their remedies
+introduced a new persistent record and commit point (the recovery
+journal, RF-30), a new reconstruction of authoritative state
+(event-derived meters/exemptions, RF-29), or a new binding for what a
+consumer treats as authoritative (signed candidate digests, RF-31).
+Those are unratified semantics with no written clause to be conformant
+to — exactly the condition under which independent review cannot
+terminate, since each reviewer re-derives the missing protocol and
+finds different edges. RF-32 (tools/list advertisement liveness) is the
+instructive boundary case: it trips the structural test — a consumer's
+authoritative source changed — but its governing clause was already
+ratified (§5.4 liveness/M7; advertisement was a consumer that ignored
+it), so it is mechanism-class and remediates in-PR. The tiebreaker is
+whether the clause exists, not how structural the fix looks. The MUST
+form lives in AGENTS.md: protocol-class findings file an SI and ratify
+before implementation (the three map to SI-31/SI-33/SI-34, and SI-32
+files the publication attacker model RF-20's remediation implied; W-20
+batches their ratification); mechanism-class findings — a missing or
+wrong predicate inside already-ratified semantics — remediate in-PR as
+before; blocking findings cite the written clause they enforce or they
+are filings, not blockers.
+
 **G10. Authenticated-storage adversary matrix (cryptographic audit,
 2026-07-12).** Treat SQLite/CAS as attacker-controlled materialized storage
 while the signing key remains unavailable. For every signed event, mutate each

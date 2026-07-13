@@ -134,7 +134,7 @@ fn setup_mode(mode: AuthorityMode) -> World {
             path: memory_db.clone(),
         },
     ];
-    let mut fabric = Fabric::open(tmp.path().join("fabric"), stores).unwrap();
+    let mut fabric = Fabric::initialize(tmp.path().join("fabric"), stores).unwrap();
     let human = fabric
         .register_principal("human", "josh", "01", None)
         .unwrap();

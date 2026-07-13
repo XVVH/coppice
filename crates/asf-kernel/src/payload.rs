@@ -206,7 +206,10 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init(&conn).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let kek = Keystore::open(dir.path()).unwrap().kek().unwrap();
+        let kek = Keystore::initialize(dir.path().join("keys"))
+            .unwrap()
+            .kek()
+            .unwrap();
         (conn, kek)
     }
 

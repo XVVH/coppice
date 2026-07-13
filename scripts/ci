@@ -93,6 +93,20 @@ run_mutation() {
         --minimum-test-timeout 20 \
         --timeout-multiplier 3
 
+    heading "W-13 key-continuity mutation tests"
+    # Stable boundaries for explicit-new-home refusal, exact required-key
+    # loading, and malformed secret-store rejection. These are the predicates
+    # whose absence would recreate RF-18 or overwrite protected credentials.
+    cargo mutants \
+        -f crates/asf-cli/src/proxy.rs \
+        -f crates/asf-kernel/src/kernel.rs \
+        -f crates/asf-kernel/src/keys.rs \
+        -f crates/asf-kernel/src/snapshot.rs \
+        -F '(w13_open_fabric_before_runtime_state|w13_validate_existing_runtime_store|w13_fabric_entry_exists|w13_runtime_store_entry_exists|w13_initialize_memory_store|w13_prepare_new_home|w13_validate_existing_fabric_home|w13_load_required_key|w13_load_secret_store|w13_parse_secret_store|w13_validate_existing_cas)' \
+        -j 4 \
+        --minimum-test-timeout 20 \
+        --timeout-multiplier 3
+
     heading "authority-evaluation and promotion-policy mutation tests"
     cargo mutants \
         -f crates/asf-kernel/src/evaluate.rs \

@@ -100,6 +100,14 @@ impl Cas {
         Ok(Self { dir })
     }
 
+    /// Open an already-published CAS without creating or repairing it.
+    /// Existing-home reopen must not silently complete a partial fabric.
+    pub fn open_existing(dir: impl AsRef<Path>) -> Result<Self, SnapError> {
+        let dir = dir.as_ref().to_path_buf();
+        w13_validate_existing_cas(&dir)?;
+        Ok(Self { dir })
+    }
+
     fn blob_path(&self, hash: &str) -> Result<PathBuf, SnapError> {
         let Some(raw) = hash.strip_prefix("sha256:") else {
             return Err(SnapError::InvalidHash(hash.into()));
@@ -151,6 +159,24 @@ impl Cas {
         }
         Ok(bytes)
     }
+}
+
+fn w13_validate_existing_cas(dir: &Path) -> Result<(), SnapError> {
+    let metadata = fs::symlink_metadata(dir)
+        .map_err(|_| SnapError::MissingRoot(dir.to_path_buf()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(SnapError::Symlink(dir.to_path_buf()));
+    }
+    if !metadata.is_dir() {
+        return Err(SnapError::Io {
+            path: dir.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "existing CAS path is not a directory",
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Capture a store's current state into the CAS; returns its root hash.

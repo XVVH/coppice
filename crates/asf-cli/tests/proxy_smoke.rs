@@ -3,6 +3,7 @@
 //! would, with approvals over the daemon's Unix socket (C2 in the flesh:
 //! the MCP stream has no approval verb at all).
 
+use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -362,6 +363,136 @@ fn live_marker_count(home: &std::path::Path) -> i64 {
         |row| row.get(0),
     )
     .unwrap()
+}
+
+fn run_proxy_to_bootstrap(home: &std::path::Path) -> std::process::Output {
+    let asf = env!("CARGO_BIN_EXE_asf");
+    Command::new(asf)
+        .args(["proxy", "--home"])
+        .arg(home)
+        .args(["--vault"])
+        .arg(home.join("vault"))
+        .args(["--downstream", asf, "vault-server", "--vault"])
+        .arg(home.join("vault"))
+        .output()
+        .expect("run proxy bootstrap")
+}
+
+fn initialized_demo_home(tmp: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
+    let home = tmp.path().join(name);
+    let output = Command::new(env!("CARGO_BIN_EXE_asf"))
+        .arg("demo")
+        .arg(&home)
+        .output()
+        .expect("initialize test fabric");
+    assert!(
+        output.status.success(),
+        "demo initialization failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    home
+}
+
+#[test]
+fn bootstrap_missing_identity_creates_no_memory_store() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = initialized_demo_home(&tmp, "missing-identity");
+    let fabric_key = home.join("fabric/keys/fabric.ed25519");
+    let memory_db = home.join("memory.db");
+    std::fs::remove_file(&fabric_key).unwrap();
+    std::fs::remove_file(&memory_db).unwrap();
+
+    let output = run_proxy_to_bootstrap(&home);
+    assert!(!output.status.success(), "key-loss reopen must fail");
+    assert!(!fabric_key.exists(), "missing identity must not be replaced");
+    assert!(
+        !memory_db.exists(),
+        "proxy must validate existing identity before creating memory.db"
+    );
+}
+
+#[test]
+fn bootstrap_missing_runtime_store_fails_without_repair() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = initialized_demo_home(&tmp, "missing-runtime");
+    let memory_db = home.join("memory.db");
+    std::fs::remove_file(&memory_db).unwrap();
+
+    let output = run_proxy_to_bootstrap(&home);
+    assert!(!output.status.success(), "partial existing home must fail");
+    assert!(!memory_db.exists(), "reopen must not recreate lost state");
+}
+
+#[test]
+fn bootstrap_runtime_init_failure_creates_no_fabric_identity() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("runtime-init-failure");
+    std::fs::create_dir(&home).unwrap();
+    std::fs::create_dir(home.join("memory.db")).unwrap();
+
+    let output = run_proxy_to_bootstrap(&home);
+    assert!(!output.status.success(), "runtime initialization must fail");
+    assert!(home.join("memory.db").is_dir());
+    assert!(
+        !home.join("fabric").exists(),
+        "fabric identity must not publish after runtime-store failure"
+    );
+}
+
+#[test]
+fn bootstrap_path_symlinks_cannot_redirect_state() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::tempdir().unwrap();
+
+    let outer_target = tmp.path().join("outer-target");
+    let outer_link = tmp.path().join("outer-link");
+    std::fs::create_dir(&outer_target).unwrap();
+    symlink(&outer_target, &outer_link).unwrap();
+    let output = run_proxy_to_bootstrap(&outer_link);
+    assert!(!output.status.success(), "outer-home symlink must fail");
+    assert!(std::fs::read_dir(&outer_target).unwrap().next().is_none());
+
+    let new_home = tmp.path().join("new-memory-link");
+    let new_target = tmp.path().join("new-memory-target.db");
+    std::fs::create_dir(&new_home).unwrap();
+    Connection::open(&new_target)
+        .unwrap()
+        .execute_batch("CREATE TABLE sentinel (value TEXT);")
+        .unwrap();
+    symlink(&new_target, new_home.join("memory.db")).unwrap();
+    let before = std::fs::read(&new_target).unwrap();
+    let output = run_proxy_to_bootstrap(&new_home);
+    assert!(!output.status.success(), "new runtime-store symlink must fail");
+    assert_eq!(std::fs::read(&new_target).unwrap(), before);
+    assert!(!new_home.join("fabric").exists());
+
+    let fabric_link_home = tmp.path().join("fabric-link-home");
+    let fabric_link_target = tmp.path().join("fabric-link-target");
+    std::fs::create_dir(&fabric_link_home).unwrap();
+    std::fs::create_dir(&fabric_link_target).unwrap();
+    symlink(&fabric_link_target, fabric_link_home.join("fabric")).unwrap();
+    let output = run_proxy_to_bootstrap(&fabric_link_home);
+    assert!(!output.status.success(), "fabric-home symlink must fail");
+    assert!(!fabric_link_home.join("memory.db").exists());
+    assert!(std::fs::read_dir(&fabric_link_target).unwrap().next().is_none());
+
+    let existing_home = initialized_demo_home(&tmp, "existing-memory-link");
+    let existing_target = tmp.path().join("existing-memory-target.db");
+    Connection::open(&existing_target)
+        .unwrap()
+        .execute_batch("CREATE TABLE sentinel (value TEXT);")
+        .unwrap();
+    std::fs::remove_file(existing_home.join("memory.db")).unwrap();
+    symlink(&existing_target, existing_home.join("memory.db")).unwrap();
+    let before = std::fs::read(&existing_target).unwrap();
+    let output = run_proxy_to_bootstrap(&existing_home);
+    assert!(!output.status.success(), "existing runtime-store symlink must fail");
+    assert_eq!(std::fs::read(&existing_target).unwrap(), before);
+    assert!(std::fs::symlink_metadata(existing_home.join("memory.db"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }
 
 /// EOF may be queued while a downstream call is blocked, but the proxy's

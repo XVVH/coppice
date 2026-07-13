@@ -174,25 +174,81 @@ fn finish_session(broker: &Arc<Mutex<Broker>>, manifest: &str, branch: &std::col
     let _ = gate_stranded(&mut b, manifest, branch);
 }
 
-/// Open (bootstrapping on first run) the fabric home and start a session:
+/// Explicitly initialize on first run or reopen an existing fabric home, then
+/// start a session:
 /// step-boundary manifest + fresh session capability (M6: cheap, frequent).
-pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
+fn w13_validate_existing_runtime_store(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("required runtime store missing: {}", path.display()))?;
+    if !metadata.is_file() {
+        anyhow::bail!("required runtime store is not a file: {}", path.display());
+    }
+    Ok(())
+}
+
+fn w13_fabric_entry_exists(home: &Path) -> Result<bool> {
+    for entry in std::fs::read_dir(home)? {
+        if entry?.file_name() == std::ffi::OsStr::new("fabric") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn w13_runtime_store_entry_exists(dir: &Path, name: &std::ffi::OsStr) -> Result<bool> {
+    for entry in std::fs::read_dir(dir)? {
+        if entry?.file_name() == name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn w13_initialize_memory_store(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("memory store has no parent directory")?;
+    let name = path.file_name().context("memory store has no file name")?;
+    if w13_runtime_store_entry_exists(parent, name)? {
+        anyhow::bail!("refusing to initialize over runtime store: {}", path.display());
+    }
+    Connection::open(path)?
+        .execute_batch("CREATE TABLE memories (id INTEGER PRIMARY KEY, fact TEXT);")?;
+    Ok(())
+}
+
+fn w13_open_fabric_before_runtime_state(
+    home: &Path,
+    stores: Vec<StoreSpec>,
+    memory_db: &Path,
+) -> Result<Fabric> {
     std::fs::create_dir_all(home)?;
+    if !std::fs::symlink_metadata(home)?.is_dir() {
+        anyhow::bail!("proxy home is not a real directory: {}", home.display());
+    }
+    let fabric_home = home.join("fabric");
+    if w13_fabric_entry_exists(home)? {
+        let fabric = Fabric::open_existing(&fabric_home)?;
+        w13_validate_existing_runtime_store(memory_db)?;
+        return Ok(fabric);
+    }
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700))?;
     }
+    w13_initialize_memory_store(memory_db)?;
+    Ok(Fabric::initialize(&fabric_home, stores)?)
+}
+
+pub fn bootstrap(home: &Path, vault: &Path) -> Result<Session> {
     let memory_db = home.join("memory.db");
-    if !memory_db.exists() {
-        Connection::open(&memory_db)?
-            .execute_batch("CREATE TABLE memories (id INTEGER PRIMARY KEY, fact TEXT);")?;
-    }
     let stores = vec![
         StoreSpec { store: "fs:vault".into(), tier: 1, kind: StoreKind::Fs, path: vault.to_path_buf() },
-        StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db },
+        StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db.clone() },
     ];
-    let fabric = Fabric::open(home.join("fabric"), stores)?;
+    let fabric = w13_open_fabric_before_runtime_state(home, stores, &memory_db)?;
     let mut broker = Broker::new(fabric)?;
 
     // Gate any session a previous proxy left stranded BEFORE this session
@@ -608,13 +664,8 @@ pub fn run(home: PathBuf, vault: PathBuf, downstream: Vec<String>) -> Result<()>
 /// manifest ids handle legacy branches from before the markers existed
 /// (the operator asserts those sessions are dead by naming them). Run this
 /// with no live proxy on the home.
-pub fn recover_cli(home: &Path, vault: &Path, manifests: &[String]) -> Result<()> {
-    let memory_db = home.join("memory.db");
-    let stores = vec![
-        StoreSpec { store: "fs:vault".into(), tier: 1, kind: StoreKind::Fs, path: vault.to_path_buf() },
-        StoreSpec { store: "db:memory".into(), tier: 1, kind: StoreKind::Sqlite, path: memory_db },
-    ];
-    let fabric = Fabric::open(home.join("fabric"), stores)?;
+pub fn recover_cli(home: &Path, _vault: &Path, manifests: &[String]) -> Result<()> {
+    let fabric = Fabric::open_existing(home.join("fabric"))?;
     let mut broker = Broker::new(fabric)?;
     recover_stranded_sessions(&mut broker)?;
     for manifest in manifests {

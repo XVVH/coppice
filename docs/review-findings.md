@@ -469,7 +469,7 @@ Independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS.
 The authority-review gate is satisfied; fixed by `452c9bc` and merged in PR
 #36.
 
-## RF-17 — JCS accepts signature-preserving numeric semantic collisions — remediated by W-12 (pending merge)
+## RF-17 — JCS accepts signature-preserving numeric semantic collisions — fixed by W-12 (PR #39)
 
 **Severity: high at the signed-format boundary. Direction: AUTHENTICITY.** The
 spec requires integer `|n| < 2^53` and forbids floats, but `jcs_bytes`, `seal`,
@@ -493,7 +493,20 @@ includes bounds, nested floats, collision inputs, and duplicates. A protected
 tool-dispatch negative covers both duplicate-bearing object and event rows.
 Type/domain transcript binding remains the separate RF-6/SI-26 decision.
 
-## RF-18 — existing homes silently regenerate missing identity and KEK files — open
+## RF-18 — existing homes silently regenerate missing identity and KEK files — in-progress
+
+**W-13 correction (pending merge):** `Fabric::initialize` and
+`Fabric::open_existing` are now distinct public operations. Initialization
+publishes the complete fabric/user-root/owner-KEK set as one fsynced directory
+entry; reopen validates all three before opening SQLite and never creates key
+material. Existing and partial homes refuse re-initialization; fabric-home,
+database, CAS, and proxy runtime-store paths must already have the expected
+non-symlink shape, and reopen never repairs missing state. Malformed
+`secrets.json` syntax, shape, or non-string values fail without overwrite.
+The `KEY-CONTINUITY` contract exercises loss, malformed material, database-only,
+keys-only, mixed partial-home, missing-CAS/runtime, and path-substitution cases;
+the targeted `w13_*` mutation lane caught all 35 viable mutants (five
+compiler-unviable, zero survivors). SI-27/W-17 and RF-14 remain open.
 
 **Severity: high. Direction: IDENTITY SPLIT / IRRECOVERABLE DATA LOSS.**
 `load_or_create_raw` cannot distinguish first initialization from key loss.

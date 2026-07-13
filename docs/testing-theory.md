@@ -173,11 +173,15 @@ are covered; session-boundary SIGKILL recovery is covered too. Nothing yet kills
 a process *during* a multi-root promotion/revert commit, between state mutation
 and event append, or between event append and expected-root updates. Add that
 full subprocess crash matrix when the atomic commit protocol is designed. Same
-family: WAL/-shm sidecars under a crashed reader. RF-18/RF-20/RF-22 add the
-near-term matrix: key-file publication and missing-key reopen, every boundary
+family: WAL/-shm sidecars under a crashed reader. W-13 now covers complete
+key-directory publication, concurrent initialization, required-key
+loss/malformed reopen, database-only, keys-only, mixed partial homes,
+missing/substituted database, CAS, and runtime-store paths, and malformed
+credential storage; every negative snapshots protected material and proves no
+replacement identity, repair, external-target write, or overwrite occurred. Still pending from
+RF-20/RF-22: hard-process exit at each key-publication syscall, every boundary
 of payload put/shred, signed shred-event sequencing, and corrupt/missing CAS
-objects during prepare. Every failure asserts that no replacement identity and
-no partial protected state mutation occurred.
+objects during prepare.
 
 **G4. Concurrency.** Generated model histories cover logical interleavings. A
 programmable downstream barrier now forces both in-flight timing directions:
@@ -202,6 +206,21 @@ dimension logic IS `evaluate.rs` (the gate replays the decision-time
 evaluator over signed records), so the scheduled evaluator lane's mutants
 now guard gate-time semantics too — a single hand-rolled recheck drifting
 out of sync is no longer a representable bug.
+
+W-13 adds a stable targeted lane over the `w13_*` boundaries in proxy, kernel,
+keystore, and CAS: explicit new/existing-home classification, identity-before-
+runtime ordering, non-repair of missing runtime/CAS state, path-shape and
+symlink rejection, exact required-material load, secret-file classification,
+and malformed credential-store rejection. Its contract negatives assert
+absence of replacement/repair files and byte-for-byte preservation of external
+targets, so a killed mutant means the protected effect stayed absent—not merely
+that an error changed. The final targeted run caught all 35 viable mutants;
+five whole-function replacements were compiler-unviable and none survived.
+Iterative runs exposed missing exact boundaries, fail-closed-but-late proxy
+effects, path substitution, and a shared predicate whose failures masked one
+another; the final lane separates and kills each meaningful predicate.
+directory-entry enumeration now treats dangling symlinks as malformed rather
+than absent.
 
 A21/M7 has its own stable targeted mutation surface:
 `m7_grant_offsets`, `m7_effect_capability`, and `m7_verify_grant`. The mutation

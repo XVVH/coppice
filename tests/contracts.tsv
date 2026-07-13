@@ -60,6 +60,26 @@ LEDGER-UX|negative|ledger_rejects_uninitialized_home_and_unknown_event_without_c
 SQLITE-ENGINE|positive|kernel::tests::patched_sqlite_runtime_opens_fabric
 SQLITE-ENGINE|negative|kernel::tests::affected_sqlite_runtime_creates_no_fabric_state
 
+# W-13/§8 home-lifetime key continuity: creation is explicit and complete;
+# reopen never replaces missing/malformed fabric, user-root, or owner-KEK
+# material, and malformed credential storage is never treated as empty.
+KEY-CONTINUITY|positive|keys::tests::key_continuity_survives_reopen
+KEY-CONTINUITY|positive|kernel::tests::initialized_fabric_reopens_with_same_home_identities
+KEY-CONTINUITY|negative|keys::tests::missing_or_malformed_required_key_never_regenerates
+KEY-CONTINUITY|negative|keys::tests::partial_keystore_initialization_never_mints_missing_material
+KEY-CONTINUITY|negative|kernel::tests::existing_fabric_key_loss_fails_without_home_mutation
+KEY-CONTINUITY|negative|kernel::tests::partial_fabric_initialization_never_completes_itself
+KEY-CONTINUITY|negative|kernel::tests::existing_fabric_missing_or_substituted_cas_fails_without_repair
+KEY-CONTINUITY|negative|kernel::tests::fabric_home_and_database_symlinks_cannot_redirect_reopen_or_initialization
+KEY-CONTINUITY|negative|bootstrap_missing_identity_creates_no_memory_store
+KEY-CONTINUITY|negative|bootstrap_missing_runtime_store_fails_without_repair
+KEY-CONTINUITY|negative|bootstrap_runtime_init_failure_creates_no_fabric_identity
+KEY-CONTINUITY|negative|bootstrap_path_symlinks_cannot_redirect_state
+KEY-CONTINUITY|negative|keys::tests::malformed_secret_store_is_not_overwritten
+KEY-CONTINUITY|supporting|keys::tests::initialized_keystore_material_is_complete_and_private
+KEY-CONTINUITY|supporting|keys::tests::concurrent_initialization_publishes_one_complete_identity
+KEY-CONTINUITY|supporting|keys::tests::valid_secret_store_roundtrip
+
 # W-2 unified gate replay: the decision evaluator re-runs over signed
 # records, clocked at each event's `at` (SI-22 at-the-time semantics).
 GATE-REPLAY|positive|si22_gate_clock_is_the_events_at_not_gate_time

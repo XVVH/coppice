@@ -66,6 +66,13 @@ is also a production boundary. The immediate implementation may fail closed on
 missing keys without deciding the larger lifecycle, but rotation/custody claims
 wait for this amendment.
 
+**Immediate W-13 boundary (implementation in progress, not a resolution):**
+new-home initialization is explicit; an existing or partial home with missing
+or malformed fabric, user-root, or owner-KEK material fails closed without
+replacement. This supplies no trust anchor, rotation certificate, recovery
+ceremony, custody improvement, or historical-key registry; all of those remain
+the unresolved question here and gate W-17.
+
 ## SI-26 — the signed transcript does not bind object type or protocol domain (§0, §8) — open
 
 The spec explicitly signs JCS of the body excluding `id` and `sig`; the type

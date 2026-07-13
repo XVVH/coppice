@@ -59,7 +59,7 @@ fn gate_lock_child_helper() {
     let started = PathBuf::from(std::env::var("ASF_GATE_STARTED").unwrap());
     let acquired = PathBuf::from(std::env::var("ASF_GATE_ACQUIRED").unwrap());
     let release = PathBuf::from(std::env::var("ASF_GATE_RELEASE").unwrap());
-    let fabric = Fabric::open(home, store(vault)).unwrap();
+    let fabric = Fabric::open_existing_with_stores(home, store(vault)).unwrap();
     fs::write(&started, b"waiting").unwrap();
     let _guard = fabric.gate_lock().unwrap();
     fs::write(&acquired, b"acquired").unwrap();
@@ -75,7 +75,7 @@ fn gate_lock_blocks_another_process() {
     let acquired = tmp.path().join("child-acquired");
     let release = tmp.path().join("release-child");
     fs::create_dir_all(&vault).unwrap();
-    let fabric = Fabric::open(&home, store(vault.clone())).unwrap();
+    let fabric = Fabric::initialize(&home, store(vault.clone())).unwrap();
     let guard = fabric.gate_lock().unwrap();
 
     let child = Command::new(std::env::current_exe().unwrap())

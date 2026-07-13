@@ -43,7 +43,7 @@ pub fn run(parsed: &ParseOutcome, home: &Path, limit: usize) -> Result<Value> {
         kind: StoreKind::Fs,
         path: scratch,
     }];
-    let fabric = Fabric::open(home.join("fabric"), stores)?;
+    let fabric = Fabric::initialize(home.join("fabric"), stores)?;
     let mut broker = Broker::new(fabric).context("broker init")?;
 
     let human = broker

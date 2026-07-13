@@ -62,7 +62,7 @@ fn setup() -> World {
             path: memory_db.clone(),
         },
     ];
-    let fabric = Fabric::open(tmp.path().join("fabric"), stores).unwrap();
+    let fabric = Fabric::initialize(tmp.path().join("fabric"), stores).unwrap();
     World {
         _tmp: tmp,
         vault,

@@ -22,33 +22,6 @@ deferred; un-park trigger named). Ids are `W-n`, stable once assigned.
 
 ## In flight
 
-**W-10 — patched SQLite floor.** Owner: current security-hardening session.
-Upgrade the bundled engine out of the WAL-reset affected range (SQLite
-3.7.0…3.51.2, except separately identified fixed backports), assert the runtime
-version mechanically, and carry a two-sided storage-integrity contract so
-dependency drift cannot silently reintroduce the engine defect. Implemented in
-`fa9defd` at bundled SQLite 3.53.2 with a conservative 3.51.3 runtime floor;
-required/deep/RustSec lanes are green. Closes RF-21 when merged.
-*Provenance: 2026-07-12 cryptographic mechanism audit.*
-
-**W-11 — verified-event authority boundary.** Owner: current
-security-hardening session. Replace A22's trust in denormalized event indexes
-with a `VerifiedEvent` derived from signed raw; establish exact row agreement
-before filtering; use the signed replay clock; add all seven signed-materialized
-selector and combined `kind`+`span` concealment negatives; extend the
-targeted A22 mutation surface. Unsigned global `offset` is explicitly filed
-under SI-25 rather than silently claimed. This repairs RF-16 without choosing
-SI-25's global-head design. Authority surface: independent-context review
-required. *Provenance: reproduced post-revoke allow in the 2026-07-12
-cryptographic mechanism audit.*
-The first independent review returned REQUEST CHANGES: unsigned-offset
-branch-tip selection, a split events/head decision snapshot, unchecked signed
-grant parent, missing registration placement, and constructor-only negative
-evidence. All five corrections are implemented with protected-effect
-contracts and expanded mutation lanes (RF-16/RF-25/RF-26); independent
-re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS. The authority-review
-gate is satisfied; W-11 is implemented in `452c9bc` and ready to merge.
-
 **W-1 — Phase 5 dogfooding: real workflow-3 sessions.** Owner: operator.
 Drive vault-maintenance sessions through the brokered tools per
 `dogfooding.md`; track denial-FP rate, capability gaps, tripwires. First
@@ -58,6 +31,55 @@ Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
 ## Queued (ordered)
+
+**W-12 — strict JCS input domain.** Enforce the spec's integer-only
+`|n| < 2^53` domain at seal and verify, with the reproduced adjacent-u64
+signature collision and nested-float negatives plus language-neutral G2
+vectors. Valid signed bytes do not change; RF-6/SI-26 type-domain transcript
+versioning remains W-6's publication decision. Closes RF-17/P24.
+*Provenance: 2026-07-12 cryptographic mechanism audit.*
+
+**W-13 — key continuity and explicit initialization.** Separate new-home key
+creation from existing-home reopen; fail closed on missing/malformed identity
+or KEK material; fsync publication; refuse malformed secret storage; test
+partial initialization and loss without generating replacement authority.
+Closes RF-18's immediate mechanism. SI-27/W-17 owns external custody,
+rotation, recovery, and historical verification. *Provenance: 2026-07-12
+cryptographic mechanism audit.*
+
+**W-14 — typed object application + verified restore preparation.** One
+expected-prefix/kind/signature boundary for every authority-bearing object;
+update branch/revert/parent consumers; verify and stage every CAS dependency
+before live mutation. Negative contracts leave all protected stores unchanged.
+Closes RF-19/RF-20. *Provenance: 2026-07-12 cryptographic mechanism audit.*
+
+**W-15 — authenticated global trace head (design then implementation).**
+Ratify SI-25, then bind global order, completeness, home/epoch, export order,
+and rollback freshness with an explicit recovery story. Closes RF-13/P15's
+production and standing-authority gate. W-11 has landed; W-3 may collect
+disposable examples but may not compile standing authority until W-15 lands.
+*Provenance: RF-13 + 2026-07-12 cryptographic mechanism audit.*
+
+**W-16 — payload envelope v2 and shred protocol.** Ratify SI-28/SI-29, then
+bind canonical AAD and algorithm/version/key metadata, enforce the KEK wrap
+lifecycle, decrypt against a complete signed `PayloadRef`, and make put/shred
+crash-safe before tackling the separately parked forensic-media guarantee.
+Closes RF-22/P19; composes with P13. *Provenance: 2026-07-12 cryptographic
+mechanism audit.*
+
+**W-17 — production key custody and lifecycle.** After SI-27, move user-root,
+fabric, KEK, and credential custody behind the chosen independent OS/hardware
+or remote boundary; implement trust anchors, rotation, recovery, and historical
+verification. Closes RF-14's production boundary. No real credential ships
+before this and W-18. *Provenance: RF-14 + 2026-07-12 cryptographic mechanism
+audit.*
+
+**W-18 — authenticated identity, approval, and credential containment.**
+Resolve SI-23, holder/channel proof and user presence (RF-24), and the trusted
+credential-adapter/response boundary (RF-23/P27). Composes with W-4 rather than
+replacing containment. No actuation, third-party credential adapter, or live
+credential ships first. *Provenance: SI-23 + 2026-07-12 cryptographic mechanism
+audit.*
 
 **W-3 — Start the accretion counters: dumb clerk + TrustRecords.**
 Deterministic, no model. `asf rules candidates`: cluster approval events
@@ -140,20 +162,17 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Parked (trigger-gated — do not start without the trigger)
 
-- **SI-23 actuation/approval-surface mechanisms (C7 candidate)** —
-  trigger: any actuation-scoped tool (computer use, shell, UI control)
-  approaching registration; the dogfooding graduation gate blocks
-  registration until ratified AND built. Ratifying the *constraints* now
-  is cheap (base case = current behavior) and should precede spec
-  publication (W-6) — C6's total order is already believed wrong under
-  live actuation. Design input to W-4 (the two are complements:
-  attestation/containment vs. approval-surface integrity).
+- **Actuation registration remains trigger-blocked by SI-23/W-18.** W-18 is
+  now queued to ratify and build the identity/approval/credential boundary;
+  this parked gate still means no computer-use, shell, or UI-control tool may
+  register before that work completes. W-4 remains its containment complement.
 - **Checkpoint session boundary** — ADR 0004 tripwire (ops-per-promotion /
   conflict incidence).
 - **R2 read-authority family** — before the first `external_reach: live`
   tool (ADR 0005 binds the shape; dogfooding graduation criterion).
-- **Trace-head anchoring + crash-atomic multi-root commit + RF-13** —
-  bundle; production/live-egress release gates (security audit).
+- **Crash-atomic multi-root commit** — production/live-egress release gate;
+  authenticated trace order/head moved to queued W-15 after SI-25 separated
+  its cryptographic protocol from the state-commit protocol.
 - **Broker-outage loud fail-open + `on_broker_outage`** — live-egress
   integration.
 - **Durable external-effect protocol** — trigger: the first tool that
@@ -181,6 +200,19 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-10 — patched SQLite floor** — upgraded the bundled engine from affected
+  SQLite 3.46.0 to 3.53.2, enforced a conservative 3.51.3 runtime floor before
+  fabric-state creation, and added a two-sided `SQLITE-ENGINE` contract plus a
+  stable targeted mutation lane (4/4 caught). Closes RF-21. (PR #37,
+  2026-07-12)
+- **W-11 — verified-event authority boundary** — authority consumers verify
+  signed raw before filtering, require exact agreement for all seven
+  signed/materialized selectors, take decision events/head from one statement
+  view, use signed `seq` for within-span replay and branch-tip selection, bind
+  grant parent exactly, and enforce registration placement. The first
+  independent-context review returned REQUEST CHANGES; all five findings were
+  corrected and re-review approved with non-blocking follow-ups. Closes
+  RF-16/RF-25/RF-26; SI-25 and RF-27 remain explicit. (PR #36, 2026-07-12)
 - **W-8 — capability closure + revocation (A22/§5.4)** — the signed
   `revoke` edge as the permanent, prospective, descendant-closing dual of
   A21's `grant`: pure event-derived liveness (`a22_*` predicates — the

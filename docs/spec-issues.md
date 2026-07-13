@@ -8,7 +8,8 @@
 > historical. New issues found under v0.4 start at **SI-20** (resolved in
 > v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; SI-22 is
 > interpreted (W-2); SI-24 is resolved in **v0.7 as A22** (implementation
-> is W-8); SI-23 remains open; new issues start at **SI-25**.
+> is W-8); SI-23 remains open. The 2026-07-12 cryptographic mechanism
+> audit filed **SI-25…SI-30**; new issues start at **SI-31**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -18,6 +19,79 @@ Settled decisions (F1, F4, fail-open) are not re-litigated here.
 Status legend: **open** = needs a spec amendment or an explicit "fine as
 interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
+
+---
+
+## SI-30 — salted redaction commitments have no canonical construction or reveal semantics (§1, §8.4) — open
+
+The spec writes `sha256:salt‖value` but does not define salt entropy or length,
+the canonical encoding of `value`, domain/field/object binding, unambiguous
+concatenation, where the salt lives, whether it is later revealed or destroyed,
+or what an opening proves. These choices determine whether the construction is
+binding, privacy-preserving for low-entropy values, and interoperable. No
+implementation may silently choose them. This issue is specification-only;
+redaction commitments are not implemented today.
+
+## SI-29 — can identical content return after its payload hash is shredded? (§1, §8.4) — open
+
+Payload identity is currently the plaintext SHA-256. A shredded row and
+tombstone persist structurally, so re-storing identical bytes returns the
+permanently unreadable reference. The spec's "destroys content everywhere at
+once" can support that permanent-hash reading, but later ingestion could also
+be understood as a new payload generation with a new DEK. Multi-owner
+retention makes the distinction load-bearing. Decide whether hashes are
+permanently poisoned, generation-qualified, or represented by another explicit
+lifecycle. This issue does not resolve the known multi-actor visibility-policy
+problem.
+
+## SI-28 — what exactly does the payload AEAD envelope authenticate? (§1, §8.2) — open
+
+A19/SI-9 names AES-256-GCM but does not define envelope versioning, associated
+data, algorithm dispatch, KEK identifiers, multiple owner wraps, or the nonce
+and invocation lifecycle of a long-lived KEK. RF-22/P19 show that these fields
+cannot remain documentary: hash, size, media type, DEK id, KEK id, algorithm,
+home/tenant context, purpose, and format version need an unambiguous binding or
+an explicit reason for exclusion. Decide the canonical transcript and migration
+rule before changing stored ciphertext. Multi-actor visibility policy remains
+open; this issue reserves a compatible mechanism without choosing that policy.
+
+## SI-27 — fabric identity initialization, rotation, recovery, and historical verification are unspecified (§8.1, §8.2) — open
+
+The hierarchy names user, fabric, agent, and owner keys but not how a home is
+first anchored, how reopening distinguishes missing keys from first use, which
+public identity a verifier trusts, how rotation is certified, how historical
+records remain verifiable, or how loss and compromise differ. RF-18 proves
+that `load-or-create` is unsafe for an existing home; RF-14 shows that custody
+is also a production boundary. The immediate implementation may fail closed on
+missing keys without deciding the larger lifecycle, but rotation/custody claims
+wait for this amendment.
+
+## SI-26 — the signed transcript does not bind object type or protocol domain (§0, §8) — open
+
+The spec explicitly signs JCS of the body excluding `id` and `sig`; the type
+prefix is outside those bytes. RF-6 therefore cannot be fixed interoperably by
+simply prepending the prefix: that would change the normative transcript and
+every existing signature. The same fabric key signs several object classes,
+so decide a versioned type/domain transcript (or a signed type field), expected
+prefix verification, migration of existing objects, and whether distinct role
+keys also become mandatory. This must resolve before W-6 publishes fixtures.
+
+## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — open
+
+Per-span signed chains authenticate records within the rows a verifier sees,
+but the global substrate offset is unsigned and no expected head detects tail
+truncation, whole-span deletion, or database rollback. A22 liveness, M7 grant
+ordering, approval headroom, `captured_before`, and drift windows all consume
+that order. RF-13 and RF-16 demonstrate that "verified substrate prefix" is
+not presently a mechanically available object.
+
+Choose the normative representation: one per-home global signed chain,
+periodic signed checkpoints committing per-span heads and global order, an
+external/witness anchor, or another construction. Specify home/epoch binding,
+export ordering, rollback detection, checkpoint recovery, and the relationship
+to the durable external-effect dispatch record. Do not encode an anchor design
+in code until ratified; RF-16's immediate verified-row fix is compatible with
+all candidates.
 
 ---
 

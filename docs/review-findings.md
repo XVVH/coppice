@@ -4,11 +4,15 @@ Tracked defects and hardening items found in code review (distinct from
 `spec-issues.md`, which tracks *spec* ambiguities). IDs are `RF-n`. Source:
 the self-review pass over commit `1eec9e3` (Stage 1–3, 2026-07-09), with a
 second adversarial pass that re-ranked by *failure direction* and corrected
-two severities (RF-1 upgraded, RF-4 downgraded, RF-6 zeroize claim verified).
+two severities (RF-1 upgraded, RF-4 downgraded, RF-6 zeroize claim verified),
+plus the 2026-07-12 cryptographic mechanism audit and its first
+independent-context W-11 review (RF-16…RF-27).
 
-No GitHub remote / issue tracker is configured; this file is the tracker.
-Ordering below is **action priority** (fail-open before fail-closed before
-hygiene), not ID order. `(#n)` cross-references the original review numbering.
+This file is the canonical tracker. GitHub issues/PRs may mirror an RF id, but
+must link back rather than becoming a second source of truth; no external issue
+was created in this audit session. Ordering below is **action priority**
+(fail-open before fail-closed before hygiene), not ID order. `(#n)`
+cross-references the original review numbering.
 
 Status legend: **open** · **in-progress** · **fixed** (cite commit) ·
 **wontfix** (cite rationale) · **accepted** (documented property, no code change).
@@ -462,7 +466,67 @@ Protected-effect regressions cover both boundaries and the W-11 consumer
 mutation lane is green. SI-25 still owns cross-span offset authenticity,
 completeness, signature-invalid row erasure, rollback, and freshness.
 Independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS.
-The authority-review gate is satisfied; fixed by `452c9bc`.
+The authority-review gate is satisfied; fixed by `452c9bc` and merged in PR
+#36.
+
+## RF-17 — JCS accepts signature-preserving numeric semantic collisions — open
+
+**Severity: high at the signed-format boundary. Direction: AUTHENTICITY.** The
+spec requires integer `|n| < 2^53` and forbids floats, but `jcs_bytes`, `seal`,
+and `verify` perform no recursive domain validation. The locked canonicalizer
+casts `u64` to `f64`.
+
+**Reproduction:** an ASF object sealed with integer `9007199254740992` was
+mutated to exact `serde_json::Value` integer `9007199254740993`; canonical body
+bytes remained equal and `canon::verify` returned `Ok(())`. This upgrades P24
+from an interoperability note to a signature-authenticity defect for accepted
+out-of-spec input.
+
+**Fix:** reject floats and integers outside the exact spec domain at both seal
+and verify; reject duplicate object names before a raw JSON parser collapses
+them; carry boundary and collision vectors in G2. Type/domain binding remains
+the separate RF-6/SI-26 format decision.
+
+## RF-18 — existing homes silently regenerate missing identity and KEK files — open
+
+**Severity: high. Direction: IDENTITY SPLIT / IRRECOVERABLE DATA LOSS.**
+`load_or_create_raw` cannot distinguish first initialization from key loss.
+Removing `fabric.ed25519`, `user_root.ed25519`, or `owner.kek` from an existing
+home silently creates new material. Old events then fail under a new fabric
+identity and old payloads become unreadable under a new KEK. No trusted home
+identity, historical key registry, rotation chain, or recovery ceremony exists;
+parent-directory entries are not explicitly fsynced after publication.
+
+**Fix now:** split explicit initialization from reopen, fail closed when any
+required key is absent from initialized state, fsync directory publication,
+and refuse malformed secret storage rather than treating it as empty.
+SI-27 owns external trust anchoring, rotation, recovery, and historical
+verification; RF-14 remains the separate cleartext-custody finding.
+
+## RF-19 — manifests are applied without universal signature/type verification — open
+
+**Severity: high. Direction: INTEGRITY / UNAUTHORIZED STATE APPLICATION.**
+Promotion verifies manifests, but `create_branch`, `revert_to`, and some parent
+reads consume mutable object rows without recomputing the id or signature. A
+database writer without the signing key can replace raw root references; CAS
+hashing proves only that the attacker-selected bytes match their address, not
+that the root was authorized.
+
+**Fix:** one typed `load_verified_object` boundary taking expected prefix,
+stored kind, and verifying key; every authority-bearing object read goes
+through it. Negative tests must leave all live stores byte-for-byte unchanged.
+
+## RF-20 — filesystem restore preparation checks CAS presence, not integrity — open
+
+**Severity: medium-high. Direction: PARTIAL DESTRUCTIVE FAILURE.** For
+filesystem restores, `prepare_restore` checks only `cas.has`. Commit deletes
+live files absent from the desired tree before the first `cas.get` rehash. A
+corrupt referenced blob can therefore pass prepare, trigger live deletions,
+and fail only during the later write pass.
+
+**Fix:** read and hash-verify every referenced blob during prepare, preferably
+staging immutable verified bytes for commit. The negative contract asserts no
+live mutation when any required CAS object is missing or corrupt.
 
 ## RF-21 — bundled SQLite 3.46.0 is affected by the WAL-reset corruption race — fixed (fa9defd, W-10)
 
@@ -485,6 +549,49 @@ silently reintroduce the affected engine.
 open a fabric below the conservative 3.51.3 floor. The version-only guard
 deliberately rejects older fixed backports because it cannot attest their patch
 provenance. The two-sided `SQLITE-ENGINE` contract is green.
+The stable runtime-floor mutation lane catches all 4 mutants. Merged in PR #37.
+
+## RF-22 — payload envelope metadata is unauthenticated and put/shred is non-atomic — open
+
+**Severity: high at the production/storage boundary.** Neither DEK wrapping
+nor payload encryption binds associated data. Stored `alg` and `kek_id` are
+ignored on unwrap; resolution accepts only the plaintext hash and ignores the
+signed size, media type, and DEK id. DEK/payload insertion, destructive shred
+steps, and the signed shred event cross separate transaction boundaries. The
+long-lived KEK uses random GCM nonces with no invocation cap or rotation.
+
+**Fix:** SI-28 defines a versioned canonical AAD/envelope and wrap lifecycle;
+SI-29 resolves post-shred generations. Implementation then decrypts against a
+complete expected `PayloadRef`, fails closed on unknown algorithms, and makes
+put/shred crash-safe. P13/P19 and forensic storage remain release gates.
+
+## RF-23 — a downstream tool can reflect an injected credential to the agent — open
+
+**Severity: high before real credentials or third-party tools. Direction:
+EXPOSURE.** The broker correctly excludes injected credentials from traced
+arguments, but the downstream process receives the secret in its tool-call
+arguments and its result is forwarded byte-for-byte to the agent. A malicious
+or merely echoing adapter therefore defeats the absolute claim that the agent
+never sees the real credential.
+
+**Fix:** make the trusted credential adapter an explicit boundary; prefer
+scoped/one-use downstream credentials and injection below the agent-visible
+protocol. Response scrubbing can catch accidents but cannot contain an
+adversarial encoder. P27 and the third-party/live-egress gates own the interim
+prohibition.
+
+## RF-24 — holder, channel, and auth-strength claims lack cryptographic proof — open
+
+**Severity: high before actuation or multi-actor authority. Direction:
+IMPERSONATION / SELF-APPROVAL.** Capability `holder` is not authenticated or
+checked. Principal public keys have no proof of possession. `capture_intent`
+uses the locally held user-root key to sign caller-supplied principal, channel,
+and auth strength; the approval socket equates same-uid connection with
+`local_session` user presence.
+
+**Fix:** SI-23 and W-4/W-18 own authenticated user presence, holder
+proof/attestation, and channel-device binding. No actuation registration or
+multi-actor authority claim may precede that work.
 
 ## RF-25 — signed grant parent can disagree with capability ancestry — fixed (452c9bc, W-11)
 
@@ -501,7 +608,8 @@ activation to grant nothing and G9 forbids relying on honest emission.
 ancestry exactly. Missing, null-for-child, and wrong-parent grants all deny
 before dispatch in `a22_malformed_grant_parent_cannot_activate_capability`.
 The existing targeted `a22_*` lane catches all 29 current mutants.
-Independent re-review approved the correction; fixed by `452c9bc`.
+Independent re-review approved the correction; fixed by `452c9bc` and merged
+in PR #36.
 
 ## RF-26 — signed tool registration placement was not enforced — fixed (452c9bc, W-11)
 
@@ -515,7 +623,8 @@ session span or under a manifest could make its tool callable.
 dimensions explicitly. The two-sided TOOL-REGISTRATION contract independently
 tests wrong-span and non-null-manifest cases and proves no protected dispatch
 occurs. The W-11 consumer mutation lane covers the placement predicate.
-Independent re-review approved the correction; fixed by `452c9bc`.
+Independent re-review approved the correction; fixed by `452c9bc` and merged
+in PR #36.
 
 ## RF-27 — recovery preselection trusts unsigned promotion selectors — open
 
@@ -537,11 +646,13 @@ surface; schedule it with the next RF-9 recovery pass.
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse
   on payload data.
-- Credential injection stores pre-injection args (`args_raw`); the secret
-  reaches only the forwarded child-stdin copy, never the payload store.
+- Credential injection stores pre-injection args (`args_raw`); the secret is
+  absent from the request payload store. RF-23 separately tracks downstream
+  reflection in the response path.
 - The promotion gate recounts budgets from signed trace events, not the
   runtime meter — so RF-2/RF-3 meter drift cannot defeat enforcement.
-- Trace append-only is enforced by triggers *and* by signature recomputation
-  on verify — trigger-bypass tampering is caught.
+- Trace append-only triggers and signature recomputation catch signed-raw and
+  middle-chain tampering at explicit verification boundaries. RF-16/RF-13
+  delimit the unsigned-index, completeness, ordering, and rollback residuals.
 - Attenuation subset logic + fail-closed unknown dimensions are solid and
   property-tested (P5: no privilege escalation across generated pairs).

@@ -43,7 +43,7 @@ external custody, trust anchoring, rotation, recovery, and historical
 verification. *Provenance: 2026-07-12 cryptographic mechanism audit.*
 
 **W-19 — integrity-aware operator ledger.** Owner: agent branch
-`codex/w19-ledger-integrity`, stacked on W-13 while PR #40 is open. The
+`codex/w19-ledger-integrity`, rebased onto `main` after W-13 merged in PR #40. The
 diff-attribution ledger accounts only from signature-verified, selector-matched,
 chain-valid events while reporting malformed, foreign-signed, selector-mismatched,
 signed-sequence-reordered, and chain-anomalous retained rows explicitly instead

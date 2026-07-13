@@ -186,21 +186,27 @@ per-kind schema work filed as G11/W-6.
 | object namespace and materialized type agree with the caller's expected artifact (§0 schemas) | `w14_object_prefix_matches`, `w14_object_kind_matches`, and the single loader boundary | four-type positive matrix plus mistyped manifest/capability/tool protected-effect negatives; per-kind body schemas remain G11/W-6 |
 | manifest roots and parent lineage are fabric-signed, content-addressed authority inputs (§3, §8.1, §8.3) | `Fabric::load_manifest`; `step_boundary_with_mode`, `create_branch`, and `revert_to` consume it | `w14_unverified_manifest_cannot_extend_lineage_or_mutate_state` proves no new object/event, branch substitution, or live-store restore |
 | promotion is the only live mutation and uses the manifest's signed base (§5.3) | `gate_replay_check`, `promote_manifest`, `gate_trace_check`, and `approve_promotion` call `Fabric::load_manifest` before applying manifest fields | `w14_mistyped_manifest_cannot_promote_branch_state` proves no trunk file or promotion event |
-| coherent revert restores every manifest root together (§5.3) | `revert_to` verifies the manifest, prepares every store, then commits; `w14_prepare_verified_fs_entries` verifies and retains every filesystem blob | corrupt-blob and unverified-manifest negatives preserve both live filesystem and SQLite state; hard-exit all-store atomicity remains G3 |
+| coherent revert restores every manifest root together (§5.3) | `revert_to` routes through `commit_state_change`: forward/rollback preparation, signed event + expected roots in one DB transaction, authenticated journal, all-store fsync, then DB commit; reopen chooses rollback/forward from the exact linked event | corrupt/unverified prepare negatives; later-store ordinary rollback; forced event failure for revert and promotion; reopen without/with committed event proves exact all-root rollback/roll-forward |
 | broker-minted capability identity and ancestry verify fail-closed (§5 F1, §5.4.4, §8.1) | `Broker::load_capability`; decision, attenuation, revoke, ancestry, gate replay, and escalation resolution use the typed boundary | mistyped capability cannot dispatch, escalate, or receive approval authority; existing F1/tamper and A22 ancestry contracts remain green |
-| approval strength cannot be hidden by unsigned object classification (§5.1, §5.4 materialized-view rule) | `check_min_auth_for_manifest` discovers ids from verified signed grants and typed-loads every referenced capability | `w14_mistyped_capability_cannot_receive_approval_authority` proves pending escalation remains pending with no exemption or approval event |
+| approval strength cannot be hidden by unsigned object classification (§5.1, §5.4 materialized-view rule) | `check_min_auth_for_manifest` discovers ids from verified signed grants and typed-loads every referenced capability | direct `w14_mistyped_capability_cannot_weaken_promotion_approval_strength` proves no promotion/approval/trunk mutation; the escalation-resolution sibling remains covered separately |
+| meters and approvals cannot arise from unsigned state (§5.1, §5.4) | `w14_decision_authority`, `w14_reserve_signed_checks`, `w14_pending_escalation`; approval event and cache share one transaction | injected/reset meter and exemption rows cannot dispatch; forced approval append failure leaves no cache, signed authority, ticket, or sentinel |
+| parked human approval binds the exact candidate (§5.3 promotion/approval) | `w14_promotion_binding`, signed promotion escalation fields, `w14_verify_promotion_candidate`; approval repeats the digest and shares the promotion DB transaction | swapping two valid pending rows fails before drift or mutation; honest destructive candidate still approves and applies |
 | a callable tool requires the verified registered tool object (§4, §5.4 liveness prerequisite) | `registered_tools` combines the W-11 signed placement predicate with `load_verified_object(..., "tool", "tool", ...)` | `w14_mistyped_registered_tool_cannot_dispatch` proves the protected tool effect is absent |
+| advertised tools require current capability authority (§4, §5.4 liveness prerequisite) | `current_advertisable_capability` + `filter_tools_result` require typed cap, current M2, expiry, grant, ancestry, and no revoke before static caveat filtering | direct tools/list negatives after signed revoke and without a verified grant expose no tools; process positive advertises the live allowed set |
 | channel registrations use the `chan` namespace and fabric signer (§8.1) | the shared loader's four-type positive/rejection matrix pins the channel boundary | SI-23/W-18 remains explicit: no current approval/identity consumer authenticates holder, sender, or user presence, so W-14 claims no channel-proof enforcement |
-| interim SHA-256 state roots resolve only to bytes matching their address (F2 direction) | `Cas::get`; filesystem prepare calls it for the tree and every leaf and retains verified bytes for commit; SQLite prepare already materializes from `Cas::get` | `revert_is_all_or_nothing` covers a missing dependency; `w14_corrupt_referenced_blob_prevents_revert_before_live_mutation` covers present-but-corrupt bytes; `w14_prepared_fs_restore_commits_only_staged_verified_bytes` covers substitution after prepare; CID/DAG-CBOR transition remains W-6 |
+| interim SHA-256 state roots resolve only to bytes matching their address (F2 direction) | `Cas::get`; filesystem and SQLite plans retain verified content; `write_atomic_verified` uses an exclusive random no-follow sibling, rehashes through the retained handle, verifies the pathname still names that exact inode immediately before rename, and fsyncs publication | missing/present-corrupt negatives, FS/SQLite post-prepare substitution positives, and regular-file/symlink inode substitution rejection; CID/DAG-CBOR transition remains W-6 |
 | global order, completeness, rollback, home/epoch, and freshness are authenticated | not implemented by typed object reads or CAS rehashing | SI-25/RF-13/P15/W-15; W-14 does not narrow or claim that boundary |
 
-The two-sided registry carries 20 contracts, 105 contracted tests, and 94
-frozen legacy tests. The W-14 targeted lane tested 18 mutants: 17 caught, one
-compiler-unviable, zero survivors or timeouts. Required CI passed all 199
-workspace tests and both acceptance demos outside the socket-restricted
-sandbox. The deep release lane also passed with 4,096 authority cases and 512
-real-store model histories. Independent-context review remains mandatory
-before merge.
+The first independent-context review returned REQUEST CHANGES and invalidated
+the original narrow evidence claim. The corrected registry spans 24 contracts,
+131 contracted tests, and 93 frozen legacy tests; required CI passed all 224
+workspace tests and both acceptance demos. The expanded W-14 lane covered 152
+mutants across typed objects, signed runtime decision state, immutable
+FS/SQLite plans, exact parked-candidate binding, recoverable multi-root commit,
+direct promotion-strength aggregation, and current-authority advertisement:
+140 caught, 12 compiler-unviable, zero survivors or timeouts. The deep release
+lane passed 4,096 authority cases and 512 model histories. Independent-context
+re-review remains mandatory before merge.
 
 ## W-19 G9 inverse conformance (brief §3/§5.1; spec §6)
 
@@ -256,13 +262,14 @@ human whether history is explainable.
   three compiler-unviable, zero survivors or timeouts. Iterative runs exposed
   and corrected a missing middle-deletion location assertion and an unsigned
   offset/signed-sequence accounting gap before publication.
-- W-14's required lane passed outside the socket-restricted sandbox: strict
-  Clippy, 20 contracts with 105 registered tests and 94 frozen legacy tests,
-  all 199 workspace tests, and both demos. Its targeted typed-object/restore
-  lane tested 18 mutants: 17 caught, one compiler-unviable, zero survivors or
-  timeouts; the deep release lane passed with 4,096 authority cases and 512
-  real-store model histories. Independent-context authority review and merge
-  remain pending.
+- W-14's first submitted lane passed with 20 contracts / 105 registered tests /
+  94 frozen tests, 199 workspace tests, both demos, 17 caught mutants plus one
+  compiler-unviable, and the deep generated suites. Independent review proved
+  those claims too narrow and returned REQUEST CHANGES. The corrected run
+  replaces—not adds to—that evidence: 24 contracts / 131 registered / 93
+  frozen, 224 workspace tests plus both demos, 140 caught mutants plus 12
+  compiler-unviable with zero survivors/timeouts, and green 4,096-case / 512-
+  history deep suites. Independent re-review remains pending.
 - W-11 merged in PR #36, W-10 in PR #37, W-12 in PR #39, W-13 in PR #40,
   and W-19 in PR #41. The remaining findings and spec decisions stay queued in
   the canonical RF/SI/P/G/W trackers rather than being implied complete here.

@@ -94,14 +94,56 @@ TYPED-OBJECT|negative|w14_unverified_manifest_cannot_extend_lineage_or_mutate_st
 TYPED-OBJECT|negative|w14_mistyped_manifest_cannot_promote_branch_state
 TYPED-OBJECT|negative|w14_mistyped_capability_cannot_dispatch_or_escalate
 TYPED-OBJECT|negative|w14_mistyped_capability_cannot_receive_approval_authority
+TYPED-OBJECT|negative|w14_mistyped_capability_cannot_weaken_promotion_approval_strength
 TYPED-OBJECT|negative|tools::tests::w14_mistyped_registered_tool_cannot_dispatch
 TYPED-OBJECT|supporting|trace::tests::w14_verified_object_rejects_wrong_id_prefix_kind_signature_or_key
 
 # W-14/RF-20 restore preparation: every referenced CAS object is read and
 # hash-verified into an immutable plan before any live store is mutated.
 RESTORE-INTEGRITY|positive|snapshot::tests::w14_prepared_fs_restore_commits_only_staged_verified_bytes
+RESTORE-INTEGRITY|positive|snapshot::tests::w14_prepared_sqlite_restore_commits_only_retained_verified_bytes
+RESTORE-INTEGRITY|negative|snapshot::tests::w14_atomic_publication_rejects_staging_inode_substitution
 RESTORE-INTEGRITY|negative|w14_corrupt_referenced_blob_prevents_revert_before_live_mutation
 RESTORE-INTEGRITY|negative|revert_is_all_or_nothing
+
+# W-14 independent-review remediation: runtime cache tables are never
+# authority; only matched signed escalation/approval events plus pending
+# in-memory dispatch reservations can widen a budget.
+SIGNED-DECISION-AUTH|positive|escalation_batch_approval_cycle
+SIGNED-DECISION-AUTH|positive|w14_signed_and_pending_usage_are_isolated_by_capability
+SIGNED-DECISION-AUTH|positive|w14_escalation_resolution_selects_the_exact_signed_id
+SIGNED-DECISION-AUTH|negative|w14_unsigned_meter_reset_or_exemption_cannot_authorize_dispatch
+SIGNED-DECISION-AUTH|negative|w14_failed_approval_append_leaves_no_dispatch_authority
+SIGNED-DECISION-AUTH|negative|w14_anomalous_signed_decision_edges_never_authorize_dispatch
+
+# W-14 coherent state transaction: signed event + expected roots + all live
+# stores converge together under ordinary failure and restart recovery.
+STATE-COMMIT|positive|kernel::tests::w14_reopen_rolls_forward_committed_state_change
+STATE-COMMIT|positive|kernel::tests::w14_reopen_rolls_forward_committed_promotion
+STATE-COMMIT|negative|kernel::tests::w14_later_store_failure_rolls_back_every_root_and_event
+STATE-COMMIT|negative|kernel::tests::w14_store_sync_failure_rolls_back_every_root_and_event
+STATE-COMMIT|negative|kernel::tests::w14_reopen_rolls_back_uncommitted_partial_state_change
+STATE-COMMIT|negative|kernel::tests::w14_reopen_rejects_mistyped_or_unsafe_recovery_journal_before_mutation
+STATE-COMMIT|negative|kernel::tests::w14_reopen_rejects_journal_event_misbinding_without_restore
+STATE-COMMIT|negative|w14_revert_event_append_failure_precedes_every_live_mutation
+STATE-COMMIT|negative|w14_promotion_event_append_failure_precedes_every_live_mutation
+
+# Human approval applies only the exact candidate digest bound in a signed
+# promotion escalation; mutable parking rows are selectors/caches only.
+PROMOTION-BINDING|positive|destructive_ops_park_then_apply_on_approval
+PROMOTION-BINDING|negative|w14_unsigned_parked_row_swap_cannot_redirect_promotion_approval
+PROMOTION-BINDING|negative|w14_malformed_signed_promotion_binding_cannot_reach_trunk
+PROMOTION-BINDING|negative|w14_strongest_activated_capability_governs_promotion_approval
+PROMOTION-BINDING|negative|w14_mistyped_capability_cannot_weaken_promotion_approval_strength
+
+# tools/list exposes only capability surfaces that currently satisfy the same
+# signed grant/revoke/ancestry/M2/expiry prerequisite as dispatch.
+ADVERTISEMENT-AUTH|positive|proxied_session_end_to_end
+ADVERTISEMENT-AUTH|positive|w14_live_capability_passes_advertisement_authority
+ADVERTISEMENT-AUTH|negative|w14_expired_capability_fails_advertisement_authority
+ADVERTISEMENT-AUTH|negative|w14_revoked_capability_fails_advertisement_authority
+ADVERTISEMENT-AUTH|negative|proxy::tests::w14_tools_list_hides_capability_after_signed_revoke
+ADVERTISEMENT-AUTH|negative|proxy::tests::w14_tools_list_hides_capability_without_verified_grant
 
 # W-2 unified gate replay: the decision evaluator re-runs over signed
 # records, clocked at each event's `at` (SI-22 at-the-time semantics).

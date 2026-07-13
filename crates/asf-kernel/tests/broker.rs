@@ -19,6 +19,7 @@
 
 use asf_kernel::broker::{Broker, BrokerError, Decision};
 use asf_kernel::kernel::Fabric;
+use asf_kernel::keys::Role;
 use asf_kernel::payload::PayloadRef;
 use asf_kernel::snapshot::{StoreKind, StoreSpec};
 use asf_kernel::trace;
@@ -125,6 +126,53 @@ fn write_call(w: &mut World, cap: &str, path: &str) -> Decision {
     w.broker
         .propose_call(cap, "tool:vault@1.0", "note.write", &json!({"path": path, "content": "x"}))
         .unwrap()
+}
+
+fn append_substrate_event(w: &mut World, manifest: &str, kind: &str, body: Value) {
+    let key = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    let span = trace::meta_get(&w.broker.fabric.conn, "substrate_span")
+        .unwrap()
+        .unwrap();
+    trace::append(
+        &mut w.broker.fabric.conn,
+        &key,
+        &span,
+        Some(manifest),
+        kind,
+        body,
+        "2026-07-13T12:00:00Z",
+    )
+    .unwrap();
+}
+
+fn exhaust_and_escalate(w: &mut World, cap: &str) -> i64 {
+    for path in ["inbox/exhaust-a.md", "inbox/exhaust-b.md"] {
+        match write_call(w, cap, path) {
+            Decision::Allowed { ticket, .. } => {
+                w.broker.record_result(ticket, b"{}").unwrap();
+            }
+            other => panic!("expected budget-burning call: {other:?}"),
+        }
+    }
+    match write_call(w, cap, "inbox/escalate.md") {
+        Decision::Escalated { escalations } => escalations[0],
+        other => panic!("expected escalation: {other:?}"),
+    }
+}
+
+fn assert_no_signed_anomaly_dispatch(w: &mut World, cap: &str, label: &str) -> Decision {
+    let sentinel = w.vault.join(format!("{label}-dispatch-sentinel"));
+    let decision = write_call(w, cap, "inbox/protected.md");
+    if matches!(decision, Decision::Allowed { .. }) {
+        fs::write(&sentinel, b"dispatched").unwrap();
+    }
+    assert!(!sentinel.exists(), "signed anomaly {label} authorized dispatch");
+    decision
 }
 
 #[test]
@@ -292,6 +340,242 @@ fn w14_mistyped_capability_cannot_receive_approval_authority() {
 }
 
 #[test]
+fn w14_unsigned_meter_reset_or_exemption_cannot_authorize_dispatch() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    for path in ["inbox/a.md", "inbox/b.md"] {
+        match write_call(&mut w, &cap, path) {
+            Decision::Allowed { ticket, .. } => {
+                w.broker.record_result(ticket, b"{}").unwrap();
+            }
+            other => panic!("expected budget-burning call: {other:?}"),
+        }
+    }
+    assert!(matches!(
+        write_call(&mut w, &cap, "inbox/blocked.md"),
+        Decision::Escalated { .. }
+    ));
+
+    // Both attacker writes recreate the pre-review fail-open inputs. They are
+    // compatibility caches now and must be inert without signed authority.
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "INSERT INTO broker_meters (cap, key, used) VALUES (?1, 'budget.count:write', 0)
+             ON CONFLICT(cap, key) DO UPDATE SET used = 0",
+            [&cap],
+        )
+        .unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "INSERT INTO exemptions (escalation, cap, key, remaining)
+             VALUES (9999, ?1, 'budget.count:write', 100)",
+            [&cap],
+        )
+        .unwrap();
+
+    let sentinel = w.vault.join("unsigned-cache-dispatch-sentinel");
+    let decision = write_call(&mut w, &cap, "inbox/still-blocked.md");
+    if matches!(decision, Decision::Allowed { .. }) {
+        fs::write(&sentinel, b"dispatched").unwrap();
+    }
+    assert!(matches!(decision, Decision::Escalated { .. }));
+    assert!(!sentinel.exists(), "unsigned cache state reached dispatch");
+}
+
+#[test]
+fn w14_failed_approval_append_leaves_no_dispatch_authority() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    for path in ["inbox/a.md", "inbox/b.md"] {
+        match write_call(&mut w, &cap, path) {
+            Decision::Allowed { ticket, .. } => {
+                w.broker.record_result(ticket, b"{}").unwrap();
+            }
+            other => panic!("expected budget-burning call: {other:?}"),
+        }
+    }
+    let escalation = match write_call(&mut w, &cap, "inbox/c.md") {
+        Decision::Escalated { escalations } => escalations[0],
+        other => panic!("expected escalation: {other:?}"),
+    };
+    w.broker
+        .fabric
+        .conn
+        .execute_batch(
+            "CREATE TEMP TRIGGER fail_w14_approval
+             BEFORE INSERT ON events WHEN NEW.kind = 'approval'
+             BEGIN SELECT RAISE(ABORT, 'injected approval append failure'); END;",
+        )
+        .unwrap();
+    assert!(w
+        .broker
+        .approve_escalation(escalation, 2, "chan:test", "local_session")
+        .is_err());
+    w.broker
+        .fabric
+        .conn
+        .execute_batch("DROP TRIGGER fail_w14_approval;")
+        .unwrap();
+    let cached: i64 = w
+        .broker
+        .fabric
+        .conn
+        .query_row("SELECT COUNT(*) FROM exemptions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(cached, 0, "failed append left a widening cache row");
+
+    let sentinel = w.vault.join("failed-approval-dispatch-sentinel");
+    let decision = write_call(&mut w, &cap, "inbox/d.md");
+    if matches!(decision, Decision::Allowed { .. }) {
+        fs::write(&sentinel, b"dispatched").unwrap();
+    }
+    assert!(matches!(decision, Decision::Escalated { .. }));
+    assert!(!sentinel.exists(), "failed approval append authorized dispatch");
+}
+
+#[test]
+fn w14_anomalous_signed_decision_edges_never_authorize_dispatch() {
+    for variant in ["capability", "caveat", "manifest"] {
+        let mut w = setup();
+        let cap = mint_default(&mut w);
+        let escalation = exhaust_and_escalate(&mut w, &cap);
+        let manifest = w.manifest.clone();
+        let event_manifest = if variant == "manifest" {
+            "man:other".to_string()
+        } else {
+            manifest.clone()
+        };
+        append_substrate_event(
+            &mut w,
+            &event_manifest,
+            "escalation",
+            json!({
+                "escalation": escalation,
+                "capability": if variant == "capability" { "cap:other" } else { cap.as_str() },
+                "caveat": if variant == "caveat" { "budget.count:other" } else { "budget.count:write" },
+                "count": 1,
+                "sample": [],
+            }),
+        );
+        assert!(matches!(
+            assert_no_signed_anomaly_dispatch(&mut w, &cap, variant),
+            Decision::Denied { .. }
+        ));
+    }
+
+    for variant in ["capability", "caveat", "manifest", "auth_strength", "zero_uses"] {
+        let mut w = setup();
+        let cap = mint_default(&mut w);
+        let escalation = exhaust_and_escalate(&mut w, &cap);
+        let manifest = w.manifest.clone();
+        let event_manifest = if variant == "manifest" {
+            "man:other".to_string()
+        } else {
+            manifest.clone()
+        };
+        append_substrate_event(
+            &mut w,
+            &event_manifest,
+            "approval",
+            json!({
+                "escalation": escalation,
+                "resolution": "approved",
+                "uses": if variant == "zero_uses" { 0 } else { 1 },
+                "capability": if variant == "capability" { "cap:other" } else { cap.as_str() },
+                "caveat": if variant == "caveat" { "budget.count:other" } else { "budget.count:write" },
+                "channel": "chan:test",
+                "auth_strength": if variant == "auth_strength" { "platform_oauth" } else { "local_session" },
+            }),
+        );
+        let decision = assert_no_signed_anomaly_dispatch(&mut w, &cap, variant);
+        assert!(!matches!(decision, Decision::Allowed { .. }));
+    }
+}
+
+#[test]
+fn w14_signed_and_pending_usage_are_isolated_by_capability() {
+    let mut signed = setup();
+    let cap_a = mint_default(&mut signed);
+    let cap_b = signed
+        .broker
+        .mint(
+            &signed.manifest,
+            &signed.human,
+            default_caveats(),
+            vec!["budget.count:write"],
+            &far_expiry(),
+        )
+        .unwrap();
+    for path in ["inbox/a-signed.md", "inbox/b-signed.md"] {
+        let Decision::Allowed { ticket, .. } = write_call(&mut signed, &cap_a, path) else {
+            panic!("first capability should have its own budget");
+        };
+        signed.broker.record_result(ticket, b"{}").unwrap();
+    }
+    assert!(matches!(
+        write_call(&mut signed, &cap_b, "inbox/other-signed.md"),
+        Decision::Allowed { .. }
+    ));
+
+    let mut pending = setup();
+    let cap_a = mint_default(&mut pending);
+    let cap_b = pending
+        .broker
+        .mint(
+            &pending.manifest,
+            &pending.human,
+            default_caveats(),
+            vec!["budget.count:write"],
+            &far_expiry(),
+        )
+        .unwrap();
+    for path in ["inbox/a-pending.md", "inbox/b-pending.md"] {
+        assert!(matches!(
+            write_call(&mut pending, &cap_a, path),
+            Decision::Allowed { .. }
+        ));
+    }
+    assert!(matches!(
+        write_call(&mut pending, &cap_b, "inbox/other-pending.md"),
+        Decision::Allowed { .. }
+    ));
+}
+
+#[test]
+fn w14_escalation_resolution_selects_the_exact_signed_id() {
+    let mut w = setup();
+    let cap_a = mint_default(&mut w);
+    let cap_b = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.human,
+            default_caveats(),
+            vec!["budget.count:write"],
+            &far_expiry(),
+        )
+        .unwrap();
+    let escalation_a = exhaust_and_escalate(&mut w, &cap_a);
+    let escalation_b = exhaust_and_escalate(&mut w, &cap_b);
+    assert_ne!(escalation_a, escalation_b);
+    w.broker
+        .approve_escalation(escalation_b, 1, "chan:tty", "local_session")
+        .unwrap();
+    assert!(matches!(
+        write_call(&mut w, &cap_b, "inbox/b-approved.md"),
+        Decision::Allowed { .. }
+    ));
+    assert!(matches!(
+        write_call(&mut w, &cap_a, "inbox/a-still-blocked.md"),
+        Decision::Escalated { .. }
+    ));
+}
+
+#[test]
 fn undeclared_action_uncallable() {
     let mut w = setup();
     let cap = mint_default(&mut w);
@@ -446,6 +730,11 @@ fn escalation_batch_approval_cycle() {
     }
     // …and the third parks again: approvals are bounded, not blank cheques.
     assert!(matches!(write_call(&mut w, &cap, "inbox/e.md"), Decision::Escalated { .. }));
+    assert!(matches!(
+        w.broker
+            .approve_escalation(esc, 1, "chan:tty", "local_session"),
+        Err(BrokerError::NoSuchEscalation(_))
+    ));
 }
 
 #[test]
@@ -602,6 +891,49 @@ fn expired_capability_denies_structurally() {
         Decision::Denied { structural: Some(s), .. } => assert!(s.contains("expired")),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn w14_live_capability_passes_advertisement_authority() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    let loaded = w
+        .broker
+        .current_advertisable_capability(&cap)
+        .unwrap();
+    assert_eq!(loaded["id"], cap);
+}
+
+#[test]
+fn w14_expired_capability_fails_advertisement_authority() {
+    let mut w = setup();
+    let cap = w
+        .broker
+        .mint(
+            &w.manifest,
+            &w.agent,
+            default_caveats(),
+            vec![],
+            "2020-01-01T00:00:00Z",
+        )
+        .unwrap();
+    assert!(w
+        .broker
+        .current_advertisable_capability(&cap)
+        .is_err());
+}
+
+#[test]
+fn w14_revoked_capability_fails_advertisement_authority() {
+    let mut w = setup();
+    let cap = mint_default(&mut w);
+    w.broker
+        .revoke_capability(&cap, "advertisement test", None)
+        .unwrap();
+    assert!(w
+        .broker
+        .current_advertisable_capability(&cap)
+        .is_err());
 }
 
 // ---- A22/§5.4 capability closure: decision-time surface ------------------

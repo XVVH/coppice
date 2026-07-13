@@ -481,14 +481,10 @@ fn advertisable(cap: &Value, broker: &Broker, action_name: &str) -> bool {
 
 /// Filter a downstream tools/list result down to the session grant.
 fn filter_tools_result(broker: &Broker, cap_id: &str, mut resp: Value) -> Value {
-    let Ok(cap) = trace::load_verified_object(
-        &broker.fabric.conn,
-        cap_id,
-        "cap",
-        "capability",
-        &broker.fabric.fabric_vk(),
-    ) else {
-        // No verified, correctly typed grant → advertise nothing.
+    let Ok(cap) = broker.current_advertisable_capability(cap_id) else {
+        // Advertisement has the same verified current-authority prerequisite
+        // as dispatch: no grant, stale manifest, expiry, or revoke means no
+        // advertised surface.
         resp["result"]["tools"] = json!([]);
         return resp;
     };
@@ -768,5 +764,126 @@ fn operator_cmd(home: &Path, req: &Value) -> Result<()> {
             req["cmd"].as_str().unwrap_or("command"),
             reply["error"].as_str().unwrap_or("unknown error")
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use asf_kernel::kernel::AuthorityMode;
+    use asf_kernel::snapshot::{StoreKind, StoreSpec};
+
+    fn advertisement_world() -> (tempfile::TempDir, Broker, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("vault");
+        std::fs::create_dir(&vault).unwrap();
+        let mut fabric = Fabric::initialize(
+            tmp.path().join("fabric"),
+            vec![StoreSpec {
+                store: "fs:vault".into(),
+                tier: 1,
+                kind: StoreKind::Fs,
+                path: vault,
+            }],
+        )
+        .unwrap();
+        let human = fabric
+            .register_principal("human", "operator", "01", None)
+            .unwrap();
+        let agent = fabric
+            .register_principal("agent", "worker", "02", Some(&human))
+            .unwrap();
+        let channel = fabric
+            .register_channel(&human, "local_session", b"tty", "local_session")
+            .unwrap();
+        let intent = fabric
+            .capture_intent(
+                &human,
+                &channel,
+                "local_session",
+                "test advertisement",
+                json!({}),
+                None,
+            )
+            .unwrap();
+        let step = fabric
+            .step_boundary_with_mode(
+                &human,
+                &agent,
+                &intent,
+                json!({"bundle":"sha256:test","skills":[]}),
+                AuthorityMode::Brokered,
+            )
+            .unwrap();
+        let mut broker = Broker::new(fabric).unwrap();
+        broker
+            .register_tool(
+                TOOL_REF,
+                json!([{
+                    "name":"note.write", "side_effect":"local", "surface":"fixed",
+                    "reversibility":"reversible", "domain":"files.vault",
+                    "class":"write", "store":"fs:vault", "path_args":["path"]
+                }]),
+            )
+            .unwrap();
+        let cap = broker
+            .mint(
+                &step.manifest,
+                &agent,
+                vec![json!({
+                    "dim":"action.allow",
+                    "tools":[TOOL_REF],
+                    "actions":["note.write"]
+                })],
+                vec![],
+                "2027-01-01T00:00:00Z",
+            )
+            .unwrap();
+        (tmp, broker, cap)
+    }
+
+    fn tools_response() -> Value {
+        json!({"result":{"tools":[{"name":"note.write"}]}})
+    }
+
+    #[test]
+    fn w14_tools_list_hides_capability_after_signed_revoke() {
+        let (_tmp, mut broker, cap) = advertisement_world();
+        assert_eq!(
+            filter_tools_result(&broker, &cap, tools_response())["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        broker
+            .revoke_capability(&cap, "test closure", None)
+            .unwrap();
+        assert!(filter_tools_result(&broker, &cap, tools_response())["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn w14_tools_list_hides_capability_without_verified_grant() {
+        let (_tmp, broker, cap) = advertisement_world();
+        broker
+            .fabric
+            .conn
+            .execute_batch("DROP TRIGGER events_append_only_u;")
+            .unwrap();
+        broker
+            .fabric
+            .conn
+            .execute(
+                "UPDATE events SET raw = '{}' WHERE kind = 'grant' AND raw LIKE ?1",
+                [format!("%{cap}%")],
+            )
+            .unwrap();
+        assert!(filter_tools_result(&broker, &cap, tools_response())["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 }

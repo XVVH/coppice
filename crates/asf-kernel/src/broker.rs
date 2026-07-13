@@ -14,7 +14,7 @@
 
 use crate::capability::{self, auth_rank};
 use crate::evaluate::{self, CallCtx, Outcome};
-use crate::kernel::{Fabric, KernelError};
+use crate::kernel::{Fabric, KernelError, StateChangePlan, StateRootTransition};
 use crate::promote::{self, Conflict, Op};
 use crate::snapshot::{self, StoreKind};
 use crate::tools::{self, ToolError};
@@ -77,9 +77,9 @@ pub enum Decision {
     Escalated { escalations: Vec<i64> },
 }
 
+#[derive(Clone)]
 struct PendingCall {
     ticket: u64,
-    #[allow(dead_code)] // kept for daemon-side debugging/inspection
     cap: String,
     tool: String,
     action: String,
@@ -88,6 +88,55 @@ struct PendingCall {
     checks: Value,
     reversibility: String,
     summary: Value,
+}
+
+#[derive(Default)]
+struct DecisionAuthority {
+    meters: BTreeMap<String, u64>,
+    exemptions: BTreeMap<String, String>,
+}
+
+fn w14_required_approval_strength(
+    capability_id: &str,
+    capability: &Value,
+) -> Result<Option<(u8, String)>, BrokerError> {
+    let caveats = capability["caveats"].as_array().ok_or_else(|| {
+        BrokerError::GateTraceViolation(format!(
+            "capability {capability_id} has no signed caveat array"
+        ))
+    })?;
+    let mut ranked = BTreeMap::new();
+    for caveat in caveats.iter().filter(|caveat| caveat["dim"] == "approval.min_auth") {
+        let minimum = caveat["min"].as_str().ok_or_else(|| {
+            BrokerError::GateTraceViolation(format!(
+                "capability {capability_id} has malformed approval.min_auth"
+            ))
+        })?;
+        let rank = auth_rank(minimum).ok_or_else(|| {
+            BrokerError::GateTraceViolation(format!(
+                "capability {capability_id} has unknown approval strength {minimum}"
+            ))
+        })?;
+        ranked.insert(rank, minimum.to_string());
+    }
+    Ok(ranked.into_iter().next_back())
+}
+
+fn w14_require_approval_strength(
+    capability_id: &str,
+    capability: &Value,
+    auth_strength: &str,
+) -> Result<(), BrokerError> {
+    let Some((need_rank, need)) = w14_required_approval_strength(capability_id, capability)? else {
+        return Ok(());
+    };
+    match auth_rank(auth_strength) {
+        Some(have_rank) if have_rank >= need_rank => Ok(()),
+        _ => Err(BrokerError::ChannelTooWeak {
+            have: auth_strength.into(),
+            need,
+        }),
+    }
 }
 
 pub struct Broker {
@@ -147,6 +196,35 @@ impl Broker {
             "capability",
             &self.fabric.fabric_vk(),
         )?)
+    }
+
+    /// Capability prerequisite shared by tool advertisement and dispatch:
+    /// verified type/signature, current M2 binding, mandatory live expiry,
+    /// and event-derived grant/ancestry/revocation state at the current head.
+    pub fn current_advertisable_capability(&self, id: &str) -> Result<Value, BrokerError> {
+        let capability = self.load_capability(id)?;
+        let current = self.fabric.current_manifest()?.ok_or_else(|| {
+            BrokerError::GateTraceViolation("no current manifest for capability advertisement".into())
+        })?;
+        if capability["bound_manifest"].as_str() != Some(current.as_str()) {
+            return Err(BrokerError::GateTraceViolation(format!(
+                "capability {id} is not bound to current manifest {current} (M2)"
+            )));
+        }
+        let expiry = capability["expires_at"].as_str().ok_or_else(|| {
+            BrokerError::GateTraceViolation(format!("capability {id} has no mandatory expiry"))
+        })?;
+        match (crate::parse_instant(&now_rfc3339()), crate::parse_instant(expiry)) {
+            (Some(now), Some(bound)) if now <= bound => {}
+            _ => {
+                return Err(BrokerError::GateTraceViolation(format!(
+                    "capability {id} is expired or has an invalid expiry"
+                )))
+            }
+        }
+        self.liveness_at_head(id)
+            .map_err(BrokerError::CapabilityClosed)?;
+        Ok(capability)
     }
 
     // ---- registration & minting ----------------------------------------
@@ -244,6 +322,135 @@ impl Broker {
         let revokes = a22_revoke_offsets(&snapshot.events);
         let chain = a22_ancestry(&self.fabric.conn, &vk, cap_id)?;
         a22_state_at(&chain, snapshot.head + 1, &grants, &revokes)
+    }
+
+    /// Reconstruct budget consumption and approval headroom exclusively from
+    /// verified signed events plus this broker's in-memory dispatch
+    /// reservations. `broker_meters` and `exemptions` are compatibility
+    /// caches only: storage writes to either table cannot widen authority.
+    fn w14_decision_authority(&self, cap_id: &str) -> Result<DecisionAuthority, BrokerError> {
+        let events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let substrate = self.fabric.substrate_span();
+        let ordered = w11_span_events_in_signed_sequence(&events, substrate);
+        let mut bindings: BTreeMap<i64, (String, String, String, i64)> = BTreeMap::new();
+        for event in &ordered {
+            if event.kind != "escalation" {
+                continue;
+            }
+            let body = &event.raw["body"];
+            let (Some(id), Some(capability), Some(caveat)) = (
+                body["escalation"].as_i64(),
+                body["capability"].as_str(),
+                body["caveat"].as_str(),
+            ) else {
+                continue;
+            };
+            let Some(manifest) = event.manifest.as_deref() else {
+                continue;
+            };
+            match bindings.get(&id) {
+                Some((old_cap, old_caveat, old_manifest, _))
+                    if old_cap != capability
+                        || old_caveat != caveat
+                        || old_manifest != manifest =>
+                {
+                    return Err(BrokerError::GateTraceViolation(format!(
+                        "signed escalation {id} has conflicting authority bindings"
+                    )))
+                }
+                Some(_) => {}
+                None => {
+                    bindings.insert(
+                        id,
+                        (
+                            capability.to_string(),
+                            caveat.to_string(),
+                            manifest.to_string(),
+                            event.seq,
+                        ),
+                    );
+                }
+            }
+        }
+
+        let mut remaining: BTreeMap<(String, String, i64), i64> = BTreeMap::new();
+        let mut resolved = BTreeSet::new();
+        for event in &ordered {
+            if event.kind != "approval" || event.raw["body"].get("escalation").is_none() {
+                continue;
+            }
+            let body = &event.raw["body"];
+            let Some(id) = body["escalation"].as_i64() else {
+                continue;
+            };
+            if !resolved.insert(id) {
+                return Err(BrokerError::GateTraceViolation(format!(
+                    "signed escalation {id} has multiple resolutions"
+                )));
+            }
+            let Some((bound_cap, bound_caveat, bound_manifest, escalation_seq)) = bindings.get(&id)
+            else {
+                continue; // an approval without its signed request grants nothing
+            };
+            if event.seq <= *escalation_seq
+                || event.manifest.as_deref() != Some(bound_manifest.as_str())
+                || body["capability"].as_str() != Some(bound_cap.as_str())
+                || body["caveat"].as_str() != Some(bound_caveat.as_str())
+            {
+                continue; // doubtful activation never widens authority
+            }
+            if body["resolution"] != "approved" || bound_cap != cap_id {
+                continue;
+            }
+            let cap = self.load_capability(bound_cap)?;
+            if cap["bound_manifest"].as_str() != Some(bound_manifest.as_str()) {
+                continue;
+            }
+            let Some(auth_strength) = body["auth_strength"].as_str() else {
+                continue;
+            };
+            w14_require_approval_strength(bound_cap, &cap, auth_strength)?;
+            let Some(uses) = body["uses"].as_u64().filter(|uses| *uses != 0) else {
+                continue;
+            };
+            let Ok(uses) = i64::try_from(uses) else {
+                continue;
+            };
+            remaining.insert((bound_cap.clone(), bound_caveat.clone(), id), uses);
+        }
+
+        let mut meters = BTreeMap::new();
+        for event in events.iter().filter(|event| event.kind == "tool_call") {
+            if event.raw["body"]["summary"]["capability"].as_str() != Some(cap_id) {
+                continue;
+            }
+            w14_reserve_signed_checks(
+                cap_id,
+                &event.raw["body"]["checks"],
+                &mut meters,
+                &mut remaining,
+            )?;
+        }
+        for pending in &self.pending {
+            if pending.cap != cap_id {
+                continue;
+            }
+            w14_reserve_signed_checks(
+                cap_id,
+                &pending.checks,
+                &mut meters,
+                &mut remaining,
+            )?;
+        }
+
+        let exemptions = remaining
+            .into_iter()
+            .filter(|(_, uses)| *uses > 0)
+            .fold(BTreeMap::new(), |mut available, ((_, caveat, id), _)| {
+                available.entry(caveat).or_insert_with(|| format!("esc:{id}"));
+                available
+            });
+        Ok(DecisionAuthority { meters, exemptions })
     }
 
     /// M1: stores reachable through the allowed tools must be present in the
@@ -497,31 +704,27 @@ impl Broker {
             current_manifest: &manifest,
         };
 
-        let conn = &self.fabric.conn;
-        let mut meter = |key: &str| -> u64 {
-            conn.query_row(
-                "SELECT used FROM broker_meters WHERE cap = ?1 AND key = ?2",
-                params![cap_id, key],
-                |r| r.get::<_, i64>(0),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .unwrap_or(0) as u64
+        let authority = match self.w14_decision_authority(cap_id) {
+            Ok(authority) => authority,
+            Err(error) => {
+                return self.deny(
+                    cap_id,
+                    tool,
+                    action,
+                    vec![],
+                    Some(format!("signed decision authority unavailable: {error}")),
+                    json!([]),
+                )
+            }
         };
-        // Peek only — never consume here (RF-2). The broker commits the
-        // decrement below, and only if the aggregate outcome is Allow.
+        let mut meter = |key: &str| -> u64 {
+            authority.meters.get(key).copied().unwrap_or(0)
+        };
+        // Peek only — a returned ticket is the in-memory reservation. Signed
+        // result events make consumption durable; unsigned cache rows never
+        // participate in authorization.
         let mut exempt = |key: &str| -> Option<String> {
-            conn.query_row(
-                "SELECT escalation FROM exemptions
-                 WHERE cap = ?1 AND key = ?2 AND remaining > 0 LIMIT 1",
-                params![cap_id, key],
-                |r| r.get::<_, i64>(0),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .map(|esc| format!("esc:{esc}"))
+            authority.exemptions.get(key).cloned()
         };
 
         let eval = evaluate::evaluate(&cap, &ctx, &mut meter, &mut exempt);
@@ -529,38 +732,6 @@ impl Broker {
 
         match eval.outcome {
             Outcome::Allow => {
-                // Consume budget + approval exemptions atomically, and ONLY
-                // here (RF-2/RF-3): a denied/escalated call never reaches this
-                // arm, so it burns neither. NB consumption commits at decision
-                // time, not at record_result — deferring it there would let
-                // two calls proposed before either records both pass the same
-                // budget (fail-OPEN under pipelined proposes). Consuming now
-                // keeps the meter monotonic; the residual cost is that an
-                // Allowed-but-never-recorded call over-counts budget (the
-                // fail-safe direction), and the promotion gate reconciles
-                // authority from the signed ledger, not this meter.
-                let tx = self.fabric.conn.unchecked_transaction()?;
-                for c in &eval.checks {
-                    if c.caveat.starts_with("budget.count:")
-                        && c.meter.get("applies") != Some(&Value::Bool(false))
-                    {
-                        tx.execute(
-                            "INSERT INTO broker_meters (cap, key, used) VALUES (?1, ?2, 1)
-                             ON CONFLICT(cap, key) DO UPDATE SET used = used + 1",
-                            params![cap_id, c.caveat],
-                        )?;
-                    }
-                }
-                for (key, _esc) in &eval.consumed_exemptions {
-                    tx.execute(
-                        "UPDATE exemptions SET remaining = remaining - 1
-                         WHERE rowid = (SELECT rowid FROM exemptions
-                                        WHERE cap = ?1 AND key = ?2 AND remaining > 0
-                                        LIMIT 1)",
-                        params![cap_id, key],
-                    )?;
-                }
-                tx.commit()?;
                 // Credential injection — AFTER checks, into the forwarded
                 // copy only. reg.credentials: {"arg": <field>, "secret": <vault name>}.
                 let mut forwarded = args.clone();
@@ -759,55 +930,19 @@ impl Broker {
         channel: &str,
         auth_strength: &str,
     ) -> Result<(), BrokerError> {
-        let row: Option<(String, String, String)> = self
-            .fabric
-            .conn
-            .query_row(
-                "SELECT cap, manifest, key FROM escalations WHERE id = ?1 AND status = 'pending'",
-                [escalation],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()?;
-        let (cap_id, manifest, key) = row.ok_or(BrokerError::NoSuchEscalation(escalation))?;
+        let (cap_id, manifest, key) = self.w14_pending_escalation(escalation)?;
 
-        // approval.min_auth (§5.1): the approving channel must be strong
-        // enough; unrankable strengths fail closed.
+        // approval.min_auth (§5.1): issuance and reconstruction share the
+        // same strict signed-capability predicate.
         let cap = self.load_capability(&cap_id)?;
-        if let Some(min) = cap["caveats"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|c| c["dim"] == "approval.min_auth")
-            .and_then(|c| c["min"].as_str())
-        {
-            let need = auth_rank(min);
-            let have = auth_rank(auth_strength);
-            match (need, have) {
-                (Some(n), Some(h)) if h >= n => {}
-                _ => {
-                    return Err(BrokerError::ChannelTooWeak {
-                        have: auth_strength.into(),
-                        need: min.into(),
-                    })
-                }
-            }
-        }
+        w14_require_approval_strength(&cap_id, &cap, auth_strength)?;
 
         let now = now_rfc3339();
-        self.fabric.conn.execute(
-            "UPDATE escalations SET status = ?2, decided_at = ?3 WHERE id = ?1",
-            params![escalation, resolution, now],
-        )?;
-        if resolution == "approved" && uses > 0 {
-            self.fabric.conn.execute(
-                "INSERT INTO exemptions (escalation, cap, key, remaining) VALUES (?1, ?2, ?3, ?4)",
-                params![escalation, cap_id, key, uses],
-            )?;
-        }
         let sk = self.fabric.fabric_sk().clone();
         let span = self.fabric.substrate_span().to_string();
-        trace::append(
-            &mut self.fabric.conn,
+        let tx = self.fabric.conn.transaction()?;
+        trace::append_in_tx(
+            &tx,
             &sk,
             &span,
             Some(&manifest),
@@ -815,11 +950,71 @@ impl Broker {
             json!({
                 "escalation": escalation, "resolution": resolution, "uses": uses,
                 "capability": cap_id, "caveat": key,
-                "channel": channel, "auth_strength": auth_strength,   // C1
+                "channel": channel, "auth_strength": auth_strength,
             }),
             &now,
         )?;
+        tx.execute(
+            "UPDATE escalations SET status = ?2, decided_at = ?3
+             WHERE id = ?1 AND cap = ?4 AND manifest = ?5 AND key = ?6",
+            params![escalation, resolution, now, cap_id, manifest, key],
+        )?;
+        if resolution == "approved" && uses > 0 {
+            tx.execute(
+                "INSERT INTO exemptions (escalation, cap, key, remaining) VALUES (?1, ?2, ?3, ?4)",
+                params![escalation, cap_id, key, uses],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
+    }
+
+    /// Resolve the immutable authority binding for one escalation from the
+    /// verified substrate chain. Mutable table status and selectors are never
+    /// enough to create or redirect an approval.
+    fn w14_pending_escalation(
+        &self,
+        escalation: i64,
+    ) -> Result<(String, String, String), BrokerError> {
+        let events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let ordered = w11_span_events_in_signed_sequence(&events, self.fabric.substrate_span());
+        let mut binding: Option<(String, String, String)> = None;
+        for event in ordered {
+            let body = &event.raw["body"];
+            if event.kind == "approval" {
+                if body["escalation"].as_i64() == Some(escalation) {
+                    return Err(BrokerError::NoSuchEscalation(escalation));
+                }
+                continue;
+            }
+            if event.kind != "escalation" {
+                continue;
+            }
+            if body["escalation"].as_i64() != Some(escalation) {
+                continue;
+            }
+            let Some(capability) = body["capability"].as_str() else {
+                continue;
+            };
+            let Some(caveat) = body["caveat"].as_str() else {
+                continue;
+            };
+            let Some(manifest) = event.manifest.as_deref() else {
+                continue;
+            };
+            let candidate = (
+                capability.to_string(),
+                manifest.to_string(),
+                caveat.to_string(),
+            );
+            if binding.as_ref().is_some_and(|old| old != &candidate) {
+                return Err(BrokerError::GateTraceViolation(format!(
+                    "signed escalation {escalation} has conflicting bindings"
+                )));
+            }
+            binding = Some(candidate);
+        }
+        binding.ok_or(BrokerError::NoSuchEscalation(escalation))
     }
 
     // ---- result recording -------------------------------------------------
@@ -837,8 +1032,8 @@ impl Broker {
             .iter()
             .position(|p| p.ticket == ticket)
             .ok_or(BrokerError::NoPendingCall(ticket))?;
-        let p = self.pending.remove(idx);
-        Ok(self.fabric.record_tool_call(
+        let p = self.pending[idx].clone();
+        let appended = self.fabric.record_tool_call(
             &p.tool,
             &p.action,
             &p.args_raw,
@@ -846,7 +1041,9 @@ impl Broker {
             p.summary.clone(),
             p.checks.clone(),
             Some(&p.reversibility),
-        )?)
+        )?;
+        self.pending.remove(idx);
+        Ok(appended)
     }
 }
 
@@ -854,6 +1051,46 @@ impl Broker {
 pub enum PromotionOutcome {
     Applied { event: String },
     Parked { promotion: i64 },
+}
+
+const W14_PROMOTION_POLICY_CONTEXT: &str = "default-policy/manual-review/v1";
+
+struct PromotionBinding {
+    candidate_digest: String,
+    branch_roots_digest: String,
+}
+
+struct PromotionApproval {
+    id: i64,
+    channel: String,
+    auth_strength: String,
+    candidate_digest: String,
+}
+
+fn w14_promotion_binding(
+    id: i64,
+    manifest: &str,
+    preview: &Value,
+) -> Result<PromotionBinding, BrokerError> {
+    let branch_roots = preview["branch_roots"].as_object().ok_or_else(|| {
+        BrokerError::MalformedPromotion {
+            id,
+            detail: "preview has no exact branch_roots map".into(),
+        }
+    })?;
+    let branch_roots_digest = canon::sha256_hex(&canon::jcs_bytes(&Value::Object(
+        branch_roots.clone(),
+    ))?);
+    let candidate = json!({
+        "promotion": id,
+        "manifest": manifest,
+        "preview": preview,
+        "policy_context": W14_PROMOTION_POLICY_CONTEXT,
+    });
+    Ok(PromotionBinding {
+        candidate_digest: canon::sha256_hex(&canon::jcs_bytes(&candidate)?),
+        branch_roots_digest,
+    })
 }
 
 /// One store's merge plan.
@@ -870,6 +1107,55 @@ struct MergePlan {
     stores: Vec<StorePlan>,
     ops: Vec<Op>,
     conflicts: Vec<Conflict>,
+}
+
+/// Count one already-authorized call into the decision-time reservation
+/// view. Signed calls and in-memory pending calls use the same representation,
+/// so a dispatch ticket reserves budget before its result event exists.
+#[allow(clippy::collapsible_if)] // G9: prefix and applies are independently mutation-tested edges.
+fn w14_reserve_signed_checks(
+    cap_id: &str,
+    checks: &Value,
+    meters: &mut BTreeMap<String, u64>,
+    remaining: &mut BTreeMap<(String, String, i64), i64>,
+) -> Result<(), BrokerError> {
+    let Some(checks) = checks.as_array() else {
+        return Err(BrokerError::GateTraceViolation(format!(
+            "authorized call for {cap_id} has no signed check array"
+        )));
+    };
+    for check in checks {
+        let Some(caveat) = check["caveat"].as_str() else {
+            return Err(BrokerError::GateTraceViolation(format!(
+                "authorized call for {cap_id} has a malformed caveat check"
+            )));
+        };
+        if caveat.starts_with("budget.count:") {
+            if check["meter"].get("applies") != Some(&Value::Bool(false)) {
+                *meters.entry(caveat.to_string()).or_insert(0) += 1;
+            }
+        }
+        let Some(exemption) = check["meter"]["approved_exemption"].as_str() else {
+            continue;
+        };
+        let Some(id) = exemption.strip_prefix("esc:").and_then(|id| id.parse::<i64>().ok()) else {
+            return Err(BrokerError::GateTraceViolation(format!(
+                "authorized call for {cap_id} names malformed approval {exemption}"
+            )));
+        };
+        let Some(uses) = remaining.get_mut(&(cap_id.to_string(), caveat.to_string(), id)) else {
+            return Err(BrokerError::GateTraceViolation(format!(
+                "authorized call for {cap_id} consumes unsigned or mismatched escalation {id}"
+            )));
+        };
+        if *uses <= 0 {
+            return Err(BrokerError::GateTraceViolation(format!(
+                "authorized call for {cap_id} exceeds signed approval {id}"
+            )));
+        }
+        *uses -= 1;
+    }
+    Ok(())
 }
 
 /// Consumers within one verified span use that span's signed sequence, never
@@ -1188,7 +1474,7 @@ impl Broker {
         trace_report["branch_tip"] = self.verify_branch_tip(&man, &span, &plan)?;
 
         if promote::default_policy_allows(&plan.ops, &plan.conflicts) {
-            let event = self.apply_plan(manifest_id, &plan, &trace_report, "auto")?;
+            let event = self.apply_plan(manifest_id, &plan, &trace_report, "auto", None)?;
             Ok(PromotionOutcome::Applied { event })
         } else {
             let preview = json!({
@@ -1217,6 +1503,7 @@ impl Broker {
                 ],
             )?;
             let id = self.fabric.conn.last_insert_rowid();
+            let binding = w14_promotion_binding(id, manifest_id, &preview)?;
             let sk = self.fabric.fabric_sk().clone();
             let sspan = self.fabric.substrate_span().to_string();
             trace::append(
@@ -1226,7 +1513,12 @@ impl Broker {
                 Some(manifest_id),
                 "escalation",
                 json!({
-                    "promotion": id, "caveat": "promotion.policy",
+                    "promotion": id,
+                    "manifest": manifest_id,
+                    "candidate_digest": binding.candidate_digest,
+                    "branch_roots_digest": binding.branch_roots_digest,
+                    "policy_context": W14_PROMOTION_POLICY_CONTEXT,
+                    "caveat": "promotion.policy",
                     "count": 1,
                     "sample": [{
                         "ops": plan.ops.iter().map(|o| o.class()).collect::<Vec<_>>(),
@@ -1702,18 +1994,8 @@ impl Broker {
         plan: &MergePlan,
         trace_report: &Value,
         policy: &str,
+        approval: Option<PromotionApproval>,
     ) -> Result<String, BrokerError> {
-        let mut prepared = Vec::new();
-        for sp in &plan.stores {
-            if let Some(root) = &sp.install {
-                let spec = self.fabric.store(&sp.store)?.clone();
-                prepared.push(snapshot::prepare_restore(&self.fabric.cas, &spec, root)?);
-            }
-        }
-        for prep in prepared {
-            snapshot::commit_restore(&self.fabric.cas, prep)?;
-        }
-
         let stores_json: Vec<Value> = plan
             .stores
             .iter()
@@ -1725,46 +2007,147 @@ impl Broker {
                 })
             })
             .collect();
+        let transitions = plan
+            .stores
+            .iter()
+            .map(|store| StateRootTransition {
+                store: store.store.clone(),
+                before: store.trunk.clone(),
+                after: store.install.clone().unwrap_or_else(|| store.trunk.clone()),
+            })
+            .collect();
+        let event_body = json!({
+            "manifest": manifest_id,
+            "stores": stores_json,
+            "ops": plan.ops.iter().map(Op::to_json).collect::<Vec<_>>(),
+            "conflicts": plan.conflicts.iter().map(Conflict::to_json).collect::<Vec<_>>(),
+            "trace_check": trace_report,
+            "policy": policy,
+        });
         let sk = self.fabric.fabric_sk().clone();
         let span = self.fabric.substrate_span().to_string();
-        let ev = trace::append(
-            &mut self.fabric.conn,
-            &sk,
-            &span,
-            Some(manifest_id),
-            "promotion",
-            json!({
-                "manifest": manifest_id,
-                "stores": stores_json,
-                "ops": plan.ops.iter().map(Op::to_json).collect::<Vec<_>>(),
-                "conflicts": plan.conflicts.iter().map(Conflict::to_json).collect::<Vec<_>>(),
-                "trace_check": trace_report,
-                "policy": policy,
-            }),
-            &now_rfc3339(),
+        let manifest = manifest_id.to_string();
+        let event = self.fabric.commit_state_change(
+            StateChangePlan {
+                manifest: manifest_id.to_string(),
+                event_kind: "promotion".into(),
+                event_body,
+                transitions,
+                set_current_manifest: false,
+            },
+            move |tx, _| {
+                if let Some(approval) = approval {
+                    let now = now_rfc3339();
+                    tx.execute(
+                        "UPDATE promotions SET status = 'applied', decided_at = ?2
+                         WHERE id = ?1 AND manifest = ?3",
+                        params![approval.id, now, manifest],
+                    )?;
+                    trace::append_in_tx(
+                        tx,
+                        &sk,
+                        &span,
+                        Some(&manifest),
+                        "approval",
+                        json!({
+                            "promotion": approval.id,
+                            "resolution": "approved",
+                            "candidate_digest": approval.candidate_digest,
+                            "channel": approval.channel,
+                            "auth_strength": approval.auth_strength,
+                        }),
+                        &now,
+                    )?;
+                }
+                Ok(())
+            },
         )?;
-        for sp in &plan.stores {
-            let merged = sp.install.clone().unwrap_or_else(|| sp.trunk.clone());
-            self.fabric
-                .set_expected_root(&sp.store, &merged, ev.offset)?;
-        }
-        Ok(ev.id)
+        Ok(event.id)
     }
 
     pub fn list_promotions(&self, status: &str) -> Result<Vec<Value>, BrokerError> {
-        let mut stmt = self
-            .fabric
-            .conn
-            .prepare("SELECT id, manifest, preview, created_at FROM promotions WHERE status = ?1 ORDER BY id")?;
-        let rows = stmt.query_map([status], |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "manifest": r.get::<_, String>(1)?,
-                "preview": serde_json::from_str::<Value>(&r.get::<_, String>(2)?).unwrap_or(Value::Null),
-                "created_at": r.get::<_, String>(3)?,
-            }))
-        })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        let rows = {
+            let mut stmt = self
+                .fabric
+                .conn
+                .prepare("SELECT id, manifest, preview, created_at FROM promotions WHERE status = ?1 ORDER BY id")?;
+            let rows = stmt.query_map([status], |r| {
+                Ok(json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "manifest": r.get::<_, String>(1)?,
+                    "preview": serde_json::from_str::<Value>(&r.get::<_, String>(2)?).unwrap_or(Value::Null),
+                    "created_at": r.get::<_, String>(3)?,
+                }))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        if status == "pending" {
+            for row in &rows {
+                self.w14_verify_promotion_candidate(
+                    row["id"].as_i64().unwrap_or_default(),
+                    row["manifest"].as_str().unwrap_or_default(),
+                    &row["preview"],
+                )?;
+            }
+        }
+        Ok(rows)
+    }
+
+    /// Prove that the mutable parked row is byte-for-byte the candidate bound
+    /// by a still-unresolved signed escalation on the substrate chain.
+    fn w14_verify_promotion_candidate(
+        &self,
+        id: i64,
+        manifest: &str,
+        preview: &Value,
+    ) -> Result<PromotionBinding, BrokerError> {
+        let binding = w14_promotion_binding(id, manifest, preview)?;
+        let events = trace::verified_events(&self.fabric.conn, &self.fabric.fabric_vk())?;
+        let ordered = w11_span_events_in_signed_sequence(&events, self.fabric.substrate_span());
+        let mut matched = false;
+        for event in ordered {
+            let body = &event.raw["body"];
+            if event.kind == "approval" {
+                if body["promotion"].as_i64() == Some(id) {
+                    return Err(BrokerError::NoSuchPromotion(id));
+                }
+                continue;
+            }
+            if event.kind != "escalation" {
+                continue;
+            }
+            if body["promotion"].as_i64() != Some(id) {
+                continue;
+            }
+            let exact = event.manifest.as_deref() == Some(manifest)
+                && body["manifest"].as_str() == Some(manifest)
+                && body["candidate_digest"].as_str()
+                    == Some(binding.candidate_digest.as_str())
+                && body["branch_roots_digest"].as_str()
+                    == Some(binding.branch_roots_digest.as_str())
+                && body["policy_context"].as_str() == Some(W14_PROMOTION_POLICY_CONTEXT);
+            if !exact {
+                return Err(BrokerError::MalformedPromotion {
+                    id,
+                    detail: "mutable candidate does not match its signed escalation binding"
+                        .into(),
+                });
+            }
+            if matched {
+                return Err(BrokerError::MalformedPromotion {
+                    id,
+                    detail: "multiple signed candidate bindings".into(),
+                });
+            }
+            matched = true;
+        }
+        if !matched {
+            return Err(BrokerError::MalformedPromotion {
+                id,
+                detail: "no signed escalation binds this candidate".into(),
+            });
+        }
+        Ok(binding)
     }
 
     /// Approve a parked promotion (C2 surface, C1-stamped). The merge is
@@ -1781,12 +2164,18 @@ impl Broker {
             .fabric
             .conn
             .query_row(
-                "SELECT manifest, preview FROM promotions WHERE id = ?1 AND status = 'pending'",
+                "SELECT manifest, preview FROM promotions WHERE id = ?1",
                 [id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
         let (manifest_id, preview_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
+        let preview: Value =
+            serde_json::from_str(&preview_raw).map_err(|e| BrokerError::MalformedPromotion {
+                id,
+                detail: format!("preview is not JSON: {e}"),
+            })?;
+        let binding = self.w14_verify_promotion_candidate(id, &manifest_id, &preview)?;
         self.check_min_auth_for_manifest(&manifest_id, auth_strength)?;
 
         // As at the automatic gate, authenticate the authority object before
@@ -1798,11 +2187,6 @@ impl Broker {
         let _gate = self.fabric.gate_lock()?;
         self.fabric.check_drift()?;
 
-        let preview: Value =
-            serde_json::from_str(&preview_raw).map_err(|e| BrokerError::MalformedPromotion {
-                id,
-                detail: format!("preview is not JSON: {e}"),
-            })?;
         let branch_roots: BTreeMap<String, String> = preview["branch_roots"]
             .as_object()
             .ok_or_else(|| BrokerError::MalformedPromotion {
@@ -1831,24 +2215,12 @@ impl Broker {
             &plan,
             &trace_report,
             &format!("approved:{id}"),
-        )?;
-
-        let now = now_rfc3339();
-        self.fabric.conn.execute(
-            "UPDATE promotions SET status = 'applied', decided_at = ?2 WHERE id = ?1",
-            params![id, now],
-        )?;
-        let sk = self.fabric.fabric_sk().clone();
-        let sspan = self.fabric.substrate_span().to_string();
-        trace::append(
-            &mut self.fabric.conn,
-            &sk,
-            &sspan,
-            Some(&manifest_id),
-            "approval",
-            json!({ "promotion": id, "resolution": "approved",
-                    "channel": channel, "auth_strength": auth_strength }),
-            &now,
+            Some(PromotionApproval {
+                id,
+                channel: channel.to_string(),
+                auth_strength: auth_strength.to_string(),
+                candidate_digest: binding.candidate_digest,
+            }),
         )?;
         Ok(event)
     }
@@ -1859,33 +2231,43 @@ impl Broker {
         channel: &str,
         auth_strength: &str,
     ) -> Result<(), BrokerError> {
-        let manifest: Option<String> = self
+        let row: Option<(String, String)> = self
             .fabric
             .conn
             .query_row(
-                "SELECT manifest FROM promotions WHERE id = ?1 AND status = 'pending'",
+                "SELECT manifest, preview FROM promotions WHERE id = ?1",
                 [id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let manifest = manifest.ok_or(BrokerError::NoSuchPromotion(id))?;
+        let (manifest, preview_raw) = row.ok_or(BrokerError::NoSuchPromotion(id))?;
+        let preview: Value =
+            serde_json::from_str(&preview_raw).map_err(|error| BrokerError::MalformedPromotion {
+                id,
+                detail: format!("preview is not JSON: {error}"),
+            })?;
+        let binding = self.w14_verify_promotion_candidate(id, &manifest, &preview)?;
         let now = now_rfc3339();
-        self.fabric.conn.execute(
-            "UPDATE promotions SET status = 'rejected', decided_at = ?2 WHERE id = ?1",
-            params![id, now],
-        )?;
         let sk = self.fabric.fabric_sk().clone();
         let sspan = self.fabric.substrate_span().to_string();
-        trace::append(
-            &mut self.fabric.conn,
+        let tx = self.fabric.conn.transaction()?;
+        trace::append_in_tx(
+            &tx,
             &sk,
             &sspan,
             Some(&manifest),
             "approval",
             json!({ "promotion": id, "resolution": "denied",
+                    "candidate_digest": binding.candidate_digest,
                     "channel": channel, "auth_strength": auth_strength }),
             &now,
         )?;
+        tx.execute(
+            "UPDATE promotions SET status = 'rejected', decided_at = ?2
+             WHERE id = ?1 AND manifest = ?3",
+            params![id, now, manifest],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1904,7 +2286,7 @@ impl Broker {
             .filter(|(_, manifest, _)| manifest == manifest_id)
             .map(|(capability, _, _)| capability.clone())
             .collect();
-        let mut need: Option<String> = None;
+        let mut ranked = BTreeMap::new();
         for cap_id in granted {
             let cap = self.load_capability(&cap_id)?;
             if cap["bound_manifest"].as_str() != Some(manifest_id) {
@@ -1912,31 +2294,18 @@ impl Broker {
                     "grant binds capability {cap_id} to {manifest_id}, but its signed object binds a different manifest"
                 )));
             }
-            if let Some(min) = cap["caveats"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|c| c["dim"] == "approval.min_auth")
-                .and_then(|c| c["min"].as_str())
-            {
-                let stronger = match (&need, auth_rank(min)) {
-                    (None, Some(_)) => true,
-                    (Some(cur), Some(new)) => Some(new) > auth_rank(cur),
-                    _ => false,
-                };
-                if stronger {
-                    need = Some(min.to_string());
-                }
+            if let Some((rank, minimum)) = w14_required_approval_strength(&cap_id, &cap)? {
+                ranked.insert(rank, minimum);
             }
         }
-        if let Some(min) = need {
-            match (auth_rank(&min), auth_rank(auth_strength)) {
-                (Some(n), Some(h)) if h >= n => {}
+        if let Some((need_rank, need)) = ranked.into_iter().next_back() {
+            match auth_rank(auth_strength) {
+                Some(have_rank) if have_rank >= need_rank => {}
                 _ => {
                     return Err(BrokerError::ChannelTooWeak {
                         have: auth_strength.into(),
-                        need: min,
-                    })
+                        need,
+                    });
                 }
             }
         }

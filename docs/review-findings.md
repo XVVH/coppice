@@ -570,8 +570,17 @@ rehashing CAS read for every referenced blob, retaining the verified bytes in
 the prepared plan. Commit never re-reads attacker-controlled CAS content. The
 `RESTORE-INTEGRITY` contract proves prepared commits consume the staged bytes
 and missing or present-but-corrupt dependencies abort coherent revert before
-either the filesystem or SQLite live store is restored. Required CI and the
-targeted mutation lane are green; merge review remains pending.
+either the filesystem or SQLite live store is restored. The first independent
+review found the SQLite sibling still retained a predictable mutable staging
+pathname. The corrected SQLite plan retains the verified image bytes and CAS
+address, creates an exclusive randomized sibling only at commit, rehashes it
+through its retained handle, verifies the pathname still names that exact
+non-symlink inode immediately before atomic rename, and fsyncs file plus
+parent. A direct
+post-prepare CAS and legacy-staging substitution test proves only the retained
+verified image reaches the live database; a separate regular-file/symlink
+substitution negative proves the live target remains unchanged. Merge
+re-review remains pending.
 
 ## RF-21 — bundled SQLite 3.46.0 is affected by the WAL-reset corruption race — fixed (fa9defd, W-10)
 
@@ -721,6 +730,78 @@ rollback, expected-head completeness, and freshness, including replacement
 after a diagnostic view has already been observed.
 Merged in PR #41 after the required, deep, and targeted mutation lanes passed;
 GitHub's Linux, macOS, static, and audit checks also passed.
+
+## RF-29 — unsigned broker meter/exemption caches authorize dispatch — remediation in review (W-14)
+
+**Severity: high. Direction: FAIL-OPEN AUTHORITY.** Decision time read
+`broker_meters` and `exemptions` directly. A storage writer could reset a
+consumed meter or inject an exemption and receive an Allowed dispatch ticket;
+gate replay was too late to prevent credential injection or the downstream
+effect. Approval also inserted the exemption before its signed event, so an
+append failure left widening state behind.
+
+**Remediation:** decision meters and exemption headroom reconstruct from
+verified signed tool-call, escalation, and exact-matching approval events plus
+the broker's in-memory pending dispatch reservations. The two tables remain
+compatibility caches and are never read for authorization. Approval event and
+cache update now share one SQLite transaction, and approval without its exact
+prior signed escalation grants nothing. Protected-effect negatives reproduce
+both table writes and forced approval-append failure without dispatch. The
+corrected G9 matrix also rejects signer-anomalous capability, caveat, manifest,
+auth-strength, zero-use, duplicate-binding, and cross-capability accounting
+edges.
+
+## RF-30 — promotion/revert can partially commit or mutate without a signed event — remediation in review (W-14)
+
+**Severity: high. Direction: CROSS-STORE INTEGRITY / UNRECORDED MUTATION.**
+Both paths previously restored stores sequentially, then appended their event
+and expected roots. A later-store failure left roots disagreeing; an event
+failure left changed live state without its ledger cause.
+
+**Remediation:** one internal state-change transaction prepares both forward
+and rollback plans for every root, stages the primary signed event, expected
+roots, promotion status, and companion approval in one uncommitted SQLite
+transaction, then publishes a fabric-signed recovery journal. Stores are
+applied and fsynced before the database commit. Ordinary failure restores and
+fsyncs every before-root and rolls back the database; a retained journal makes
+reopen deterministically roll back when the linked verified event is absent or
+roll forward when it is present and its root tuple matches exactly. The journal
+is an implementation-private recovery record, not a new public §6 event kind.
+P16 becomes closed when W-14 merges; SI-25 still owns ledger deletion,
+database rollback, and external freshness.
+Recovery negatives additionally reject mistyped, wrong-version, symlink,
+directory, and event/manifest-misbound journals before restore; a forced store
+sync failure rolls every root and the event transaction back.
+
+## RF-31 — parked promotion approval trusts unsigned candidate selectors — remediation in review (W-14)
+
+**Severity: high. Direction: HUMAN-APPROVAL MISBINDING.** The mutable
+`promotions` row supplied manifest and preview while its signed escalation
+named only a numeric promotion id. Swapping two valid pending rows redirected
+approval from the reviewed branch to another valid branch.
+
+**Remediation:** the escalation signs promotion id, manifest, canonical digest
+of the exact preview, digest of the branch-root tuple, and versioned policy
+context. Approval recomputes and verifies that binding before auth-strength,
+drift, or merge work; table-only and swapped rows are inert. The signed
+approval repeats the candidate digest and commits atomically with promotion.
+
+## RF-32 — tools/list advertises revoked, expired, stale, or ungranted capability surfaces — remediation in review (W-14)
+
+**Severity: low. Direction: STALE AUTHORITY SURFACE / FAIL-CLOSED CONFUSION.**
+Advertisement previously verified only the capability object. Dispatch still
+denied, but a revoked or orphaned capability kept exposing tools to the agent.
+
+**Remediation:** advertisement shares dispatch's current-authority prerequisite:
+typed object, current-manifest M2 binding, mandatory live expiry, exact signed
+grant and ancestry, and absence of leaf/ancestor revoke. Direct tools/list
+tests cover signed revoke and capability-without-verified-grant.
+
+Corrected W-14 assurance is green: strict Clippy; 24 contracts with 131
+contracted tests and 93 frozen legacy tests; all 224 workspace tests and both
+acceptance demos; 152 targeted mutants (140 caught, 12 compiler-unviable, zero
+survivors/timeouts); and the deep 4,096-authority-case / 512-model-history
+release lane. Independent-context re-review remains the merge gate.
 
 ## Verified sound during review (recorded so they aren't re-litigated)
 

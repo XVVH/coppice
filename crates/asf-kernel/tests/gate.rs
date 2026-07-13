@@ -791,6 +791,34 @@ fn promotion_survives_revert() {
 }
 
 #[test]
+fn w14_promotion_event_append_failure_precedes_every_live_mutation() {
+    let mut w = setup();
+    agent_write(&mut w, "inbox/append-failure.md", "branch only\n");
+    w.broker
+        .fabric
+        .conn
+        .execute_batch(
+            "CREATE TEMP TRIGGER fail_w14_promotion_event
+             BEFORE INSERT ON events WHEN NEW.kind = 'promotion'
+             BEGIN SELECT RAISE(ABORT, 'injected promotion append failure'); END;",
+        )
+        .unwrap();
+    let branch = w.branch.clone();
+    assert!(w
+        .broker
+        .promote_manifest(&w.manifest, &branch)
+        .is_err());
+    assert!(
+        !w.vault.join("inbox/append-failure.md").exists(),
+        "failed event append still mutated trunk"
+    );
+    assert!(trace::all_events(&w.broker.fabric.conn)
+        .unwrap()
+        .iter()
+        .all(|event| event.kind != "promotion"));
+}
+
+#[test]
 fn destructive_ops_park_then_apply_on_approval() {
     let mut w = setup();
     // Agent deletes a file through the broker (delete op class).
@@ -833,6 +861,194 @@ fn destructive_ops_park_then_apply_on_approval() {
         Err(BrokerError::NoSuchPromotion(_))
     ));
     let _ = w.agent;
+}
+
+#[test]
+fn w14_unsigned_parked_row_swap_cannot_redirect_promotion_approval() {
+    let mut w = setup();
+    agent_delete(&mut w, "inbox/a.md");
+    let branch = w.branch.clone();
+    let first = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Parked { promotion } => promotion,
+        other => panic!("first destructive candidate must park: {other:?}"),
+    };
+
+    agent_delete(&mut w, "inbox/b.md");
+    let branch = w.branch.clone();
+    let second = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Parked { promotion } => promotion,
+        other => panic!("second destructive candidate must park: {other:?}"),
+    };
+    assert_ne!(first, second);
+
+    // Redirect the reviewed id to the other valid candidate using only the
+    // mutable parking table. Its signed candidate digest must make this row
+    // inert before drift accounting or any trunk mutation.
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE promotions
+             SET manifest = (SELECT manifest FROM promotions WHERE id = ?2),
+                 preview = (SELECT preview FROM promotions WHERE id = ?2)
+             WHERE id = ?1",
+            rusqlite::params![first, second],
+        )
+        .unwrap();
+    assert!(matches!(
+        w.broker
+            .approve_promotion(first, &w.chan, "local_session"),
+        Err(BrokerError::MalformedPromotion { .. })
+    ));
+    assert!(w.vault.join("inbox/a.md").exists());
+    assert!(w.vault.join("inbox/b.md").exists());
+    let events = trace::verified_events(&w.broker.fabric.conn, &w.broker.fabric.fabric_vk())
+        .unwrap();
+    assert!(events.iter().all(|event| {
+        event.kind != "approval" || event.raw["body"]["promotion"].as_i64() != Some(first)
+    }));
+}
+
+fn rewrite_promotion_escalation(
+    w: &mut World,
+    promotion: i64,
+    mutate: impl FnOnce(&mut serde_json::Map<String, Value>),
+) {
+    let event = trace::all_events(&w.broker.fabric.conn)
+        .unwrap()
+        .into_iter()
+        .find(|event| {
+            event.kind == "escalation"
+                && event.raw["body"]["promotion"].as_i64() == Some(promotion)
+        })
+        .unwrap();
+    let mut envelope = event.raw.as_object().unwrap().clone();
+    envelope.remove("id");
+    envelope.remove("sig");
+    mutate(envelope["body"].as_object_mut().unwrap());
+    let key = w
+        .broker
+        .fabric
+        .keystore()
+        .signing_key(Role::Fabric)
+        .unwrap();
+    let sealed = canon::seal("evt", envelope, &key).unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute_batch("DROP TRIGGER events_append_only_u")
+        .unwrap();
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE events SET id = ?2, raw = ?3 WHERE offset = ?1",
+            rusqlite::params![
+                event.offset,
+                sealed["id"].as_str().unwrap(),
+                serde_json::to_string(&sealed).unwrap()
+            ],
+        )
+        .unwrap();
+}
+
+#[test]
+fn w14_malformed_signed_promotion_binding_cannot_reach_trunk() {
+    for field in ["branch_roots_digest", "policy_context"] {
+        let mut w = setup();
+        agent_delete(&mut w, "inbox/b.md");
+        let branch = w.branch.clone();
+        let promotion = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+            PromotionOutcome::Parked { promotion } => promotion,
+            other => panic!("destructive candidate must park: {other:?}"),
+        };
+        rewrite_promotion_escalation(&mut w, promotion, |body| {
+            body.insert(field.into(), json!("sha256:signed-but-wrong"));
+        });
+
+        assert!(matches!(
+            w.broker
+                .approve_promotion(promotion, &w.chan, "local_session"),
+            Err(BrokerError::MalformedPromotion { .. })
+        ));
+        assert!(
+            w.vault.join("inbox/b.md").exists(),
+            "malformed signed {field} binding reached trunk"
+        );
+        assert!(trace::verified_events(&w.broker.fabric.conn, &w.broker.fabric.fabric_vk())
+            .unwrap()
+            .iter()
+            .all(|event| event.kind != "approval"));
+    }
+}
+
+#[test]
+fn w14_strongest_activated_capability_governs_promotion_approval() {
+    let mut w = setup();
+    let mut weaker = caveats();
+    weaker
+        .iter_mut()
+        .find(|caveat| caveat["dim"] == "approval.min_auth")
+        .unwrap()["min"] = json!("platform_oauth");
+    w.broker
+        .mint(
+            &w.manifest,
+            &w.human,
+            weaker,
+            vec!["budget.count:write"],
+            "2099-01-01T00:00:00Z",
+        )
+        .unwrap();
+    agent_delete(&mut w, "inbox/b.md");
+    let branch = w.branch.clone();
+    let promotion = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Parked { promotion } => promotion,
+        other => panic!("destructive candidate must park: {other:?}"),
+    };
+
+    assert!(matches!(
+        w.broker
+            .approve_promotion(promotion, "chan:oauth", "platform_oauth"),
+        Err(BrokerError::ChannelTooWeak { .. })
+    ));
+    assert!(
+        w.vault.join("inbox/b.md").exists(),
+        "weaker sibling capability lowered the strongest approval requirement"
+    );
+}
+
+#[test]
+fn w14_mistyped_capability_cannot_weaken_promotion_approval_strength() {
+    let mut w = setup();
+    agent_delete(&mut w, "inbox/b.md");
+    let branch = w.branch.clone();
+    let promotion = match w.broker.promote_manifest(&w.manifest, &branch).unwrap() {
+        PromotionOutcome::Parked { promotion } => promotion,
+        other => panic!("destructive candidate must park: {other:?}"),
+    };
+    w.broker
+        .fabric
+        .conn
+        .execute(
+            "UPDATE objects SET kind = 'manifest' WHERE id = ?1",
+            [&w.cap],
+        )
+        .unwrap();
+
+    assert!(w
+        .broker
+        .approve_promotion(promotion, &w.chan, "local_session")
+        .is_err());
+    assert!(
+        w.vault.join("inbox/b.md").exists(),
+        "mistyped capability bypassed promotion-strength aggregation"
+    );
+    let events = trace::verified_events(&w.broker.fabric.conn, &w.broker.fabric.fabric_vk())
+        .unwrap();
+    assert!(events.iter().all(|event| {
+        event.kind != "approval"
+            || event.raw["body"]["promotion"].as_i64() != Some(promotion)
+    }));
 }
 
 /// M7/A21: under `authority: {"mode":"brokered"}` every effect must be

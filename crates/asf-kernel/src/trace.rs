@@ -15,7 +15,7 @@
 
 use crate::canon::{self, CanonError};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{Map, Value};
 
 #[derive(Debug, thiserror::Error)]
@@ -159,10 +159,27 @@ pub fn append(
     body: Value,
     at: &str,
 ) -> Result<Appended, TraceError> {
+    let tx = conn.transaction()?;
+    let appended = append_in_tx(&tx, sk, span, manifest, kind, body, at)?;
+    tx.commit()?;
+    Ok(appended)
+}
+
+/// Append within a caller-owned SQLite transaction. State-changing callers
+/// use this to make the signed event, expected-root tuple, and mutable caches
+/// one database commit; the caller remains responsible for committing.
+pub fn append_in_tx(
+    tx: &Transaction<'_>,
+    sk: &SigningKey,
+    span: &str,
+    manifest: Option<&str>,
+    kind: &str,
+    body: Value,
+    at: &str,
+) -> Result<Appended, TraceError> {
     if !EVENT_KINDS.contains(&kind) {
         return Err(TraceError::UnknownKind(kind.into()));
     }
-    let tx = conn.transaction()?;
     let tip: Option<(String, i64)> = tx
         .query_row(
             "SELECT id, seq FROM events WHERE span = ?1 ORDER BY seq DESC LIMIT 1",
@@ -205,7 +222,6 @@ pub fn append(
         ],
     )?;
     let offset = tx.last_insert_rowid();
-    tx.commit()?;
     Ok(Appended {
         id,
         offset,

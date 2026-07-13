@@ -169,11 +169,14 @@ validation as type binding.
 
 **G3. Crash consistency.** Preparation failure, injected interruption, hard
 process exit during an in-place filesystem apply, reopen, and idempotent replay
-are covered; session-boundary SIGKILL recovery is covered too. Nothing yet kills
-a process *during* a multi-root promotion/revert commit, between state mutation
-and event append, or between event append and expected-root updates. Add that
-full subprocess crash matrix when the atomic commit protocol is designed. Same
-family: WAL/-shm sidecars under a crashed reader. W-13 now covers complete
+are covered; session-boundary SIGKILL recovery is covered too. W-14 adds the
+multi-root protocol and deterministic barriers after journal publication,
+after a later-store mutation, before database commit, and after database
+commit. Ordinary later-store and event-append failures prove no partial root or
+unrecorded mutation survives; reopen proves exact rollback without the linked
+event and exact roll-forward with it. Remaining same family: a subprocess
+hard-exit matrix at each filesystem syscall and WAL/-shm sidecars under a
+crashed reader. W-13 covers complete
 key-directory publication, concurrent initialization, required-key
 loss/malformed reopen, database-only, keys-only, mixed partial homes,
 missing/substituted database, CAS, and runtime-store paths, and malformed
@@ -394,16 +397,13 @@ silently omitted. The process-level negative snapshots the complete fabric
 home and proves integrity failure already present in the observed view occurs
 before drift attribution or CAS capture can mutate it; concurrent replacement
 after that view remains SI-25 freshness. The targeted `w19_*` mutation lane
-guards the new classification and no-accounting-on-doubt predicates. W-14
-implements the typed-object half with one `load_verified_object` boundary for
-manifests, tools, capabilities, and channels, plus verified-and-staged CAS reads
-during filesystem restore prepare; missing and corrupt dependencies are both
-covered. Its `TYPED-OBJECT` and
-`RESTORE-INTEGRITY` negatives assert that lineage, branch/revert, promotion,
-dispatch/escalation, approval, tool lookup, and live-store mutation do not
-occur on doubt. The targeted W-14 lane tested 18 mutants: 17 caught, one
-compiler-unviable whole-function replacement, zero survivors or timeouts.
-Independent-context review remains the merge gate. The matrix is a caller-
+guards the new classification and no-accounting-on-doubt predicates. W-14's
+first submitted matrix covered typed objects and filesystem CAS preparation;
+independent review demonstrated that its passing 18-mutant lane omitted live
+decision caches, SQLite staging, multi-root transactionality, parked candidate
+binding, promotion-strength aggregation, and advertisement liveness. G12
+records the corrected cross-consumer matrix and expanded mutation surface.
+Independent-context re-review remains the merge gate. The matrix is a caller-
 boundary complement to G5 mutation testing, not a substitute for it.
 
 **G11. Universal signed-event body conformance.** W-19 closes the retained-row
@@ -417,6 +417,22 @@ That is a conformance/publication gap rather than a storage-only forgery—the
 current attacker cannot sign the malformed event—but G9 requires it to remain
 explicit. W-6 owns machine-readable per-kind schemas and pass/fail fixtures;
 authority consumers continue to fail closed on missing fields in the meantime.
+
+**G12. W-14 cross-consumer assurance gap — remediation in review.** The first
+independent review correctly found that the original inverse map cited an
+escalation-approval test for promotion-strength aggregation, claimed immutable
+SQLite preparation while retaining a mutable pathname, and mutated only the
+shared loader plus filesystem helper. The corrected evidence adds direct
+promotion-strength relabeling, meter reset/exemption injection, failed approval
+append, SQLite post-prepare substitution, parked-candidate swap, both
+promotion/revert event failures, ordinary later-store rollback, both reopen
+recovery directions, and revoked/ungranted tools/list. The W-14 mutation lane
+now includes the broker, kernel, tools, proxy, trace, and snapshot enforcement
+boundaries. The corrected run covered 152 mutants: 140 caught, 12 compiler-
+unviable, zero survivors or timeouts. Required CI passed 24 contracts / 131
+contracted tests / 93 frozen tests, all 224 workspace tests, and both demos;
+deep passed 4,096 authority cases and 512 model histories. Independent-context
+re-review remains the merge gate.
 
 ## Automation lanes
 

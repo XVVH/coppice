@@ -181,9 +181,11 @@ in scope, or when storage leaves that filesystem boundary.
   → HA topology (roadmap parked; scalability).
 
 ### G-PRODUCTION — before any durability / HA / forensic commitment  *(relaxes DEBUG)*
-- **P16** Promotion/revert not crash-atomic across roots (sequential commit;
-  in-place per-file apply; state mutated before ledger attestation). → audit
-  High; crash-atomic multi-root commit (roadmap parked); scalability.
+- **P16 — remediation in review (W-14):** promotion/revert now prepare forward
+  and rollback images, stage the signed event and root tuple in one uncommitted
+  database transaction, publish an authenticated recovery journal, fsync every
+  store, and commit the ledger last. Ordinary failure rolls back all roots;
+  reopen rolls back when the linked event is absent and forward when present.
 - **P15** Trace tamper-evidence incomplete: no durable/external signed head
   (tail-truncation and whole-span deletion undetectable); substrate `offset`
   is an unsigned rowid backing all cross-span ordering claims. → RF-13
@@ -251,7 +253,7 @@ All 27 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P13 | Logical-only crypto-shred; old ciphertext + wrapped-DEK pairs may survive | `payload.rs:4-5,172-197`, `keys.rs:131-141` | DEBUG 1TEN | roadmap parked; audit; `AGENTS.md` |
 | P14 | Plaintext-hash confirmation oracle; cross-tenant only if future storage deduplicates globally | `payload.rs:71-100` | 1TEN | RF-7 (accepted; global-dedup topology flagged here) |
 | P15 | No durable trace head; unsigned `offset` still backs cross-span ordering while W-11 closes denormalized-selector authority use | `trace.rs`; `broker.rs` | DEBUG 1TEN | RF-13/SI-25/W-15; RF-16 closed by W-11 |
-| P16 | Promotion/revert not crash-atomic across roots | `snapshot.rs`, `kernel.rs`, `broker.rs` | DEBUG | audit High; roadmap parked; scalability |
+| P16 | ~~Promotion/revert not crash-atomic across roots~~ **REMEDIATION IN REVIEW (W-14):** authenticated journal + linked DB transaction + all-root rollback/roll-forward | `snapshot.rs`, `kernel.rs`, `broker.rs` | — after merge | RF-30; W-14; crash/failure contract |
 | P18 | Drift attributed to the one human by default | `kernel.rs:448-453` | 1HUMAN | multi-actor (parked); SI-20; `dogfooding.md` |
 | P19 | AEAD binds no associated data and stored algorithm/key-link metadata is not enforced | `keys.rs:210-269`, `payload.rs:122-156` | DEBUG 1TEN | RF-22; SI-28; W-16 |
 | P20 | Home-global `current_manifest`/`current_span`; one broker mutex | `kernel.rs`; scalability | 1SESS | SessionContext (parked) |

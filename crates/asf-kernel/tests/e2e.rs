@@ -517,6 +517,41 @@ fn w14_corrupt_referenced_blob_prevents_revert_before_live_mutation() {
     assert_eq!(read_memory_facts(&w.memory_db).len(), 2);
 }
 
+#[test]
+fn w14_revert_event_append_failure_precedes_every_live_mutation() {
+    let mut w = setup();
+    let (human, agent, intent) = boot(&mut w);
+    let step = w
+        .fabric
+        .step_boundary(&human, &agent, &intent, behavior_v1())
+        .unwrap();
+    fs::write(w.vault.join("index.md"), "live state must survive").unwrap();
+    fs::write(w.vault.join("live-only.md"), "sentinel").unwrap();
+    Connection::open(&w.memory_db)
+        .unwrap()
+        .execute("INSERT INTO memories (fact) VALUES ('live state')", [])
+        .unwrap();
+    let vault_before = read_fs_bytes(&w.vault);
+    let memory_before = read_memory_facts(&w.memory_db);
+    w.fabric
+        .conn
+        .execute_batch(
+            "CREATE TEMP TRIGGER fail_w14_revert_event
+             BEFORE INSERT ON events WHEN NEW.kind = 'revert'
+             BEGIN SELECT RAISE(ABORT, 'injected revert append failure'); END;",
+        )
+        .unwrap();
+
+    assert!(w.fabric.revert_to(&step.manifest).is_err());
+    assert_eq!(read_fs_bytes(&w.vault), vault_before);
+    assert_eq!(read_memory_facts(&w.memory_db), memory_before);
+    assert!(w.vault.join("live-only.md").exists());
+    assert!(trace::all_events(&w.fabric.conn)
+        .unwrap()
+        .iter()
+        .all(|event| event.kind != "revert"));
+}
+
 /// M8 (A20): revert consumes live state like a merge does — the fourth
 /// timing. An out-of-band edit followed by revert must be attributed
 /// (drift with A12 attribution + A13 op summary) BEFORE the restore

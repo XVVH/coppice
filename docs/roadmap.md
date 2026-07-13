@@ -50,8 +50,8 @@ keystone every other protocol consumes; candidate is ADR 0006, recovered
 from `agent/si25-authenticated-head-design` (W-15's design half);
 (2) retro-ratify W-14's in-PR protocols — SI-31 owned-state
 transition/recovery journal, SI-33 event-derived consumable authority,
-SI-34 approval candidate binding — with PR #43's merged implementation
-as candidate; (3) SI-32 store publication / filesystem attacker model;
+SI-34 approval candidate binding — with PR #43's implementation as
+candidate once it merges; (3) SI-32 store publication / filesystem attacker model;
 (4) SI-26 with SI-28/SI-29 (type/domain transcript; payload envelope
 AAD; post-shred generations — siblings, and SI-26 gates W-6); (5) SI-27
 key lifecycle; (6) cross-cutting: a §0 posture-qualifier convention

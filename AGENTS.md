@@ -97,7 +97,10 @@ any consumer treats as authoritative is protocol-class — it MUST be
 filed as an SI and its protocol ratified before implementation; it may
 shrink the PR under review, never grow it. In-PR remediation is for
 mechanism-class findings: a missing or wrong predicate inside
-already-ratified semantics. Blocking review findings MUST cite the
+already-ratified semantics. The tiebreaker is whether the governing
+clause already exists, not how structural the fix looks — RF-32
+(tools/list liveness) trips the source-change test, yet §5.4 already
+supplied its clause, so it was mechanism-class. Blocking review findings MUST cite the
 written clause they enforce (spec section, ratified protocol/ADR, or
 posture row); a finding with no citable clause is a filing (SI/RF/G/P),
 not a blocker. Un-parking a posture row or a parked roadmap item is an
@@ -116,7 +119,7 @@ before ending — never end a session with committed-but-unpushed work.
 After a PR merges, its head branch is deleted (the repo auto-deletes
 remote heads; delete the local copy too). Cite PR numbers, not commit
 SHAs, in docs: squash-merge rewrites SHAs, so branch-local ids resolve
-only while their branch or an archive tag survives (the RF-4/5/8
+only while their branch or an archive tag survives (the RF-4/5/8/9
 "fixed in 5350010" citations resolve via the `archive/testing-suite`
 tag).
 

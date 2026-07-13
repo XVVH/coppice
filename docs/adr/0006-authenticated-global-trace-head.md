@@ -8,6 +8,35 @@ published format. If ratified, the decision must be integrated into the schema
 specification under the repository's amendment discipline before W-15 changes
 runtime code.
 
+> **Recovery note (2026-07-13, appended at import — not part of the
+> original draft).** This ADR was drafted at PR #38 and recovered from
+> the unpushed `agent/si25-authenticated-head-design` branch; W-12,
+> W-13, W-19 (PRs #39–#41) and the W-14 protocols (PR #43) postdate it.
+> Four seams for the ratification session, from the 2026-07-13
+> fresh-eyes review:
+>
+> 1. The non-goals list parks P16, but PR #43 closes P16 with the
+>    signed state-change recovery journal (SI-31). Composition clauses
+>    needed at ratification: the append protocol's checkpoint and
+>    anchor-outbox join the same SQLite transaction as the W-14 staged
+>    event/roots; reopen recovery consults the anchor before trusting
+>    the journal (the journal is mutable local metadata under the
+>    anchor-ahead recovery row); and the reason "rolled back but
+>    already anchored" is unreachable — event and checkpoint share one
+>    transaction — should become a stated clause, not a coincidence.
+> 2. `TraceEpoch` creation (`reason: "initialize"`) and the accept-once
+>    initial anchor CAS belong inside W-13's `Fabric::initialize`
+>    boundary, unreachable from `open_existing`; migration runs under
+>    that same boundary.
+> 3. H15's operator diagnostics land on W-19's ledger integrity view —
+>    global-gap, epoch-mismatch, anchor-ahead, and fork findings
+>    surface there under the G9 process-level exit-status contract; the
+>    validation plan should name that surface.
+> 4. W-15 implementation re-pins the W-9 corpus baseline (new signed
+>    event fields change ingest output) while corpus replay verdicts
+>    stay invariant (A22 adjustment 8); the validation plan should
+>    state both.
+
 ## Decision summary
 
 Adopt two deliberately separate mechanisms:

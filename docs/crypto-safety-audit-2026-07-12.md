@@ -21,10 +21,11 @@ missing-key continuity, and operator-ledger defects. The remaining release
 blockers are an unauthenticated global trace order/head, an unbound/non-atomic
 payload envelope, an unspecified production key lifecycle/custody boundary,
 and asserted rather than authenticated identity/credential surfaces. W-14's
-typed-object and verified-restore repair is implemented with green required and
-targeted-mutation evidence, but remains a blocker until its required
-independent-context authority review and merge. The merged repairs do not
-weaken the remaining production gates.
+typed-object and verified-restore repair passed its independent-context
+re-review (APPROVE WITH NON-BLOCKING FOLLOW-UPS, 2026-07-13) and merged in
+PR #43, closing RF-19/RF-20/RF-29–RF-32 and P16 with two non-blocking
+follow-ups filed (RF-33/RF-34). The merged repairs do not weaken the
+remaining production gates.
 
 ## Remediation merged from this audit
 
@@ -109,8 +110,8 @@ current Rust crates are not evidence of a validated cryptographic module.
 | operator ledger trusts or silently omits unverified rows | RF-28, G10, W-19 | fixed in PR #41; SI-25 global-order/rollback residual retained |
 | JCS semantic collision | RF-17, P24, G2, W-12 | fixed in PR #39; SI-26/RF-6 separate |
 | missing-key silent regeneration / identity split | RF-18, SI-27, G3, W-13 | fixed in PR #40; lifecycle/custody design follows |
-| unverified manifest application | RF-19, G10, W-14 | implemented; independent review and merge pending |
-| restore preflight validates presence, not bytes | RF-20, G3, W-14 | implemented; independent review and merge pending |
+| unverified manifest application | RF-19, G10, W-14 | fixed in PR #43; independent re-review approved |
+| restore preflight validates presence, not bytes | RF-20, G3, W-14 | fixed in PR #43; independent re-review approved |
 | bundled SQLite WAL-reset defect | RF-21, W-10 | fixed in PR #37; 4/4 floor mutants caught |
 | payload AAD/dispatch/atomicity/shred generation | RF-22, P13/P19, SI-28/SI-29 | design now; versioned implementation |
 | credential reflection through downstream result | RF-23, P27, SI-23, W-18 | block credentials/third-party tools |
@@ -205,8 +206,19 @@ mutants across typed objects, signed runtime decision state, immutable
 FS/SQLite plans, exact parked-candidate binding, recoverable multi-root commit,
 direct promotion-strength aggregation, and current-authority advertisement:
 140 caught, 12 compiler-unviable, zero survivors or timeouts. The deep release
-lane passed 4,096 authority cases and 512 model histories. Independent-context
-re-review remains mandatory before merge.
+lane passed 4,096 authority cases and 512 model histories. The
+independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS
+(2026-07-13) and the change merged in PR #43.
+
+Re-review residual carried forward (not a merge blocker): decision-time
+authority reconstruction (`w14_decision_authority`) performs a full
+`verified_events` scan per `propose_call`, compounding the per-decision
+full-ledger-scan cost ADR 0006 already flags for W-15. W-15's incremental
+verified-prefix caching (verify once from a trusted checkpoint, cache keyed by
+terminal event) is the intended fix; W-14 does not regress correctness, only
+adds to the scan W-15 must make incremental. The crash-restart budget-durability
+consequence of the same event-sourced reconstruction is RF-33; the operator
+listing edge is RF-34.
 
 ## W-19 G9 inverse conformance (brief §3/§5.1; spec §6)
 
@@ -269,7 +281,8 @@ human whether history is explainable.
   replaces—not adds to—that evidence: 24 contracts / 131 registered / 93
   frozen, 224 workspace tests plus both demos, 140 caught mutants plus 12
   compiler-unviable with zero survivors/timeouts, and green 4,096-case / 512-
-  history deep suites. Independent re-review remains pending.
+  history deep suites. The independent re-review returned APPROVE WITH
+  NON-BLOCKING FOLLOW-UPS (RF-33/RF-34) and W-14 merged in PR #43.
 - W-11 merged in PR #36, W-10 in PR #37, W-12 in PR #39, W-13 in PR #40,
   and W-19 in PR #41. The remaining findings and spec decisions stay queued in
   the canonical RF/SI/P/G/W trackers rather than being implied complete here.

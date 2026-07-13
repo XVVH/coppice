@@ -30,24 +30,6 @@ declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
-**W-14 — typed object application + verified restore preparation.** Owner:
-agent. One expected-prefix/kind/signature boundary now covers every
-authority-bearing object consumer; branch/revert/parent, promotion, capability,
-approval, and tool-registration paths use it. The first independent-context
-review returned REQUEST CHANGES: unsigned runtime authority caches, mutable
-SQLite staging, non-atomic multi-root commit, unsigned parked-candidate
-selection, incomplete inverse/mutation evidence, and stale tool advertisement.
-The remediation derives decision authority from signed events plus pending
-reservations; retains verified SQLite bytes; commits promotion/revert through
-an authenticated rollback/roll-forward journal linked to one database
-transaction; signs exact promotion candidates; advertises only currently live
-authority; and adds direct protected-effect contracts across every edge.
-Corrected required CI is green (224 tests and both demos), deep is green (4,096
-authority cases / 512 model histories), and the 152-mutant W-14 lane has zero
-survivors/timeouts; independent-context re-review remains before merge. Closes
-RF-19/RF-20/RF-29–RF-32 and P16 when merged. *Provenance: 2026-07-12
-cryptographic mechanism audit + 2026-07-13 independent review.*
-
 ## Queued (ordered)
 
 **W-20 — kernel security protocol pass (spec v0.8).** Owner: operator +
@@ -253,6 +235,22 @@ decision, not by drift. From the 2026-07-10 review sessions:
 
 ## Done (recent — full history is git)
 
+- **W-14 — typed object application + verified restore preparation** — one
+  expected-prefix/kind/signature boundary (`load_verified_object`) for every
+  authority-bearing object consumer (branch/revert/parent, promotion,
+  capability, approval, tool registration/advertisement); decision authority
+  reconstructed from signed events plus in-memory reservations, not the
+  `broker_meters`/`exemptions` caches; promotion/revert committed through a
+  fabric-signed rollback/roll-forward recovery journal linked to one SQLite
+  transaction with all-root fsync; parked promotions bound to a signed
+  candidate digest; restore prepares immutable verified bytes and publishes
+  through an exclusive random no-follow sibling with pre-rename inode
+  recheck. First independent-context review returned REQUEST CHANGES (six
+  findings); all corrected, and the independent re-review returned APPROVE
+  WITH NON-BLOCKING FOLLOW-UPS (RF-33/RF-34). Closes RF-19/RF-20/RF-29–RF-32
+  and P16. The three protocol-class findings from the cycle are retro-filed
+  as SI-31/SI-33/SI-34 and ratify at W-20 with this implementation as
+  candidate. (PR #43, 2026-07-13)
 - **W-19 — integrity-aware operator ledger** — diagnostic accounting now
   consumes only a clean signature-verified, selector-matched, chain-valid
   retained-row view; malformed, foreign-signed, selector-mismatched,

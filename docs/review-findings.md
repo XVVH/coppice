@@ -900,9 +900,77 @@ failure mode remains "revert and shrug" — except for item 2's lost
 downtime edits, which is why this is medium, not low. **Carried by W-15**,
 which already rewrites the same function for S4 prefix-bounding; the
 adversarial value of item 1 activates with W-17 key custody. Founding
-determinations and the V-derivation (transition roots ∘ drift
-`observed_root`, manifest-attested at genesis) are ADR 0007's; the
-enforcing tests land with W-15's contract lanes.
+determinations and the V-derivation are ADR 0007's — **as adjusted by its
+round-1 review adjustments R3/R4** (total V among
+snapshot/promotion/revert/drift/closing-record attestations, projected
+onto the journal's store set; capture-before-restore with emission
+deferred until after restore, paired window-drift + `fabric_recovery`
+closing record; per-arm epoch guard). The enforcing tests land with
+W-15's contract lanes.
+
+## RF-36 — gate replay grants approval headroom without binding, order, or double-resolution checks — open (high, posture-bounded)
+
+**Severity: high. Direction: FAIL-OPEN AUTHORITY at the gate, the
+authoritative recount.** Found by round 1 of the PR #48 independent
+review (finding 1); verified at source. `gate_trace_check` pre-aggregates
+every signed `approved` event into `(capability, caveat) → uses` headroom
+before replaying any tool call — checking none of: a matching prior
+signed escalation; approval-after-escalation or approval-before-effect
+order (a later approval retro-funds an earlier call at replay);
+manifest/M2 agreement; auth strength; conflicting bindings; double
+resolution. Decision time (`w14_decision_authority`) enforces all of
+these, so the gate — which A25/§5.4 make **authoritative for what becomes
+durable** — is strictly weaker than the advisory check, inverting the
+authority hierarchy.
+
+**Why bounded under the current posture:** locally the broker is the sole
+producer of approval events and emits them correctly bound and ordered,
+so the lax replay is unreachable from the agent. The exposure is
+foreign/replayed substrate — exactly the W-9 corpus surface — and any
+future path where trace rows are ingested rather than produced.
+**Clause:** A25 §5.5 "Decision and gate" as adjusted by ADR 0007 R1 (the
+recount applies the same exact-match binding predicate at each effect's
+durable authorization offset — the W-2 shared-evaluator discipline
+extended to consumption). Carried by **W-22**; its contract lane also
+supplies the double-resolution negative G13 records as outstanding.
+
+## RF-37 — approval-time re-merge applies un-previewed outcomes without comparison or re-park — open (medium)
+
+**Severity: medium. Direction: HUMAN-APPROVAL MISBINDING (consent scope),
+no authority widening beyond the digest-pinned branch content.** Found by
+round 1 of the PR #48 independent review (finding 2), which refuted the
+draft's narrowing rationale with a concrete counterexample: preview
+against trunk `H` shows the branch edit conflicting (trunk-wins, nothing
+applied); trunk returns to base before approval; the re-merge sees no
+conflict and installs the full branch edit the human was shown *not*
+landing. `approve_promotion` re-merges pinned branch roots against live
+trunk and applies the result with no comparison to the previewed outcome.
+
+**Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2 — the
+re-merge MUST reproduce the previewed outcome exactly (per-store results,
+op-set, conflict resolutions); any difference re-parks as a fresh
+candidate with a fresh escalation and digest. Bounded meanwhile: the
+applied content is still the digest-pinned branch content, the gate
+re-verifies trace-vs-capability, drift is attributed first (M8), and
+Tier-1 promotion remains revertible. Carried by **W-22**; the
+outcome-equality negative (G13) lands with its contract lane.
+
+## RF-38 — a poisoned escalation chain denies all capabilities with no operator recovery path — open (low)
+
+**Severity: low. Direction: FAIL-CLOSED availability (self-DoS), no
+authorization bypass.** Found by round 1 of the PR #48 independent review
+(finding 8). `w14_decision_authority` scans every escalation/approval
+anomaly before filtering to the requested capability, so one duplicate
+resolution or conflicting binding — for any capability — fails the
+consumption view for **all** capabilities in the home, permanently
+(the event stream is append-only). Ratified as intentional scope (ADR
+0007 R7: a corrupted authority chain is a home-level integrity incident;
+per-capability scoping would let a poisoned chain keep granting
+elsewhere). What is missing is the operator recovery path — today nothing
+short of an epoch action clears it. If the remedy needs a new record kind
+(a ratified supersession/quarantine record), it graduates to an SI per
+the triage rule before implementation. Schedule with the next
+operator-surface pass (alongside RF-34).
 
 ## Verified sound during review (recorded so they aren't re-litigated)
 

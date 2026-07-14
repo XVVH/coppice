@@ -16,9 +16,10 @@
 > re-filed at the spec layer (W-20 batches their ratification; PR #43's
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
-> retro-ratification, 2026-07-14, ADR 0007, PR #48 — three adjustments
-> beyond as-built tracked by RF-35, carried by W-15); SI-32 remains
-> open, next in the W-20 batch. **SI-35**
+> retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
+> adjusted by the round-1 review adjustments R1–R7; as-built gaps
+> tracked by RF-35–RF-37, carried by W-15/W-22); SI-32 remains open,
+> next in the W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
@@ -195,11 +196,19 @@ approval under a superseded policy is structurally inert and **loud** —
 re-presentation is a fresh escalation, never a silent re-park (the
 challenge pass initially misdescribed this as auto-re-park; corrected at
 source verification, ADR 0007). The re-merge boundary is ratified rather
-than left implicit (D34-3): the approval authorizes the candidate, never a
-trunk instant; A11 trunk-wins + M8 attribution force trunk drift to
-narrow, never widen, the applied delta — a widening re-merge is a spec
-violation (G13 files the missing negative). Determinations D34-1…D34-4 in
-ADR 0007 (W-20 session, 2026-07-14). Original filing preserved below.
+than left implicit (D34-3), **as revised in round 1**: the round-0
+narrowing rationale was refuted by the independent review (a trunk-wins
+conflict preview followed by trunk returning to base installs the full
+branch edit the human was shown not landing); the ratified rule is
+outcome equality — the approval-time re-merge MUST reproduce the
+previewed outcome exactly, any difference re-parking as a fresh candidate
+(RF-37, carried by W-22). Round 1 also stated the exemption candidate
+precisely (R5: the presented candidate is the signed escalation; `uses`
+is resolution-authored human input, its rendering fidelity the C2
+surface's contract; the exemption's policy context is the immutable
+content-addressed capability). Determinations D34-1…D34-4 as adjusted by
+R2/R5 in ADR 0007 (W-20 session, 2026-07-14). Original filing preserved
+below.
 
 ---
 
@@ -259,7 +268,15 @@ gate's recount at durable authorization offsets is authoritative for what
 becomes durable — §5.4 extended to consumption, composing with the accepted
 RF-3 residual). Forward consumers stated once: §7 counters and W-3's
 k-counting run over the `VerifiedPrefix` (D2), never mutable rows.
-Determinations D33-1…D33-5 in ADR 0007 (W-20 session, 2026-07-14).
+Round 1 of the independent-context review (PR #48) found the gate's
+recount does not yet apply the decision-time binding predicate (approvals
+pre-aggregated without escalation binding, ordering, or double-resolution
+checks — the gate was weaker than the advisory check); ratified as ADR
+0007 R1: the recount MUST apply the same exact-match predicate at each
+effect's durable authorization offset (RF-36, carried by W-22). Round 1
+also ratified the whole-view anomaly failure as intentional home-level
+scope, filing the operator recovery path as RF-38 (R7). Determinations
+D33-1…D33-5 as adjusted in ADR 0007 (W-20 session, 2026-07-14).
 Original filing preserved below.
 
 ---
@@ -350,9 +367,19 @@ mechanisms alongside its existing S4 prefix-bounding of the same function.
 Journal freshness against *joint* journal+database rollback remains SI-25
 layer 2's question (S4/anchor-ahead), as filed. Scope fences held:
 Tier-1-local only; filesystem adversary tiers → SI-32; syscall crash
-matrix → G3. Determinations D31-1…D31-6 in ADR 0007; challenge pass and
-fresh-eyes source verification 2026-07-14 (W-20 session). Original filing
-preserved below.
+matrix → G3. Round 1 of the independent-context review (PR #48) caught
+two semantic defects in the drafted adjustments themselves, ratified as
+ADR 0007 R3/R4: the journal epoch guard split by arm (the universal
+activation-prefix predicate contradicted the roll-back arm, whose linked
+event is definitionally absent), and the recovery emission order inverted
+(the round-0 pre-restore drift emission poisoned V and bricked retries;
+now V is total — snapshot/promotion/revert/drift/closing-record
+attestations, projected onto the journal's store set — capture precedes
+restore but emission follows it, one atomic transaction pairing the
+window drift with a `fabric_recovery` closing record, the new A12 class).
+Determinations D31-1…D31-6 as adjusted by R3/R4 in ADR 0007; challenge
+pass and fresh-eyes source verification 2026-07-14 (W-20 session).
+Original filing preserved below.
 
 ---
 

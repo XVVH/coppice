@@ -32,7 +32,7 @@ clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
 
 ## Queued (ordered)
 
-**W-20 — kernel security protocol pass (spec v0.8).** Owner: operator +
+**W-20 — kernel security protocol pass (spec v0.8–v0.9).** Owner: operator +
 agent. Write the operational stratum under the schema spec as one
 ratified batch instead of five just-in-time designs. The spec's
 invariants quantify over objects no ratified protocol yet constructs
@@ -54,7 +54,7 @@ under, and the typed authority projection (G11/W-6 pulled forward for
 authority consumers). Closes with one independent-context composition
 review over the seams (journal freshness ↔ SI-25; AAD ↔ SI-26; rotation
 ↔ historical verification) — the batch exists so the protocols compose,
-not merely each hold. Deliverables: spec v0.8 plus a companion kernel
+not merely each hold. Deliverables: spec v0.8/v0.9 plus a companion kernel
 security profile for syscall-level mechanism; SI-25…SI-34 resolved or
 explicitly deferred with named triggers; ledgers updated. Gate:
 W-15…W-18 implementation and any new authority-surface W item wait for
@@ -66,10 +66,17 @@ the existing ratify-first clauses of W-15/W-16/W-17 as one campaign.*
 **Progress:** item (1) ratified 2026-07-13 as A23 (spec v0.8 §6.2, ADR
 0006, PR #47). Item (2) ratified 2026-07-14 as A24–A26 (spec v0.9, ADR
 0007, PR #48) — challenge pass + fresh-eyes source verification over the merged
-PR #43 candidate; three adjustments beyond as-built (D31-4 journal
-freshness, D31-6 capture-before-restore, journal home/epoch binding)
-filed as RF-35 and carried by W-15; G13 files the outstanding
-negatives. Next: item (3), SI-32.
+PR #43 candidate; adjustments beyond as-built filed as RF-35 (recovery:
+D31-4 freshness, D31-6 capture-before-restore, journal home/epoch
+binding; carried by W-15). Round 1 of the independent review returned
+REQUEST CHANGES (nine findings, four high), ratified as ADR 0007
+R1–R7: gate-binding parity (RF-36) and re-merge outcome equality
+replacing the refuted narrowing rationale (RF-37) — both carried by
+W-22 — plus the per-arm journal epoch guard, total V with post-restore
+emission and the `fabric_recovery` closing record, precise exemption
+candidate identity, evidence corrections (G13), and intentional
+home-level anomaly scope with the recovery path filed as RF-38.
+Awaiting round 2. Next after merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -116,6 +123,25 @@ W-19 diagnostic surface, W-9 baseline re-pin); the unpushed sketch on
 W-3 may collect disposable examples but may not compile standing authority
 until W-15 lands. *Provenance: RF-13 + 2026-07-12 cryptographic mechanism
 audit; scope re-cut 2026-07-13 by the A23 ratification.*
+
+**W-22 — A25/A26 broker conformance mechanisms.** Close the two
+authority-surface gaps round 1 of the A24–A26 ratification review found
+between the ratified clauses and the merged W-14 broker: RF-36 — gate
+replay applies the same exact-match approval binding predicate as
+decision time, evaluated at each effect's durable authorization offset
+(the W-2 shared-evaluator discipline extended to consumption; supplies
+the G13(d) double-resolution negative); RF-37 — the approval-time
+re-merge compares its outcome to the signed candidate preview and
+re-parks on any difference as a fresh candidate (supplies the G13(a)
+outcome-equality negative). Both under the two-sided contract and
+targeted-mutation discipline. Sequenced after W-15 because RF-36
+rewrites the same gate-replay region W-15 converts to
+checkpoint-keyed `VerifiedPrefix` consumption — landing RF-36 first
+would be churned; may be pulled earlier by operator decision if W-15
+slips (RF-36 is posture-bounded: the broker is locally the sole
+approval producer; the exposure is the W-9 foreign-trace surface).
+*Provenance: PR #48 round-1 independent review, findings 1–2, ratified
+as ADR 0007 R1/R2 (2026-07-14).*
 
 **W-16 — payload envelope v2 and shred protocol.** Ratify SI-28/SI-29, then
 bind canonical AAD and algorithm/version/key metadata, enforce the KEK wrap

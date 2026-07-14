@@ -1,14 +1,18 @@
 # ADR 0007 — Owned-state transition, consumed authority, and approval candidate binding (retro-ratification of W-14's in-PR protocols)
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
-2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below are
-the normative record where the spec text and this document differ in
-emphasis; the spec text is the normative *language*. SI-31, SI-33, and SI-34
-are RESOLVED. Three determinations adjust the candidate beyond as-built
-(D31-4, D31-6, and the journal's home/epoch binding inside D31-2); RF-35
-tracks the merged-code gap and W-15 carries the mechanism. The drafted text
-awaits independent-context review before merge, per the authority-surface
-gate.**
+2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
+**as adjusted by the round-1 post-review adjustments R1–R7** (the
+adjustments win where they differ; D31-2, D31-4, D31-6, D33-4, D34-2, and
+D34-3 are read as adjusted). The spec text is the normative *language*.
+SI-31, SI-33, and SI-34 are RESOLVED. The candidate-code gaps are tracked
+as RF-35 (recovery, carried by W-15) and RF-36/RF-37 (gate binding parity
+and re-merge outcome equality, carried by W-22); RF-38 files the
+anomaly-recovery question. Round 1 of the independent-context review
+returned REQUEST CHANGES (nine findings, four high — one authority-replay
+mismatch, one widening re-merge, two recovery-protocol contradictions);
+all nine verified at source and ratified as R1–R7 below. The corrected
+text awaits round 2.**
 
 ## Context
 
@@ -288,15 +292,145 @@ signed-artifact claim here); the durable external-effect protocol owns the
 egress-side reservation and dispatch record; G3 owns the syscall-level
 crash matrix; W-3 consumes D33-5/D34-1 when it lands.
 
-## Implementation deltas (all carried by W-15; RF-35 tracks)
+## Post-review adjustments — round 1 (W-20, 2026-07-14 — operator-ratified)
 
-1. D31-4 freshness predicate in `recover_pending_state_change` (same
-   function W-15 already upgrades to the `VerifiedPrefix` per S4).
-2. D31-6 capture + attributed drift before recovery restores; optional
-   restore-skip when live == V.
-3. Journal `home`/`epoch` (TracePosition) binding + activation-prefix
-   check (D31-2/H3/R9).
+The first independent-context review of the drafted text (PR #48) returned
+REQUEST CHANGES: nine findings, four high, all nine verified at source by
+the author before triage. Two high findings refuted determination *content*
+(D34-3's narrowing theorem; the D31-4×D31-6 composition), one exposed a
+false evidence claim on the authority surface (gate replay), one a
+self-contradictory predicate (D31-2's epoch guard). The operator ratified
+the following adjustments; the spec text and the determinations above are
+read as adjusted.
 
-Zero other code change: every remaining clause of A24–A26 is enforced by
-the merged W-14 implementation, mapped line-by-line in the ratification
-PR's G9 conformance sweep.
+**R1 — gate replay applies the same binding predicate (finding 1).**
+`gate_trace_check` pre-aggregates approvals by (capability, caveat) with no
+escalation binding, no order check (an approval later than a tool_call
+retro-funds it), no manifest/M2/auth-strength verification, and no
+double-resolution detection — so the gate is *weaker* than decision time,
+inverting D33-4's authority hierarchy, and the round-0 G9 sweep cell
+claiming A25 gate enforcement was false. Adjusted clause: the gate's
+recount MUST apply the same exact-match binding predicate as decision time,
+evaluated at each effect's durable authorization offset — one shared
+reconstruction, never a weaker aggregate (the W-2 shared-evaluator
+discipline extended to consumption). As-built gap filed as **RF-36**
+(high; exploitable via foreign/replayed traces — the W-9 corpus surface;
+posture-bounded locally because the broker is the sole approval producer).
+Carried by W-22.
+
+**R2 — re-merge outcome equality replaces the narrowing theorem
+(finding 2).** The round-0 rationale — trunk drift can only narrow the
+applied delta — is **refuted**; the reviewer's counterexample is preserved
+here as the refutation record: preview against trunk `H` shows the branch
+edit conflicting, resolved trunk-wins, *nothing applied*; trunk then
+returns to base `B` before approval; the approval-time re-merge sees no
+conflict and installs the full branch edit the human was shown not
+landing. The error conflated "within the pinned branch candidate" with
+"within the previewed outcome" — and the preview, conflict cards included,
+is part of the signed candidate. Adjusted clause: the approval-time
+re-merge MUST reproduce the previewed outcome exactly (same per-store
+results, op-set, and conflict resolutions); any difference re-parks as a
+fresh candidate with a fresh escalation and digest — fail-closed into
+re-presentation, never silent application of an un-previewed outcome.
+Outcome-preserving trunk movement proceeds; outcome-changing movement
+re-asks, which is exactly when re-asking is right. This supersedes both
+the refuted rationale and the round-0 rejection of re-parking (what was
+rejected — correctly — was re-parking on *any* movement; outcome-
+conditional re-parking does not race the human's edits). As-built, no
+comparison exists — **RF-37**, carried by W-22. D34-3 is read as revised.
+
+**R3 — the journal epoch guard splits by arm (finding 3).** Round 0's
+universal predicate — "recovery honors only journals whose linked event
+lies in the epoch's activation prefix" — contradicts the roll-back arm,
+where the linked event is *by definition* absent (that absence is the
+discriminator); a literal implementation fails closed on every genuine
+pre-commit rollback. Adjusted: roll-forward requires the linked event in
+the current epoch's activation prefix (R9); roll-back requires the
+journal's **own** signed home/epoch (the W-15 TracePosition fields) to
+name the current home and epoch. Event absence remains the roll-direction
+discriminator; the epoch guard never reuses it. D31-2 is read as revised.
+
+**R4 — total V and the recovery emission order (findings 4 and 5).**
+As drafted, D31-6's pre-restore drift event *poisons* D31-4's V: appending
+drift (observed = the mixed post-crash root P) makes P the newest signed
+root, so post-recovery V disagrees with restored live state forever, the
+kernel's restore is an unrecorded mutation, and a crash between drift
+append and journal removal bricks the home (retry: neither journal tuple
+matches V = P). The two determinations could not compose as written.
+Adjusted, three parts. (a) **V made total:** per store, V is the latest
+signed root attestation in composite order among manifest `snapshot`
+events, promotion `merged`, revert `roots_restored`, drift
+`observed_root`, and the closing record below; comparison **projects V
+onto the journal's store set** (a manifest that deliberately scopes to a
+subset of the home's stores journals only that subset); a journal naming a
+store with no signed attestation fails closed. (b) **Emission after
+restore:** freshness evaluates V once, against pre-recovery signed state;
+live roots are CAS-captured before restore but **no event is emitted until
+the restore completes**; then one atomic transaction appends the window
+drift (V → captured root, `attribution: "unattributed"` — the
+crash-to-reopen window is unattended) and the **closing record**
+re-attesting the restored tuple; then the journal is removed. Every crash
+cell converges on retry: before the emission transaction V is unchanged
+and recovery re-runs from scratch (capture and restore are idempotent);
+after it, V equals the restored tuple, freshness passes, and recovery
+completes as cleanup. Post-recovery V ≡ live, always. (c) **The closing
+record** is drift-kind with a new A12 attribution class
+`fabric_recovery` — zero body-schema motion, and the ledger honestly
+distinguishes the kernel's own in-band recovery restore from out-of-band
+divergence; it never counts as a divergence window for M8 purposes.
+D31-4 and D31-6 are read as revised; RF-35's items updated to match.
+
+**R5 — exemption candidate identity stated precisely (finding 6).** The
+original SI-34 filing asked whether an exemption candidate binds caveat,
+action class, and uses; round 0 answered by reference to §5.5, which was
+incomplete — the signed escalation carries no proposed `uses`. Adjusted:
+the exemption's presented candidate is the signed escalation itself
+(escalation id, capability, caveat with action class in the caveat key,
+batch `count` and `sample`); **`uses` is resolution-authored human
+input**, C1-attributed in the signed approval and verified by §5.5's
+exact match — never a pre-presented candidate field; its rendering
+fidelity is the C2 broker-owned surface's contract (SI-23's question under
+actuation). The exemption's policy context is the immutable
+content-addressed capability itself — a hash is a version — so exemption
+approvals are policy-stable by construction, and A26's "always includes
+versioned policy context" is scoped accordingly. D34-2 is read as revised.
+
+**R6 — evidence corrections (finding 7).** The double-resolution branch of
+the consumption view has no test — moved from claimed-covered to a G13
+outstanding negative (RF-36's contract lane will exercise it, since gate
+binding parity tests the same edges). G13(c) was wrong in the opposite
+direction: a per-field `policy_context` negative *exists*
+(`w14_malformed_signed_promotion_binding_cannot_reach_trunk` mutates it
+alone); corrected to cite it.
+
+**R7 — whole-view anomaly failure is intentional; recovery path filed
+(finding 8).** `w14_decision_authority` scans all escalations before
+filtering by capability, so one duplicate resolution denies every
+capability in the home permanently. Ratified as intentional: a corrupted
+authority chain is a home-level integrity incident (the W-19 pattern), and
+scoping the view per-capability would let a poisoned chain keep granting
+elsewhere. The missing piece — an operator recovery path short of an epoch
+action — is filed as **RF-38** (low); if its remedy needs a new record
+kind it graduates to an SI per the triage rule.
+
+Finding 9 (stale `AGENTS.md` and roadmap version strings) was mechanical
+and corrected directly.
+
+## Implementation deltas (RF-35 → W-15; RF-36/RF-37 → W-22)
+
+1. D31-4 freshness predicate (total V, journal-store-set projection) in
+   `recover_pending_state_change` (same function W-15 already upgrades to
+   the `VerifiedPrefix` per S4). [RF-35 / W-15]
+2. D31-6 as adjusted by R4: CAS capture before restore; window drift +
+   `fabric_recovery` closing record in one transaction after restore;
+   restore-skip when live == V. [RF-35 / W-15]
+3. Journal `home`/`epoch` (TracePosition) binding with the R3 per-arm
+   guard. [RF-35 / W-15]
+4. Gate replay binding parity (R1): shared exact-match predicate at each
+   effect's durable authorization offset. [RF-36 / W-22]
+5. Re-merge outcome-equality check with re-park-on-difference (R2).
+   [RF-37 / W-22]
+
+Every remaining clause of A24–A26 is enforced by the merged W-14
+implementation, mapped line-by-line in the ratification PR's corrected G9
+conformance sweep.

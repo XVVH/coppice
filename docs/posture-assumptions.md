@@ -225,9 +225,10 @@ in scope, or when storage leaves that filesystem boundary.
   store, and commit the ledger last. Ordinary failure rolls back all roots;
   reopen rolls back when the linked event is absent and forward when present.
   Residual: the journal is mutable local metadata, so a full-home rollback
-  that restores journal and database together is SI-25/W-15's freshness
-  problem, not this row's; and the hard-exit-at-each-syscall matrix remains G3
-  evidence work. **Durability level (SI-25×SI-31 seam, W-20):** closed at the
+  that restores journal and database together is **layer 2's** freshness
+  problem (A23/D1: W-15 implements layer 1 only; freshness closes when the
+  anchor lands at G-ROAMING-SURFACE/G-EGRESS/G-PRODUCTION), not this row's nor
+  W-15's; and the hard-exit-at-each-syscall matrix remains G3 evidence work. **Durability level (SI-25×SI-31 seam, W-20):** closed at the
   *dogfooding* level only — W-14 runs WAL+`synchronous=NORMAL`, crash-atomic
   against a process crash (its tests' level) but not against power loss / OS
   crash. Per A23/R5 the synchronous level follows the anchor, not the gate:
@@ -239,7 +240,10 @@ in scope, or when storage leaves that filesystem boundary.
 - **P15** Trace tamper-evidence incomplete: no durable/external signed head
   (tail-truncation and whole-span deletion undetectable); substrate `offset`
   is an unsigned rowid backing all cross-span ordering claims. → RF-13
-  (open); audit High; trace-head anchoring (roadmap parked).
+  (open); audit High. **A23 (SI-25) splits the remediation:** cross-span
+  *order/completeness* closes with **W-15 layer 1** (signed `global_seq`, the
+  `VerifiedPrefix`); *freshness/rollback* closes with **layer 2** (the
+  external anchor) at G-ROAMING-SURFACE/G-EGRESS/G-PRODUCTION — not with W-15.
 - **P13** Crypto-shred is logical only; WAL/freelist/snapshot/backup residue
   may retain old ciphertext and wrapped-DEK pairs, which RF-14's persistent
   KEK can decrypt. KEK survival alone cannot recreate a deleted random DEK.
@@ -302,7 +306,7 @@ All 27 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P12 | Flat `auth_rank` total order (`local_session==passkey`) | `capability.rs:47-58` | NOACT | SI-23 (open) |
 | P13 | Logical-only crypto-shred; old ciphertext + wrapped-DEK pairs may survive | `payload.rs:4-5,172-197`, `keys.rs:131-141` | DEBUG 1TEN | roadmap parked; audit; `AGENTS.md` |
 | P14 | Plaintext-hash confirmation oracle; cross-tenant only if future storage deduplicates globally | `payload.rs:71-100` | 1TEN | RF-7 (accepted; global-dedup topology flagged here) |
-| P15 | No durable trace head; unsigned `offset` still backs cross-span ordering while W-11 closes denormalized-selector authority use | `trace.rs`; `broker.rs` | DEBUG 1TEN | RF-13/SI-25/W-15; RF-16 closed by W-11 |
+| P15 | No durable trace head; unsigned `offset` still backs cross-span ordering while W-11 closes denormalized-selector authority use | `trace.rs`; `broker.rs` | DEBUG 1TEN | RF-13; SI-25 resolved as A23 — order/completeness → W-15 layer 1, freshness → layer 2 gates; RF-16 closed by W-11 |
 | P16 | ~~Promotion/revert not crash-atomic across roots~~ **CLOSED by W-14 (PR #43):** fabric-signed journal + linked DB transaction + all-root rollback/roll-forward | `snapshot.rs`, `kernel.rs`, `broker.rs` | — (implemented) | RF-30; W-14; SI-31 ratifies at W-20; full-home rollback freshness → SI-25 |
 | P18 | Drift attributed to the one human by default | `kernel.rs:448-453` | 1HUMAN | multi-actor (parked); SI-20; `dogfooding.md` |
 | P19 | AEAD binds no associated data and stored algorithm/key-link metadata is not enforced | `keys.rs:210-269`, `payload.rs:122-156` | DEBUG 1TEN | RF-22; SI-28; W-16 |

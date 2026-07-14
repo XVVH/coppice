@@ -922,7 +922,7 @@ non-production scaffolding and must not close SI-25, RF-13, or P15.
 ## Ratification-session determinations (W-20, 2026-07-13 — ratified as A23)
 
 Operator-ratified determinations from the SI-25 ratification challenge pass
-and three independent-context review rounds, recorded in the A22-adjustment
+and five independent-context review rounds, recorded in the A22-adjustment
 style. They are integrated into spec amendment A23 (v0.8 §6.2), the posture
 ledger (G-ROAMING gates), and W-15's scope; **SI-25 is RESOLVED**. This
 addendum is the normative record where it and the candidate prose above

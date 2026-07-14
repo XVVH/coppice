@@ -2,10 +2,11 @@
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
 2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
-**as adjusted by the post-review adjustments R1–R20 (review rounds 1–4;
-the adjustments win where they differ**; D31-2, D31-4, D31-6, D33-3,
-D33-4, D34-2, and D34-3 are read as adjusted). The spec text is the
-normative *language*. Claims about the candidate code carry one of three
+**as adjusted by the post-review adjustments R1–R23 (review rounds 1–5)
+and the internal pre-round-6 review's completions (the adjustments win
+where they differ**; D31-1, D31-2, D31-4, D31-6, D33-3, D33-4, D34-2,
+and D34-3 are read as adjusted). The spec text is the normative
+*language*. Claims about the candidate code carry one of three
 labels, kept distinct throughout: **ratified as built** (the merged W-14
 mechanism is the ratified semantics), **adjusted beyond as-built** (the
 ratified semantics exceed the code; RF-35/RF-36/RF-37/RF-39 track, W-15/
@@ -15,10 +16,11 @@ implementations at its carrier gate per the ledger — the W-20 item (6)
 posture-qualifier convention will systematize this status; this batch is
 its founding evidence.
 SI-31, SI-33, and SI-34 are RESOLVED. The candidate-code gaps are tracked
-as RF-35 (recovery, carried by W-15), RF-36/RF-37 (gate binding parity
-and re-merge outcome equality, carried by W-22), and RF-39 (exemption
-candidate binding, carried by W-22); RF-38 files the anomaly-recovery
-question. Round 1 of the independent-context review returned REQUEST
+as RF-35 (recovery, carried by W-15), RF-36 (consumption binding parity
+at **both** consumers, W-22), RF-37 (re-merge outcome equality, W-22),
+RF-39 (exemption candidate binding, W-22), and RF-40 (as-built
+fs-pipeline entry-identity defects, W-15); RF-38 files the
+anomaly-recovery question. Round 1 of the independent-context review returned REQUEST
 CHANGES (nine findings, four high), ratified as R1–R7. Round 2 returned
 REQUEST CHANGES (seven findings, three high — a missing V source, a
 non-durable capture, an unbound exemption candidate, plus ABA freshness
@@ -31,14 +33,29 @@ exact-set validation predicate, the R12 comparison basis), ratified as
 R14–R16 below with SI-39 filed for the multi-window enhancement; the
 reviewer confirmed no original SI decision point was silently dropped.
 Round 4 returned REQUEST CHANGES (five findings, three high), ratified
-as R14–R16's successors R17–R20: the temporal-binding gap turned out to
-live at **both** consumers (RF-36 widened; the round-1 "gate weaker than
+as R17–R20 — each extending an earlier adjustment (R17 extends R1, R18
+extends R14, R20 extends R16) or exposing an as-built defect (R19/
+RF-40): the temporal-binding gap turned out to live at **both**
+consumers (RF-36 widened to both; the round-1 "gate weaker than
 decision" record corrected), R14's quantifier was blind to deletions
-(path-state union), two **as-built defects** surfaced in the merged fs
-restore (RF-40 — mode-only skip, file↔directory deadlock: the first
+(path-state union), two as-built defects surfaced in the merged fs
+restore (mode-only skip, file↔directory deadlock: the first
 code-fails-ratified-as-built findings of the cycle), and R16's claimed
 merged-tree referent did not exist (previews gain per-store merged
-roots). The corrected text awaits round 5.**
+roots). Round 5 returned REQUEST CHANGES (three blocking findings plus
+bookkeeping), ratified as R21–R23: entry **kind** joins canonical
+identity with non-canonical kinds definitionally unexplained (R21), the
+stale-journal guarantee is layer-qualified — joint journal+database
+rollback is layer 2's, never layer 1's (R22, correcting an overclaim in
+the drafted text), and RF-40 widened to the **planner**: the merge diff
+deliberately drops mode from entry identity, so a mode-only branch
+change promotes as a silent no-op — the shortcut's own "chosen side's
+mode rides along" rationale fails when no side is chosen (R23). Round 5
+also cleared, as verified sound, three seeded attack surfaces: R17's
+cross-span position semantics, R20's referent retention (composing with
+the scalability record's parked-promotions-as-GC-roots requirement),
+and RF-40's topology remedy under the excluded-dirs rule. The corrected
+text awaits round 6.**
 
 ## Context
 
@@ -719,6 +736,138 @@ the PR sweep: "structural logic present; A23 terminal/prefix enforcement
 pending W-15" — matching the treatment already used for home/epoch
 binding.
 
+## Post-review adjustments — round 5 (W-20, 2026-07-14 — operator-ratified)
+
+Round 5 returned REQUEST CHANGES: three blocking findings (one high, two
+medium) plus evidence bookkeeping. It also **cleared three seeded attack
+surfaces as verified sound** — R17's cross-span position semantics
+(same-span escalation/approval ordering valid; durable-effect
+comparisons use A23 composite positions), R20's referent retention (no
+CAS GC exists today, and the scalability record already requires any
+future GC to treat parked promotions as roots), and RF-40's topology
+remedy under the excluded-dirs rule (non-empty `.git` refuses pruning,
+failing the replacement closed) — recorded here so they are not
+re-litigated.
+
+**R21 — entry kind joins canonical identity; non-canonical kinds are
+definitionally unexplained (finding 1).** The R18 identity tuple (path,
+presence, content hash, executable mode) omitted **kind**: a regular
+file and a symlink whose target matches on bytes and mode were
+indistinguishable under the normative predicate, so a
+symlink-replacement made during a crashed recovery's downtime could
+pass the explanation check — and the current apply follows symlinks on
+read, letting a closing record attest a regular-file tree over a live
+symlink. Ratified, unifying the reviewer's two remedies: canonical
+entry identity is (relative path, **kind**, presence, content hash,
+executable mode), and because the canonical store grammar contains only
+regular files and directories, a live entry of any other kind can match
+neither the capture nor the target — definitionally unexplained,
+failing closed in place before any mutation. Capture already rejects
+symlinks; R21 ensures the explanation check cannot let apply-time
+symlink-following reintroduce what capture excludes. W-15 negative:
+symlink untouched, no closing record emitted (G13(k)).
+
+**R22 — the stale-journal guarantee layer-qualified (finding 2).** The
+drafted text said a stale journal "can never drive a restore" — an
+overclaim against R11's own residual note. Ratified qualification:
+layer 1 rejects a stale journal **relative to a non-rolled-back local
+verified prefix** (backup-restored, copied, replanted, and same-epoch
+ABA-replayed journals all fail the positional predicate); a journal and
+database rolled back **together** present an internally consistent
+history layer 1 structurally cannot see through — that is A23 layer 2's
+anchor-ahead signal, and under the unanchored `local-integrity` profile
+such a joint rollback can drive a restore. The R9 consolation holds
+even there: the capture record and window drift preserve the
+overwritten live state as CAS-resident, ledger-visible evidence — wrong,
+but never silent. Spec, changelog, and RF-35 wording aligned.
+
+**R23 — RF-40 widened to the planner (finding 3).** The merge planner
+deliberately reduces entries to `path → content hash` (a documented
+Stage-3 shortcut, never filed in the posture ledger) and diffs hashes
+only. In the mode-only case the shortcut's stated rationale — "the
+chosen side's mode rides along" — fails because **no side is chosen**:
+base/branch/trunk reduce to identical trees, no op or conflict is
+produced, compose falls through to trunk metadata, and the promotion
+completes as a silent no-op dropping the agent-originated mode change
+with no op, no conflict card, and no event (an A13 legibility failure
+as well as an A11/A24 one). The apply-side write fix cannot recover a
+change the planner never selected, so RF-40 widens to all three stages:
+planner (surface every canonical-entry difference as an op or conflict;
+mode-only = a `modify` refinement per A18, class chosen at
+implementation), apply (write every differing dimension), topology
+(resolve emptied directories before rename). New negative: mode-only
+branch promotion (G13(l)). The A26/W-22 outcome comparison inherits the
+same entry-identity requirement by cross-reference.
+
+Finding 4 (round-4 evidence mirrors — the ADR header's
+"R14–R16's successors" and "gate binding parity" phrasings, the SI-31/
+SI-34 as-adjusted-by lists missing R18/R20, G13's "corrected by round 1"
+heading, the PR-body commit count) was mechanical and corrected
+directly.
+
+## Internal pre-round-6 adversarial review (W-20, 2026-07-14)
+
+After five external rounds, the corrected corpus was put through an
+internal independent-context adversarial review targeting the cycle's
+accumulated failure-mode profile (quantifier domains, code-fact claims,
+absolute claims, mirror drift), plus systematic audits, before spending
+an external round 6. It returned **13 findings (two high, both in the
+round-5 text no external round had reviewed)** — all corrected in the
+same commit, recorded here with the same honesty as the external rounds:
+
+- **R23 completion (high):** the planner clause did not compose with
+  A17's exact-hash rename detection — a rename+chmod either lost the
+  mode delta inside the `rename` class or un-paired into the
+  mass-deletion rendering A13 forbids. Ratified composition: pairing
+  remains exact content-hash (A17 unchanged); a paired rename/move
+  whose endpoints differ in mode or kind additionally surfaces that
+  delta as a `modify` refinement op on the destination path (A18);
+  conflict identity and cards compare canonical entries.
+- **R21 completion (high):** "definitionally unexplained" was satisfiable
+  vacuously — as-built, capture *rejects* symlinks but silently *skips*
+  fifos/sockets/devices, so a capture-shaped walk would never enumerate
+  them. Ratified pin: the explanation check's live-state walk MUST
+  surface every directory entry regardless of kind, failing closed on
+  unreadable entries; the grammar exclusion is enforced by the check
+  itself, never inherited from the walk.
+- **Topology remedy quantifier (medium):** "emptied directories resolve
+  before rename" excluded pre-existing untracked empty directories,
+  which brick the rename identically; the remedy now covers any
+  non-excluded directory occupying a target file path that is empty
+  after pass 1, with non-empty failing closed (RF-40 updated).
+- **A26 entry-identity anchor (medium):** the ratified inheritance
+  ("the outcome comparison inherits entry identity") had no textual
+  anchor in §6 — the comparison could legally be built at content-hash
+  grain, recreating RF-40 inside A26. The R16 sentence now says
+  "at canonical-entry grain."
+- **Opaque trunk-wins corner (low):** comparing the installed (live
+  trunk) image on a trunk-wins conflict re-parks on the human's own
+  edits; the comparison is now classification + the *branch* image
+  identity on that side.
+- **Mode-quantization residual named (low):** the 755/644 two-value
+  grammar means a 0600 file restores as 0644 (permission widening on
+  the recovery path) and a downtime chmod-0600 is invisible to the
+  explanation check — within the declared grammar, now named in RF-40
+  rather than implicit.
+- **Mirrors (the rest):** D31-1 added to the header's adjusted list
+  (R19/R23 changed its text); SI-31's trailer gains R19/R23; the spec
+  footer/header no longer lump RF-38 into the mechanism trackers;
+  roadmap W-15/W-22 brought current (round-5 content, the R20 preview
+  deliverable, rounds 4–5 provenance); a pre-registered "passed the
+  pre-review" outcome claim in the roadmap reworded to record the
+  actual outcome; precision nits (re-runnable vs idempotent;
+  unsupported-kind in the validation list; "V ≡ live on every
+  completing path"); and RF-37 now notes that `approve_promotion`'s
+  doc comment still asserts the refuted narrowing theorem — a code
+  comment this docs-only PR deliberately does not touch, corrected by
+  W-22 with the mechanism.
+
+The internal review also re-verified, at source, every "as built" claim
+and file:line anchor in the three amendment sections (all held), and
+attacked the surviving absolute claims ("recovery never moves V",
+"unrepresentable", "orphaned capture record unreachable", the R22
+joint-rollback residual) — all held.
+
 ## Implementation deltas (RF-35/RF-40 → W-15; RF-36/RF-37/RF-39 → W-22)
 
 1. D31-4 freshness predicate as adjusted through round 2: total V
@@ -726,14 +875,16 @@ binding.
    per-store binding (R11), journal-store-set projection — in
    `recover_pending_state_change` (same function W-15 already upgrades to
    the `VerifiedPrefix` per S4). [RF-35 / W-15]
-2. D31-6 as adjusted through round 4: CAS capture + the recovery capture
+2. D31-6 as adjusted through round 5: CAS capture + the recovery capture
    record before restore (R9 — first-write-wins; exact-set validation
-   per R15); the R14/R18 explanation check on retry — path-state over
-   the union of live/capture/target, absence as a value,
-   canonical-entry identity — with fail-closed-in-place on unexplained
-   state; per-store window-drift/closing pairs with `recovery` linkage
-   in one transaction after restore (R13); pinned removal and check
-   orders; restore-skip when live == V. [RF-35 / W-15]
+   per R15); the R14/R18/R21 explanation check on retry — path-state
+   over the union of live/capture/target, absence as a value,
+   canonical-entry identity including **kind** (non-canonical kinds
+   definitionally unexplained) — with fail-closed-in-place on
+   unexplained state; per-store window-drift/closing pairs with
+   `recovery` linkage in one transaction after restore (R13); pinned
+   removal and check orders; restore-skip when live == V. [RF-35 /
+   W-15]
 3. Journal `home`/`epoch` (TracePosition) binding with the R3 per-arm
    guard, plus the R11 per-store prior-attestation positions. [RF-35 /
    W-15]
@@ -747,9 +898,11 @@ binding.
 6. Exemption candidate binding (R10): `escalation_event` in the approval
    body; C2 listings render from or verify against signed escalation
    events. [RF-39 / W-22]
-7. Exact canonical-entry realization in the fs apply (mode-only writes;
-   file↔directory topology ordering) with mode-exactness and
-   both-direction topology crash negatives. [RF-40 / W-15]
+7. Exact canonical-entry realization through the fs pipeline (R23:
+   planner surfaces mode-only ops; apply writes mode-only differences;
+   file↔directory topology ordering) with mode-only-promotion,
+   mode-exactness, and both-direction topology crash negatives, plus
+   the R21 symlink-untouched negative. [RF-40 + RF-35 / W-15]
 
 Every remaining clause of A24–A26 is enforced by the merged W-14
 implementation, mapped line-by-line in the ratification PR's corrected G9

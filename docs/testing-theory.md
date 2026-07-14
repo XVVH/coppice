@@ -463,9 +463,9 @@ enforcing paths against source, not the diff alone (Allow-arm reservation,
 promotion-body `merged` field, and the exact recovery-journal commit point).
 
 **G13. Ratified-clause negatives outstanding after A24–A26 (W-20
-retro-ratification, 2026-07-14; corrected by review round 1).** Normative
-sentences lacking a dedicated negative, as corrected by the PR #48
-round-1 review (finding 7 fixed this entry in both directions). (a)
+retro-ratification, 2026-07-14; maintained through the PR #48 review
+rounds).** Normative sentences lacking a dedicated negative; round 1
+corrected this entry in both directions, rounds 3–5 extended it. (a)
 **Re-merge outcome equality (D34-3 as revised in round 1):** round 1
 *refuted* the original ⊆-narrowing claim outright (a trunk-wins conflict
 preview followed by trunk returning to base installs the full
@@ -502,9 +502,14 @@ funded by it, at decision time and at gate replay — RF-36's widened
 lane, W-22); (i) **mode-only exactness** (a transition differing only in
 executable mode must realize on live state — RF-40); (j)
 **file↔directory topology crash recovery**, both directions (RF-40).
-The D31-4/D31-6/H3-binding enforcement gaps are RF-35's (implementation
-absent, not tests absent); their contract lanes land with W-15, as do
-RF-40's (i)/(j).
+Round 5 added two: (k) **live symlink untouched, no closing record**
+(R21 — a non-canonical-kind entry fails the explanation check closed
+before mutation; RF-35's lane); (l) **mode-only branch promotion**
+(R23 — a branch differing from base only in executable mode must
+surface as an op or conflict, never promote as a silent no-op —
+RF-40's planner dimension). The D31-4/D31-6/H3-binding enforcement
+gaps are RF-35's (implementation absent, not tests absent); their
+contract lanes land with W-15, as do RF-40's (i)/(j)/(l) and (k).
 
 ## Automation lanes
 

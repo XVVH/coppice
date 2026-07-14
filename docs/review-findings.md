@@ -919,9 +919,18 @@ record nor the restore target fails closed in place, so a divergence
 window opened during recovery's own downtime is preserved by refusal
 (automated multi-window preservation is SI-39). Round 4 (R18)
 re-quantified the check over **path-state** — the union of paths in
-live/capture/target with absence as a value, canonical entry identity
-(path, presence, content hash, mode) — because live-elements-only was
-vacuous for deletions. Recovery never
+live/capture/target with absence as a value — because live-elements-only
+was vacuous for deletions; round 5 (R21) completed canonical entry
+identity as (path, **kind**, presence, content hash, mode), with
+non-canonical kinds (symlink, fifo, socket, device) definitionally
+unexplained — the check's live-state walk MUST surface every directory
+entry regardless of kind (the internal pre-round-6 completion: capture
+rejects symlinks but silently skips other non-file kinds, so a
+capture-shaped walk satisfies the exclusion vacuously) — and (R22)
+layer-qualified the freshness guarantee: layer 1
+rejects stale journals against a non-rolled-back local prefix; joint
+journal+database rollback is layer 2's anchor-ahead case, with the
+capture record preserving overwritten state as evidence even there. Recovery never
 moves V (normative invariant). The enforcing tests land with W-15's
 contract lanes, including the G13(e)/(f)/(g) journal-validation
 negatives round 3 split out.
@@ -980,11 +989,18 @@ the preview's new per-store `merged` root references, CAS-retained at
 escalation and digest-covered by construction; never the whole-store
 merged root, whose equality would re-park on every unrelated human trunk
 edit; any difference re-parks as a fresh candidate with a fresh
-escalation and digest. Bounded meanwhile: the
+escalation and digest. Comparison is at canonical-entry grain, never
+content hash alone, with the trunk-wins opaque corner comparing the
+*branch* image identity (internal pre-round-6 review — RF-40's defect
+must not be recreated inside this comparison). Bounded meanwhile: the
 applied content is still the digest-pinned branch content, the gate
 re-verifies trace-vs-capability, drift is attributed first (M8), and
 Tier-1 promotion remains revertible. Carried by **W-22**; the
-outcome-equality negative (G13) lands with its contract lane.
+outcome-equality negative (G13) lands with its contract lane. Note for
+the W-22 implementer: `approve_promotion`'s doc comment still asserts
+the refuted round-0 narrowing theorem ("never wider than what was
+previewed") — this docs-only PR deliberately leaves code untouched;
+correct the comment with the mechanism.
 
 ## RF-38 — a poisoned escalation chain denies all capabilities with no operator recovery path — open (low)
 
@@ -1033,47 +1049,76 @@ capability widens; and a table writer already needs home access (RF-14
 posture). Carried by **W-22**; its lane supplies the version-swap and
 tampered-listing negatives.
 
-## RF-40 — the fs restore does not realize every signed target root: mode-only skip and file↔directory deadlock — open (high, as-built defect)
+## RF-40 — canonical entry identity is not identity through the fs pipeline: planner drops mode-only changes; apply skips mode and deadlocks on topology — open (high, as-built defect)
 
-**Severity: high. Direction: (a) SILENT ROOT MISMATCH — a committed
-event names a tuple live state does not realize; (b) FAIL-CLOSED
-availability — a legitimate recovery bricks deterministically.** Found
-by round 4 of the PR #48 independent review (finding 3); both verified
-at source. Distinct from RF-35–RF-39: those track clauses ratified
-*stronger than built*; RF-40 is the cycle's first **as-built defect** —
-merged, dogfooding code failing clauses round 0 certified as faithfully
-built (D31-1 exact realization; D31-3 idempotent recovery).
+**Severity: high. Direction: (a) SILENT AGENT-CHANGE LOSS at planning;
+(b) SILENT ROOT MISMATCH at apply — a committed event names a tuple
+live state does not realize; (c) FAIL-CLOSED availability — a
+legitimate recovery bricks deterministically.** Found by round 4 of the
+PR #48 independent review (finding 3, apply-side) and **widened by
+round 5** (finding 3, planner-side); all verified at source. Distinct
+from RF-35–RF-39: those track clauses ratified *stronger than built*;
+RF-40 is the cycle's as-built defect tracker — merged, dogfooding code
+failing clauses round 0 certified as faithfully built (A11
+reconciliation, D31-1 exact realization, D31-3 idempotent recovery).
 
-1. **Mode-only skip:** filesystem capture encodes executable mode in the
-   root hash (`snapshot.rs` mode "755"/"644"), but `apply_fs_in_place`
-   pass 2 skips any file whose **content** hash matches ("write only
-   files whose content differs"). A mode-only transition — e.g. a revert
-   that should restore `644` over a live `755` — commits its signed
-   event and expected root while live retains the old mode: the
-   authoritative-name claim silently broken, and the divergence
-   surfaces later as spurious drift.
-2. **File↔directory deadlock:** pass 1 deletes undesired *files*,
-   pass 2 renames replacements over target paths, pass 3 prunes emptied
-   directories — in that order. A target where path `a` is a file while
-   live has directory `a/` empties the directory in pass 1 but attempts
-   the rename over the still-present directory in pass 2, which fails;
-   pass 3 never runs. Recovery retries hit the identical order and the
-   home stays closed — fail-closed, but wrongly and permanently.
+1. **Planner drops mode-only branch changes (round 5):** the merge
+   planner deliberately reduces every entry to `path → content hash`
+   (`promote.rs` — a documented Stage-3 shortcut: "mode is deliberately
+   out of merge identity... the chosen side's mode rides along") and
+   diffs hashes only. In the mode-only case the shortcut's own
+   rationale fails: base/branch/trunk reduce to identical trees, **no
+   side is chosen**, no op or conflict is produced, `compose_tree`
+   falls through to trunk metadata, and the promotion completes as a
+   silent no-op — the agent-originated mode change vanishes with no op,
+   no conflict card, and no event naming it (an A13 legibility failure
+   as well as an A11/A24 one). The shortcut was never filed in the
+   posture ledger; this entry now documents it. The apply-side write
+   fix cannot recover a change the planner never selected.
+2. **Mode-only skip at apply (round 4):** filesystem capture encodes
+   executable mode in the root hash, but `apply_fs_in_place` pass 2
+   skips any file whose **content** hash matches. A mode-only
+   transition commits its signed event and expected root while live
+   retains the old mode: the authoritative-name claim silently broken,
+   surfacing later as spurious drift.
+3. **File↔directory deadlock (round 4):** pass 1 deletes undesired
+   *files*, pass 2 renames replacements over target paths, pass 3
+   prunes emptied directories — in that order. A target where path `a`
+   is a file while live has directory `a/` empties the directory in
+   pass 1 but attempts the rename over the still-present directory in
+   pass 2, which fails; pass 3 never runs. Recovery retries hit the
+   identical order and the home stays closed — fail-closed, but wrongly
+   and permanently.
 
-**Clause:** A24/D31-1 as ratified plus the round-4 canonical-entry
-realization sentence ("content, presence, and mode; a store apply that
-skips any differing dimension, or whose pass ordering cannot complete a
-legal topology change, breaks the naming claim"); D31-3 idempotent
-recovery. **Why bounded:** Tier-1-local; the mismatch is between signed
-state and live bytes on an owned store — the CAS retains every image, a
-re-run of a corrected restore converges, and the gate's drift check
-surfaces the mode mismatch on next consumption rather than letting it
-ride into a merge unattributed. Carried by **W-15** (same files and
-lanes as RF-35): pass 2 writes when the canonical entry differs (not
-content alone); emptied directories resolve before rename; registered
-STATE-COMMIT negatives for mode-only exactness and both file↔directory
-crash-recovery directions (G13(i)/(j)). RF-40 may constitute the parked
-RF-27 recovery-hardening trigger; un-parking is an operator gate
+**Clause:** A11 three-way reconciliation; A24/D31-1 as ratified plus the
+canonical-entry realization sentence as extended in round 5 ("content,
+presence, kind, and mode — at every stage: planner and apply"); D31-3
+idempotent recovery. **Why bounded:** Tier-1-local; the planner loss is
+bounded to executable-mode changes on owned stores (content changes
+always surface), and the apply mismatch is between signed state and live
+bytes the CAS fully retains — a re-run of a corrected restore converges,
+and the gate's drift check surfaces mode mismatches on next consumption
+rather than letting them ride into a merge unattributed. Carried by
+**W-15** (promote.rs shares the tree vocabulary with snapshot.rs): the
+planner surfaces every canonical-entry difference as an op or conflict
+(mode-only = a `modify` refinement per A18; rename/move pairing stays
+exact content-hash per A17, with a paired op's mode/kind endpoint delta
+surfacing as a `modify` refinement on the destination — the internal
+pre-round-6 composition rule); pass 2 writes when the canonical entry
+differs; **any non-excluded directory occupying a target file path that
+is empty after pass 1** — pre-existing empties included — resolves
+before rename, non-empty failing closed (the internal review widened
+the round-4 "emptied by deletions" quantifier); registered STATE-COMMIT
+negatives for mode-only branch promotion (G13(l)), mode-only apply
+exactness (G13(i)), and both file↔directory crash-recovery directions
+(G13(j)). Named residual (internal review): the canonical mode grammar
+is two-valued (755/644) — a 0600 file restores as 0644 (permission
+widening on the recovery path) and a downtime chmod to 0600 is
+invisible to the explanation check; within the declared grammar, named
+here so finer mode fidelity is a conscious future decision, not an
+assumed property. The A26/W-22 outcome comparison inherits the same
+entry-identity requirement by cross-reference. RF-40 may constitute the
+parked RF-27 recovery-hardening trigger; un-parking is an operator gate
 decision, not a review outcome.
 
 ## Verified sound during review (recorded so they aren't re-litigated)

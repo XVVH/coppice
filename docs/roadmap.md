@@ -101,8 +101,19 @@ deadlocks on file↔directory swaps — carried by W-15). The
 three-category labeling (ratified as built / adjusted beyond as-built
 / as-built defect) is now explicit in ADR 0007 and the changelog;
 unenforced clauses bind at their carrier gates per the ledger, the
-status W-20 item (6) will make first-class. Awaiting round 5. Next
-after merge: item (3), SI-32.
+status W-20 item (6) will make first-class. Round 5 (three blocking
+findings) ratified R21–R23: entry kind joins canonical identity, the
+stale-journal guarantee is layer-qualified (joint journal+database
+rollback is layer 2's), and RF-40 widened to the planner (mode-only
+branch changes promoted as silent no-ops); three seeded attack
+surfaces cleared as sound. Before round 6 the corrected corpus was run
+through systematic quantifier/absolute-claim/code-fact/mirror audits
+plus an internal independent-context adversarial pre-review, which
+returned 13 findings (two high, both in the round-5 text no external
+round had reviewed: the R23×A17 rename/mode composition gap and the
+kind-complete-walk vacuity) — all corrected and recorded in ADR 0007's
+internal-review section before pushing. Awaiting round 6. Next after
+merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -130,16 +141,18 @@ resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 4: the positional D31-4
-freshness predicate over total V — including unbranched
-`tool_call.state_root_after` — the D31-6 recovery capture record
-(exact-set validation, R14/R18 path-state explanation with
-fail-closed-in-place) with paired per-store
-window-drift/`fabric_recovery` closing emission, the journal's
-home/epoch + prior-attestation-position binding, and the G13(e–g)
-journal-validation negatives; plus RF-40's as-built fs-restore
-realization fixes — mode-only writes, file↔directory pass ordering —
-with the G13(i–j) negatives), and replacing the per-decision full
+prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 5 and the internal pre-round-6
+review: the positional D31-4 freshness predicate over total V —
+including unbranched `tool_call.state_root_after` — the D31-6 recovery
+capture record (exact-set validation, R14/R18/R21 path-state
+explanation over a kind-complete walk, fail-closed-in-place) with
+paired per-store window-drift/`fabric_recovery` closing emission, the
+journal's home/epoch + prior-attestation-position binding, and the
+G13(e–g) journal-validation negatives; plus RF-40's as-built
+fs-pipeline entry-identity fixes — planner mode-only ops with the A17
+composition rule, mode-only writes, file↔directory pass ordering over
+the widened empty-directory quantifier — with the G13(i–l) and R21
+symlink negatives), and replacing the per-decision full
 `verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
 abstraction (D5); the migration epoch (invalidation + the R3
 pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
@@ -166,8 +179,12 @@ demonstrating decision-time retro-funding; the W-2 shared-evaluator
 discipline extended to consumption; supplies the G13(d)
 double-resolution and G13(h) temporal negatives); RF-37 — the approval-time
 re-merge compares its agent-originated outcome (op-set + conflict
-decisions, the R12 quantifier) to the signed candidate preview and
-re-parks on any difference as a fresh candidate (supplies the G13(a)
+decisions, the R12 quantifier, on the R16 per-op touched-path basis at
+canonical-entry grain) to the signed candidate preview and re-parks on
+any difference as a fresh candidate — which requires the R20 referent:
+parked previews gain CAS-retained per-store `merged` root references at
+escalation, entering the candidate digest (a broker preview-
+serialization change, not just a comparison; supplies the G13(a)
 outcome-equality negative); RF-39 — exemption approvals bind the exact
 signed escalation version presented (`escalation_event` in the approval
 body) and C2 listings render from or verify against signed events (the
@@ -181,7 +198,10 @@ slips (RF-36 is posture-bounded: the broker is locally the sole
 approval producer; the exposure is the W-9 foreign-trace surface).
 *Provenance: PR #48 independent review — round-1 findings 1–2 (ADR 0007
 R1/R2), round-2 finding 3 (R10/RF-39), round-3 finding 3 pinning
-RF-37's comparison basis (R16); all 2026-07-14.*
+RF-37's comparison basis (R16), round-4 findings 1 and 4 (R17 widening
+RF-36 to both consumers; R20 the preview referent), round-5 finding 3
+and the internal pre-round-6 completions (canonical-entry grain in the
+comparison); all 2026-07-14.*
 
 **W-16 — payload envelope v2 and shred protocol.** Ratify SI-28/SI-29, then
 bind canonical AAD and algorithm/version/key metadata, enforce the KEK wrap

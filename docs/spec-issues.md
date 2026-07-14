@@ -17,10 +17,11 @@
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
 > retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
-> adjusted by review rounds 1–4, R1–R20; spec-code deltas tracked by
+> adjusted by review rounds 1–5, R1–R23; spec-code deltas tracked by
 > RF-35–RF-37/RF-39 (adjusted beyond as-built) and RF-40 (as-built
-> defect), carried by W-15/W-22; SI-39 files the multi-window recovery
-> enhancement); SI-32 remains open, next in the W-20 batch. **SI-35**
+> defects through the fs pipeline), carried by W-15/W-22; SI-39 files
+> the multi-window recovery enhancement); SI-32 remains open, next in
+> the W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
@@ -263,7 +264,7 @@ branch_roots), so previews gain per-store `merged` root references,
 CAS-retained at escalation and digest-covered by construction;
 approval-time re-derivation from signed inputs was rejected as
 recomputation ambiguity. Determinations D34-1…D34-4 as adjusted by
-R2/R5, R10/R12, and R16 in ADR 0007 (W-20 session, 2026-07-14).
+R2/R5, R10/R12, R16, and R20 in ADR 0007 (W-20 session, 2026-07-14).
 Original filing preserved below.
 
 ---
@@ -468,10 +469,20 @@ place** — a divergence window opened during recovery's own downtime is
 preserved by refusal, never normalized; the automated multi-window
 enhancement is SI-39) and R15's exact-set capture-record validation
 (the round-2 `⊆` predicate let a partial record pass while
-first-write-wins forbade repairing it). Determinations D31-1…D31-6 as
-adjusted by R3/R4, R8/R9/R11/R13, and R14/R15 in ADR 0007; challenge
-pass and fresh-eyes source verification 2026-07-14 (W-20 session).
-Original filing preserved below.
+first-write-wins forbade repairing it). Round 5 added entry **kind** to canonical identity (R21 — a symlink
+whose target matched on bytes and mode was indistinguishable;
+non-canonical kinds are now definitionally unexplained and fail closed
+in place), layer-qualified the stale-journal guarantee (R22 — joint
+journal+database rollback is A23 layer 2's anchor-ahead case, never
+layer 1's; the drafted "can never drive a restore" overclaimed), and
+widened RF-40 to the merge planner (R23 — mode-only branch changes
+promoted as silent no-ops). Determinations D31-1…D31-6 as adjusted by
+R3/R4, R8/R9/R11/R13, R14/R15, R18, R19/R23 (the D31-1 realization
+sentence and its planner widening), and R21/R22 in ADR 0007 — plus the
+internal pre-round-6 completions (R21's kind-complete walk pin, R23's
+A17 composition rule, the widened topology quantifier); challenge pass
+and fresh-eyes source verification 2026-07-14 (W-20 session). Original
+filing preserved below.
 
 ---
 

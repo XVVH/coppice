@@ -246,7 +246,7 @@ so decide a versioned type/domain transcript (or a signed type field), expected
 prefix verification, migration of existing objects, and whether distinct role
 keys also become mandatory. This must resolve before W-6 publishes fixtures.
 
-## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — open
+## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — open (ratification in progress, W-20)
 
 Per-span signed chains authenticate records within the rows a verifier sees,
 but the global substrate offset is unsigned and no expected head detects tail
@@ -279,6 +279,23 @@ in the ADR are ratified and integrated into the spec. Provenance note
 from `agent/si25-authenticated-head-design`, an unpushed local branch based
 before W-12/W-13/W-19/W-14 — the ADR is W-20's ratification input; the
 sketch needs rebase before W-15 implementation.
+
+**Ratification in progress (W-20, 2026-07-13):** the challenge pass has
+produced operator-ratified determinations D1–D7 — recorded in ADR 0006's
+"Ratification-session determinations" addendum (A22-adjustment style). Spine:
+the two-layer construction is accepted with **layer 1 (signed global chain +
+local checkpoints) normative for W-15 now** and **layer 2 (external monotonic
+anchor) deferred to a graduation gate**; the design center is corrected to
+**one human / one home / multiple roaming control surfaces over a stable
+always-on base**; only irreversible-external-effect dispatch is
+synchronous-anchor-gated (everything else async-loud-degraded); the writer
+fence is a lease abstraction from day one so concurrent writers are a
+non-foreclosed required future; and two new gates (G-ROAMING-SURFACE near,
+G-ROAMING-WRITE future) are proposed. Still open before SI-25 resolves and
+integrates as **A23**: the shared durability profile with SI-31 (the first
+composition-review seam), and the sibling-coordinated choices (SI-26 transcript,
+SI-27 rotation, W-6 export vocabulary). SI-25 stays **open** until that
+integration.
 
 ---
 

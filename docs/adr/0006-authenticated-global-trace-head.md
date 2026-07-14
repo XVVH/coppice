@@ -911,3 +911,111 @@ The outage rule and key-transition certificate should be ratified jointly with
 their owning issues rather than improvised in W-15. Until those choices are
 made, local-only signed checkpoints may be implemented only as explicitly
 non-production scaffolding and must not close SI-25, RF-13, or P15.
+
+## Ratification-session determinations (W-20, 2026-07-13 — in progress)
+
+Operator-ratified determinations from the SI-25 ratification challenge pass,
+recorded in the A22-adjustment style. They scope and adjust the candidate
+above and graduate into spec amendment A23, the posture ledger (new gates),
+and W-15 scoping when SI-25 fully resolves. **SI-25 remains open** until then;
+nothing here is normative in code before integration.
+
+**Design-center correction (load-bearing, operator-confirmed).** The target is
+not a single physical machine but **one human, one logical fabric home, reached
+from multiple locations**. Because the agent keeps executing while the operator
+walks away, the home + broker + agent run at a **stable always-on base**; the
+operator's devices are **roaming control surfaces that attach to it**. The
+realistic pattern is constant keyboard↔mobile handoff with the agent live
+throughout — not a quiesced "finish here, then start there." Every
+determination below is scoped against that architecture.
+
+**D1 — Two-layer split; layer 1 normative now, anchor deferred.** Layer 1 (the
+signed global chain — `home`/`epoch`/`global_seq`/`global_prev` per event plus
+local signed checkpoints) is pure local cryptography, buildable single-machine,
+and is what makes "verified substrate prefix" a mechanically available object:
+it closes the security-critical half of RF-13/RF-16 (reorder, middle-delete,
+whole-span-delete, and rowid laundering of an ordering violation — the
+fail-open case). Ratified for W-15 now. Layer 2 (the external monotonic anchor)
+adds *freshness only* (suffix-truncation, full-home rollback) and defers to a
+graduation gate. The candidate's assurance tiers stay as the honesty mechanism;
+dogfooding runs at the "local-integrity-only" label, stated, not hidden.
+
+**D2 — W-3 standing authority: local-integrity single-machine, anchored-head
+multi-location.** Contra the candidate's "local-integrity examples never count
+toward k": on a genuinely single machine, standing authority compiled under the
+local-integrity profile is valid within that posture's threat model (the
+same-user attacker holds the fabric key anyway, so an anchor buys nothing
+against it) and is re-earned at graduation — the A1 re-earn-on-boundary-change
+pattern applied to the assurance profile. The moment the home is reached from
+more than one location, W-3's k≥3 counting binds to the shared head (there is
+no single local prefix to count over). Rationale: otherwise single-machine
+W-1→W-3 produces nothing durable before production, contradicting W-1's stated
+purpose.
+
+**D3 — The anchor is an interface; the reference implementation is
+deployment-shaped.** A TPM/secure-element is hardware-bound and cannot anchor a
+home that roams between machines. Therefore, for the roaming design center the
+**remote shared head is the reference anchor** (the only anchor all locations
+share); a local TPM is a **single-machine fast-path** where applicable. This
+restores the candidate's remote-witness recommendation, but for the correct
+reason (roaming coordination), not the candidate's reason (production
+security). Quorum (candidate choice #3) is "more than one required
+`AnchorStore`" — a deployment policy, not a first-implementation concern.
+
+**D4 — Only irreversible-external-effect dispatch is synchronous-anchor-gated;
+everything else commits locally and anchors asynchronously under a loud
+freshness-degraded label.** Decompose "authority operations" by failure
+direction under rollback — the doubt-never-widens asymmetry A21/A22 already
+enshrine. Widening acts (grant, approval, standing-compile) that a rollback
+erases fail *closed* (lost authority) → async-safe. A revoke narrows local
+decisions the instant it commits and only its *durability acknowledgment* waits
+(H7 already says this) → the kill switch never waits on the network. Only
+dispatching an irreversible external effect must anchor *before* it acts,
+because a rollback after the effect crossed the boundary leaves it with no
+authorization evidence and it cannot be un-sent (the RF-33 /
+durable-external-effect case). Consequence: for the entire local→pre-egress
+life of the project there is **no synchronous witness on any hot path**, and
+even in production only egress-dispatch pays it. This is what makes a
+remote-anchored *roaming* operator usable — load-bearing, not an optimization —
+and it refines candidate choice #4 into the project's fail-open-loud posture
+rather than H9's blanket fail-closed for standing-authority reads.
+
+**D5 — Single-writer at the base now; the writer fence is a lease abstraction
+from day one.** The candidate's per-home single-writer critical section is
+implemented as a *lease* — a local `flock` at the base today — but the protocol
+treats it as a lease a witness could mediate later. Concurrent writers (a
+*required future*, from the operator's handoff pattern) then become an
+implementation swap (flock → witness-mediated lease), not a protocol change:
+the signed global chain + monotonic anchored head + H5/H10 fork-detection are
+already the primitive concurrent-writer safety needs. Leaning sequential defers
+the lease *mechanism*, never the data structures.
+
+**D6 — New graduation gates (proposed; file in the posture ledger at
+resolution).** The ledger's G-CONCURRENT (second concurrent session), G-2HUMAN
+(second human), and G-MULTITENANT (shared uid) do not cover one human / one
+home / multiple machines. Split by axis:
+- **G-ROAMING-SURFACE** (near-term): multiple control surfaces over one base
+  home. Needs layer 2's shared head consumed for *coordination* (all surfaces
+  agree on head, pending queue, and revocations) plus C5-channel monitoring.
+  Composes with SI-23's multi-surface approval work.
+- **G-ROAMING-WRITE** (required future): concurrent appenders to one home. Needs
+  the witness-mediated write lease (D5); the chain substrate is
+  forward-compatible.
+
+**D7 — SI-23 seam recorded, out of scope here.** The roaming pattern makes
+multi-surface approval concrete and near-term. C5's sender-binding already gives
+device-agnostic *approval* (a Telegram escalation is answerable from any device
+on the same identity); SI-25's shared head adds device-consistent *monitoring*.
+But the same C5 device-agnosticism is exactly what SI-23 flags as dangerous
+under actuation (the broker cannot tell whether the approval surface is
+reachable by granted hands — SI-23 review adjustment #4). The roaming pattern is
+therefore a strong argument that SI-23 must resolve before any actuation grant.
+Recorded for SI-23; not decided here.
+
+**Still open in the SI-25 session.** The shared durability profile (candidate
+choice #9) that checkpoint publication and SI-31's owned-state recovery journal
+must agree on — the first W-20 composition-review seam (journal freshness ↔
+SI-25). Candidate choice #2 (checkpoint / anchor-latency budget) defers with
+layer 2; choices #5/#6/#7 (rotation → SI-27; wire transcript → SI-26;
+import/recovery vocabulary → W-6) coordinate with their owning issues and are
+not finalized here.

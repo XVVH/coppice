@@ -2,7 +2,7 @@
 
 **Status: RATIFIED as amendment A23 (spec v0.8, §6.2) on 2026-07-13 — as
 adjusted by this document's ratification addendum (determinations D1–D7,
-durability seam S1–S5, post-review adjustments R1–R4). The addendum wins
+durability seam S1–S5, post-review adjustments R1–R7). The addendum wins
 wherever the candidate prose below differs from it; §6.2 is the normative
 text; this document is the design rationale and provenance record. SI-25 is
 RESOLVED. W-15 implements layer 1; layer 2 is graduation-gated
@@ -919,13 +919,15 @@ their owning issues rather than improvised in W-15. Until those choices are
 made, local-only signed checkpoints may be implemented only as explicitly
 non-production scaffolding and must not close SI-25, RF-13, or P15.
 
-## Ratification-session determinations (W-20, 2026-07-13 — in progress)
+## Ratification-session determinations (W-20, 2026-07-13 — ratified as A23)
 
-Operator-ratified determinations from the SI-25 ratification challenge pass,
-recorded in the A22-adjustment style. They scope and adjust the candidate
-above and graduate into spec amendment A23, the posture ledger (new gates),
-and W-15 scoping when SI-25 fully resolves. **SI-25 remains open** until then;
-nothing here is normative in code before integration.
+Operator-ratified determinations from the SI-25 ratification challenge pass
+and three independent-context review rounds, recorded in the A22-adjustment
+style. They are integrated into spec amendment A23 (v0.8 §6.2), the posture
+ledger (G-ROAMING gates), and W-15's scope; **SI-25 is RESOLVED**. This
+addendum is the normative record where it and the candidate prose above
+differ. W-15 implements layer 1; nothing here changes runtime code before
+that implementation lands under its own review.
 
 **Design-center correction (load-bearing, operator-confirmed).** The target is
 not a single physical machine but **one human, one logical fabric home, reached
@@ -1161,6 +1163,56 @@ invites mismatch). A divergence window that would span an epoch transition
 epoch record's `prior`/`legacy_commitment` carries the discontinuity. This is
 the reading forced by H12 (no retroactive authentication) plus the
 no-bare-integer-comparison-across-epochs rule.
+
+**R6 — two terminals: closure and recovery read local, freshness reads
+anchored (third-review blocker 1 + operator Q1).** The `VerifiedPrefix` has
+two terminals, and different consumers read different ones — the faithful
+encoding of D4 (a revoke narrows local decisions the instant it commits) and
+the crash matrix (a locally committed event rolls forward). (a) The **local
+verified terminal** is the head of the locally committed, signature-verified
+layer-1 chain; it is authoritative for §5.4 closure/liveness (a revoke at
+`global_seq` 11 is seen even when the anchor is at 10 — the fail-open the
+review caught) and for owned-state recovery (a locally committed event is in
+the prefix and rolls *forward*, per S4 and ADR line 1109). (b) The **anchored
+terminal** is the head an `AnchorReceipt` confirms; it is authoritative only
+for freshness/assurance labels and for standing-authority counting (D2,
+multi-location). Under R5 the anchor is never ahead of the durable local head,
+so the gap `[anchored, local]` is the committed-but-unanchored tail — locally
+authoritative, merely not yet fresh; **the anchor never shortens the local
+prefix.** Anchor-ahead-of-local is impossible in normal operation and is
+therefore the rollback signal: reopen observing it fails closed (the R5 case).
+Supersedes the earlier "bounded by the anchored head in the production
+profile" and "layer 2 = through the anchored head" wordings, which conflated
+the two.
+
+**R7 — no-resurrection rests on the migration activation barrier, not on
+R3's refusal; epoch types split (third-review blocker 2 + operator Q2).**
+Cross-epoch ordering: positions in different epochs order by **epoch lineage**
+(the `prior` DAG — an epoch precedes its descendants), never by comparing
+`global_seq` (which resets to zero per epoch); within one epoch `global_seq`
+orders; comparison across incomparable (forked) epochs fails closed. §5.4's
+`<` is this composite order. Epoch types differ in **activation**, not
+ordering: a **migration** epoch is an *activation barrier* — a pre-migration
+`grant` and the capability's `bound_manifest` are not in the new epoch's
+verified prefix, so liveness condition 1 and M2 both fail and the capability
+is dead by construction, independent of whether the broker recognizes the id;
+a **key-rotation** epoch is *activation-continuous* (authority carries across
+it under SI-27's ordered certificate chain). Both preserve cross-epoch
+*ordering* for closure — a revoke closes across any epoch boundary. Therefore
+the no-resurrection guarantee rests on the barrier + M2, which are enforceable
+today via the epoch-scoped prefix; R3's MUST-refuse is the **loud
+defense-in-depth** (fail loud, not silently-not-live), and the *id-level*
+mechanism that lets the broker recognize a prior-epoch id is **reserved to
+SI-27's epoch-key binding**. The "absolute no-resurrection" claim is corrected
+to rest on the barrier, not on R3 alone.
+
+**Q3 resolution — layer-2 graduation is an explicit ceremony (reserved).**
+An existing layer-1 home acquiring its first anchor cannot reuse `initialize`'s
+accept-once binding (unreachable from reopen). The graduation ceremony that
+performs the first anchor binding for an existing home is **reserved to the
+layer-2 implementation, composed with SI-27's key-lifecycle** (anchoring and
+key custody graduate together); §6.2 must not imply it falls out of
+`initialize`.
 
 **R5 — the synchronous level follows the anchor, not the gate
 (second-review operator question, ratified 2026-07-13).** S5's

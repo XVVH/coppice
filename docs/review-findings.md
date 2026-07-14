@@ -862,6 +862,272 @@ non-zero exit — the W-19 ledger-integrity pattern — rather than a single
 all-or-nothing error. Non-blocking hardening; schedule with the next
 operator-surface / RF-9 recovery pass.
 
+## RF-35 — journal recovery lacks the ratified freshness predicate, pre-restore capture/attribution, and home/epoch binding — open (medium, posture-bounded)
+
+**Severity: medium. Direction: UNRECORDED MUTATION / DATA LOSS on the
+reopen-recovery path, measured against clauses ratified after the merge.**
+Filed by the A24 ratification (W-20, 2026-07-14, ADR 0007 D31-2/D31-4/
+D31-6): the merged W-14 recovery conforms to its oracle as reviewed, and
+the ratification then *adjusted* the protocol in three places the
+implementation does not yet meet.
+
+1. **Freshness (D31-4):** `recover_pending_state_change` validates the
+   journal against itself (linked event presence; kind/manifest/tuple
+   agreement with the journal's own fields), never against the substrate's
+   current-roots view **V**. A stale retained journal — a backup restore,
+   a copied home directory, a replant — whose linked event is committed
+   rolls live stores back to a historical tuple; one whose event never
+   committed rolls them to its `before` images. Unrecorded,
+   kernel-executed state mutation, surfacing only as later unattributed
+   drift.
+2. **Attribution (D31-6, the serious half):** recovery restores without
+   capturing live roots to CAS or recording drift, and the fs apply's
+   first pass deletes live files the target does not contain. Human edits
+   made between crash and reopen — an unbounded window, in the store
+   humans actually edit — are deleted or overwritten with **no CAS copy
+   and no ledger trace** (M8's clause, missing at the recovery consumer).
+3. **Binding (D31-2/H3/R9):** the journal carries no home/epoch; a
+   pre-migration journal would be honored post-migration. Unimplementable
+   before W-15 introduces epochs.
+
+**Why bounded under the current posture:** the adversarial replant is moot
+while RF-14 leaves the fabric key cleartext in the home (a same-uid
+attacker forges rather than replants), so the live exposure is
+*accidental* staleness plus the downtime-edit data-loss window, which
+requires a crash landing exactly between journal publication and journal
+removal followed by pre-reopen edits to affected roots. Dogfooding's
+failure mode remains "revert and shrug" — except for item 2's lost
+downtime edits, which is why this is medium, not low. **Carried by W-15**,
+which already rewrites the same function for S4 prefix-bounding; the
+adversarial value of item 1 activates with W-17 key custody. Founding
+determinations and the V-derivation are ADR 0007's — **as adjusted through review rounds 1–2 (R3/R4, R8/R9/R11/R13)**: total
+V now includes unbranched `tool_call.state_root_after` (round 2 showed
+its omission bricks a genuine revert-crash recovery) and is projected
+onto the journal's store set; freshness is positional (per-store
+prior-attestation positions in the journal — value-only equality passes
+same-epoch ABA replays); the **recovery capture record** (fabric-signed
+write-ahead of the captured roots between capture and restore —
+first-write-wins, journal validation family, removed before the journal;
+without it a crash between restore and emission erases the downtime-edit
+evidence); per-store window-drift + `fabric_recovery` closing pairs
+carrying the journal id, pair-or-neither, with the pinned orderings
+(closing-record idempotency check before the freshness predicate);
+per-arm epoch guard. Round 3 (R14/R15): capture-record validation is
+exact-set (a partial record cannot prove non-divergence), and retries
+run the explanation check — state explained by neither the capture
+record nor the restore target fails closed in place, so a divergence
+window opened during recovery's own downtime is preserved by refusal
+(automated multi-window preservation is SI-39). Round 4 (R18)
+re-quantified the check over **path-state** — the union of paths in
+live/capture/target with absence as a value — because live-elements-only
+was vacuous for deletions; round 5 (R21) completed canonical entry
+identity as (path, **kind**, presence, content hash, mode), with
+non-canonical kinds (symlink, fifo, socket, device) definitionally
+unexplained — the kind-complete scan runs on **every active
+restore attempt** — before capture-record publication on a first
+attempt, before any restore mutation on a retry, with closing-record
+cleanup exempt (R24 as completed in round 7; round 6: the retry-scoped
+version left the first attempt free to capture around a socket and
+restore over it; capture rejects symlinks but silently skips other
+non-file kinds, so a capture-shaped walk satisfies the exclusion
+vacuously), over the R25 tagged path-state domain (absent |
+file(hash, mode) | implicit-directory over the non-empty paths strictly
+below the store root, directories derived as proper ancestors of
+tracked file paths) — and (R22)
+layer-qualified the freshness guarantee: layer 1
+rejects stale journals against a non-rolled-back local prefix; joint
+journal+database rollback is layer 2's anchor-ahead case, with the
+capture record preserving overwritten state as evidence even there. Recovery never
+moves V (normative invariant). The enforcing tests land with W-15's
+contract lanes, including the G13(e)/(f)/(g) journal-validation
+negatives round 3 split out.
+
+## RF-36 — approval headroom lacks temporal binding at both consumers; gate replay also lacks the binding tuple — open (high, posture-bounded)
+
+**Severity: high. Direction: FAIL-OPEN AUTHORITY at both consumption
+consumers.** Found by round 1 of the PR #48 independent review (finding
+1, gate replay) and **widened by round 4** (finding 1, decision time);
+both verified at source. Gate replay (`gate_trace_check`) pre-aggregates
+every signed `approved` event into `(capability, caveat) → uses` headroom
+before replaying any tool call — checking none of: a matching prior
+signed escalation; temporal order; manifest/M2 agreement; auth strength;
+double resolution. Decision time (`w14_decision_authority`) enforces the
+exact-match binding tuple but **also lacks the temporal edge**: it
+preloads all approvals into remaining-headroom before the consumption
+fold, so a signed history containing a tool_call before its approval
+retro-funds the earlier effect and leaves residual uses for new
+dispatch. The round-1 framing "the gate is weaker than decision time"
+was corrected in round 4: neither consumer requires an approval to
+precede the effects it funds.
+
+**Why bounded under the current posture:** locally the broker is the sole
+producer of approval events and emits them correctly bound and ordered,
+so the lax replay is unreachable from the agent. The exposure is
+foreign/replayed substrate — exactly the W-9 corpus surface — and any
+future path where trace rows are ingested rather than produced.
+**Clause:** A25 §5.5 "Decision and gate" as adjusted by ADR 0007 R1 and
+R17 — one position-ordered reconstruction shared by both consumers:
+exact-match binding plus the temporal edge (headroom at offset O counts
+only approvals at offsets before O). Carried by **W-22**; its contract lane supplies the double-resolution negative
+(G13(d)) and the decision-time and gate-replay temporal retro-funding
+negatives (G13(h)) under SIGNED-DECISION-AUTH and the gate contracts.
+
+## RF-37 — approval-time re-merge applies un-previewed outcomes without comparison or re-park — open (medium)
+
+**Severity: medium. Direction: HUMAN-APPROVAL MISBINDING (consent scope),
+no authority widening beyond the digest-pinned branch content.** Found by
+round 1 of the PR #48 independent review (finding 2), which refuted the
+draft's narrowing rationale with a concrete counterexample: preview
+against trunk `H` shows the branch edit conflicting (trunk-wins, nothing
+applied); trunk returns to base before approval; the re-merge sees no
+conflict and installs the full branch edit the human was shown *not*
+landing. `approve_promotion` re-merges pinned branch roots against live
+trunk and applies the result with no comparison to the previewed outcome.
+
+**Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2,
+re-quantified by R12 (round 2), given its comparison basis by R16
+(round 3), and its referent by R20 (round 4 — the round-3 claim that the
+previewed merged tree was already candidate-resident was false: the
+parked preview serializes only ops/conflicts/trace_check/branch_roots) —
+the re-merge MUST reproduce the previewed outcome exactly: per previewed
+op, over the op's full touched-path set, the re-merged result equals the
+previewed merged result, with conflict status unchanged; the referent is
+the preview's new per-store `merged` root references, CAS-retained at
+escalation and digest-covered by construction; never the whole-store
+merged root, whose equality would re-park on every unrelated human trunk
+edit; any difference re-parks as a fresh candidate with a fresh
+escalation and digest. Comparison is at canonical-entry grain, never
+content hash alone, with the trunk-wins opaque corner comparing the
+*branch* image identity (internal pre-round-6 review — RF-40's defect
+must not be recreated inside this comparison). Bounded meanwhile: the
+applied content is still the digest-pinned branch content, the gate
+re-verifies trace-vs-capability, drift is attributed first (M8), and
+Tier-1 promotion remains revertible. Carried by **W-22**; the
+outcome-equality negative (G13) lands with its contract lane. Note for
+the W-22 implementer: `approve_promotion`'s doc comment still asserts
+the refuted round-0 narrowing theorem ("never wider than what was
+previewed") — this docs-only PR deliberately leaves code untouched;
+correct the comment with the mechanism.
+
+## RF-38 — a poisoned escalation chain denies all capabilities with no operator recovery path — open (low)
+
+**Severity: low. Direction: FAIL-CLOSED availability (self-DoS), no
+authorization bypass.** Found by round 1 of the PR #48 independent review
+(finding 8). `w14_decision_authority` scans every escalation/approval
+anomaly before filtering to the requested capability, so one duplicate
+resolution or conflicting binding — for any capability — fails the
+consumption view for **all** capabilities in the home, permanently
+(the event stream is append-only). Ratified as intentional scope (ADR
+0007 R7: a corrupted authority chain is a home-level integrity incident;
+per-capability scoping would let a poisoned chain keep granting
+elsewhere). What is missing is the operator recovery path — today nothing
+short of an epoch action clears it. If the remedy needs a new record kind
+(a ratified supersession/quarantine record), it graduates to an SI per
+the triage rule before implementation. Schedule with the next
+operator-surface pass (alongside RF-34).
+
+## RF-39 — exemption approval does not bind the presented escalation version; the C2 listing renders unsigned rows — open (high, posture-bounded)
+
+**Severity: high. Direction: HUMAN-APPROVAL MISBINDING on the exemption
+surface — the RF-31 defect class, found alive on the second approval
+surface.** Found by round 2 of the PR #48 independent review (finding 3);
+verified at source. Three legs: (1) A9 batching appends a **new signed
+escalation event per violation under one numeric id** with evolving
+`count`/`sample` (`enqueue_escalation`), so "the signed escalation" is
+version-ambiguous per id and nothing identifies which version the human
+reviewed; (2) the approval event body names only the numeric id,
+capability, and caveat — no escalation event id, digest, count, or
+sample — so the approval binds no specific presented candidate; (3)
+`list_escalations`, the C2 display surface, renders id, capability,
+manifest, caveat, count, and samples directly from the mutable
+`escalations` table with no verification against the signed chain — a
+storage write can present benign samples for a hostile batch.
+
+**Clause:** A26 §6 exemption candidate identity as adjusted by ADR 0007
+R10 — the approval body carries `escalation_event` (the exact signed
+version presented, verified at resolution); newer batch versions never
+widen the grant and remain visible; C2 listings render from, or verify
+against, signed escalation events (the RF-34/W-19 pattern). **Why
+bounded:** approval surfaces are broker-owned (C2) and local-only; the
+authority tuple (capability, caveat, manifest, auth-strength, uses) is
+already exact-match verified from signed events, so the misbinding scope
+is *which batch instance* the human believed they approved, not which
+capability widens; and a table writer already needs home access (RF-14
+posture). Carried by **W-22**; its lane supplies the version-swap and
+tampered-listing negatives.
+
+## RF-40 — canonical entry identity is not identity through the fs pipeline: planner drops mode-only changes; apply skips mode and deadlocks on topology — open (high, as-built defect)
+
+**Severity: high. Direction: (a) SILENT AGENT-CHANGE LOSS at planning;
+(b) SILENT ROOT MISMATCH at apply — a committed event names a tuple
+live state does not realize; (c) FAIL-CLOSED availability — a
+legitimate recovery bricks deterministically.** Found by round 4 of the
+PR #48 independent review (finding 3, apply-side) and **widened by
+round 5** (finding 3, planner-side); all verified at source. Distinct
+from RF-35–RF-39: those track clauses ratified *stronger than built*;
+RF-40 is the cycle's as-built defect tracker — merged, dogfooding code
+failing clauses round 0 certified as faithfully built (A11
+reconciliation, D31-1 exact realization, D31-3 idempotent recovery).
+
+1. **Planner drops mode-only branch changes (round 5):** the merge
+   planner deliberately reduces every entry to `path → content hash`
+   (`promote.rs` — a documented Stage-3 shortcut: "mode is deliberately
+   out of merge identity... the chosen side's mode rides along") and
+   diffs hashes only. In the mode-only case the shortcut's own
+   rationale fails: base/branch/trunk reduce to identical trees, **no
+   side is chosen**, no op or conflict is produced, `compose_tree`
+   falls through to trunk metadata, and the promotion completes as a
+   silent no-op — the agent-originated mode change vanishes with no op,
+   no conflict card, and no event naming it (an A13 legibility failure
+   as well as an A11/A24 one). The shortcut was never filed in the
+   posture ledger; this entry now documents it. The apply-side write
+   fix cannot recover a change the planner never selected.
+2. **Mode-only skip at apply (round 4):** filesystem capture encodes
+   executable mode in the root hash, but `apply_fs_in_place` pass 2
+   skips any file whose **content** hash matches. A mode-only
+   transition commits its signed event and expected root while live
+   retains the old mode: the authoritative-name claim silently broken,
+   surfacing later as spurious drift.
+3. **File↔directory deadlock (round 4):** pass 1 deletes undesired
+   *files*, pass 2 renames replacements over target paths, pass 3
+   prunes emptied directories — in that order. A target where path `a`
+   is a file while live has directory `a/` empties the directory in
+   pass 1 but attempts the rename over the still-present directory in
+   pass 2, which fails; pass 3 never runs. Recovery retries hit the
+   identical order and the home stays closed — fail-closed, but wrongly
+   and permanently.
+
+**Clause:** A11 three-way reconciliation; A24/D31-1 as ratified plus the
+canonical-entry realization sentence as extended in round 5 ("content,
+presence, kind, and mode — at every stage: planner and apply"); D31-3
+idempotent recovery. **Why bounded:** Tier-1-local; the planner loss is
+bounded to executable-mode changes on owned stores (content changes
+always surface), and the apply mismatch is between signed state and live
+bytes the CAS fully retains — a re-run of a corrected restore converges,
+and the gate's drift check surfaces mode mismatches on next consumption
+rather than letting them ride into a merge unattributed. Carried by
+**W-15** (promote.rs shares the tree vocabulary with snapshot.rs): the
+planner surfaces every canonical-entry difference as an op or conflict
+(mode-only = a `modify` refinement per A18; rename/move pairing stays
+exact content-hash per A17, with a paired op's mode/kind endpoint delta
+surfacing as a `modify` refinement on the destination — the internal
+pre-round-6 composition rule); pass 2 writes when the canonical entry
+differs; **any non-excluded directory occupying a target file path that
+is empty after pass 1** — pre-existing empties included — resolves
+before rename, non-empty failing closed (the internal review widened
+the round-4 "emptied by deletions" quantifier); registered STATE-COMMIT
+negatives for mode-only branch promotion (G13(l)), mode-only apply
+exactness (G13(i)), and both file↔directory crash-recovery directions
+(G13(j)). Named residual (internal review): the canonical mode grammar
+is two-valued (755/644) — a 0600 file restores as 0644 (permission
+widening on the recovery path) and a downtime chmod to 0600 is
+invisible to the explanation check; within the declared grammar, named
+here so finer mode fidelity is a conscious future decision, not an
+assumed property. The A26/W-22 outcome comparison inherits the same
+entry-identity requirement by cross-reference. RF-40 may constitute the
+parked RF-27 recovery-hardening trigger; un-parking is an operator gate
+decision, not a review outcome.
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

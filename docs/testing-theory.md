@@ -462,6 +462,71 @@ independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS
 enforcing paths against source, not the diff alone (Allow-arm reservation,
 promotion-body `merged` field, and the exact recovery-journal commit point).
 
+**G13. Ratified-clause negatives outstanding after A24–A26 (W-20
+retro-ratification, 2026-07-14; maintained through the PR #48 review
+rounds).** Normative sentences lacking a dedicated negative; round 1
+corrected this entry in both directions, rounds 3–6 extended it
+(letters (a)–(q)). (a)
+**Re-merge outcome equality (D34-3 as revised in round 1):** round 1
+*refuted* the original ⊆-narrowing claim outright (a trunk-wins conflict
+preview followed by trunk returning to base installs the full
+un-previewed branch edit), so the entry is no longer "enforcing structure
+exists, negative missing" — the enforcing mechanism itself is missing
+(RF-37); the outcome-equality negative lands with W-22's contract lane.
+(b) **Rollback-failure-during-rollback retains the journal** (`kernel.rs`
+compound-error arm): enforced, error-message-visible, no direct test;
+G3-adjacent (one cell of the syscall crash matrix, nameable now because
+A24 made the clause citable). (c) **Policy-context per-field negative:
+exists** — round 1 corrected the original claim of absence:
+`w14_malformed_signed_promotion_binding_cannot_reach_trunk`
+(`tests/gate.rs`) mutates `policy_context` alone and asserts trunk is
+unchanged; coverage is direct, not by preimage argument. (d)
+**Double-resolution of one escalation** (A25 "doubt fails the view"): no
+test appends two resolutions for one escalation id — round 1 showed the
+round-0 sweep wrongly claimed this covered by
+`w14_anomalous_signed_decision_edges_never_authorize_dispatch` (which
+covers conflicting bindings and approval-field mismatches, not double
+resolution). Lands with RF-36's gate-binding-parity lane (W-22), which
+exercises the same edges at both consumers. Round 3 (finding 4) split
+three more journal-validation dimensions the sweep had grouped under
+STATE-COMMIT's existing negatives: (e) **invalid journal signature**
+(the registered tests cover mistyped/wrong-version/unsafe/misbound, all
+via resealed valid signatures; none presents a signature that fails
+`canon::verify`); (f) **pre-existing write-side sibling** (no test
+proves `O_CREAT|O_EXCL|O_NOFOLLOW` publication fails before any
+mutation when the journal path is occupied); (g) **journal-roots vs
+committed-event disagreement** (the misbinding negative varies kind and
+manifest, not the root tuple). All three land with W-15's RF-35 lane.
+Round 4 added three more: (h) **temporal retro-funding at both
+consumers** (a signed tool_call preceding its approval must not be
+funded by it, at decision time and at gate replay — RF-36's widened
+lane, W-22); (i) **mode-only exactness** (a transition differing only in
+executable mode must realize on live state — RF-40); (j)
+**file↔directory topology crash recovery**, both directions (RF-40).
+Round 5 added two: (k) **live symlink untouched, no closing record**
+(R21 — a non-canonical-kind entry fails the explanation check closed
+before mutation; RF-35's lane); (l) **mode-only branch promotion**
+(R23 — a branch differing from base only in executable mode must
+surface as an op or conflict, never promote as a silent no-op —
+RF-40's planner dimension). Round 6 added five for the internal-review
+completions: (m) **non-symlink special kind** (socket/fifo — capture
+treats these differently from symlinks — on the FIRST recovery attempt
+and on retry: recovery fails closed in place, entry untouched, no
+capture record published on the first-attempt case; R24); (n)
+**rename+chmod** (exact-hash pairing preserved as one rename/move op
+AND the destination gains the mode `modify` refinement — neither
+un-pairing nor silent mode drop); (o) **pre-existing empty directory
+occupying a target file path** (resolved before rename; non-empty fails
+closed); (p) **A26 outcome comparison at canonical-entry grain** (a
+re-merge differing from the preview only in mode or kind at a touched
+path must re-park); (q) **opaque trunk-wins comparison** (human trunk
+edit to the opaque store between preview and approval does NOT re-park;
+a changed branch image does). The D31-4/D31-6/H3-binding enforcement
+gaps are RF-35's (implementation absent, not tests absent); their
+contract lanes land with W-15, as do RF-40's (i)/(j)/(l)/(n)/(o) and
+RF-35's (k)/(m); (p)/(q) land with RF-37's W-22 lane, and (d)/(h) with
+RF-36's.
+
 ## Automation lanes
 
 | Lane | Purpose |

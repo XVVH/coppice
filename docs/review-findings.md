@@ -528,7 +528,7 @@ treating it as empty.
 SI-27 owns external trust anchoring, rotation, recovery, and historical
 verification; RF-14 remains the separate cleartext-custody finding.
 
-## RF-19 — manifests are applied without universal signature/type verification — remediation in review (W-14)
+## RF-19 — manifests are applied without universal signature/type verification — fixed by W-14 (PR #43)
 
 **Severity: high. Direction: INTEGRITY / UNAUTHORIZED STATE APPLICATION.**
 Promotion verifies manifests, but `create_branch`, `revert_to`, and some parent
@@ -550,10 +550,11 @@ aggregation discovers capability ids from verified signed grants rather than
 the unsigned `objects.kind` selector. The `TYPED-OBJECT` contract covers all
 four prefixes (manifest/tool/capability/channel) and protected-effect negatives
 for lineage, branch/revert, promotion, dispatch/escalation, approval, and tool
-lookup. Required CI and the targeted mutation lane are green; independent-
-context authority review remains required before this finding is fixed.
+lookup. Required CI and the targeted mutation lane are green; the
+independent-context authority re-review returned APPROVE WITH NON-BLOCKING
+FOLLOW-UPS (RF-33/RF-34) and the change merged in PR #43.
 
-## RF-20 — filesystem restore preparation checks CAS presence, not integrity — remediation in review (W-14)
+## RF-20 — filesystem restore preparation checks CAS presence, not integrity — fixed by W-14 (PR #43)
 
 **Severity: medium-high. Direction: PARTIAL DESTRUCTIVE FAILURE.** For
 filesystem restores, `prepare_restore` checks only `cas.has`. Commit deletes
@@ -579,8 +580,9 @@ non-symlink inode immediately before atomic rename, and fsyncs file plus
 parent. A direct
 post-prepare CAS and legacy-staging substitution test proves only the retained
 verified image reaches the live database; a separate regular-file/symlink
-substitution negative proves the live target remains unchanged. Merge
-re-review remains pending.
+substitution negative proves the live target remains unchanged. The
+independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS;
+merged in PR #43.
 
 ## RF-21 — bundled SQLite 3.46.0 is affected by the WAL-reset corruption race — fixed (fa9defd, W-10)
 
@@ -731,7 +733,7 @@ after a diagnostic view has already been observed.
 Merged in PR #41 after the required, deep, and targeted mutation lanes passed;
 GitHub's Linux, macOS, static, and audit checks also passed.
 
-## RF-29 — unsigned broker meter/exemption caches authorize dispatch — remediation in review (W-14)
+## RF-29 — unsigned broker meter/exemption caches authorize dispatch — fixed by W-14 (PR #43)
 
 **Severity: high. Direction: FAIL-OPEN AUTHORITY.** Decision time read
 `broker_meters` and `exemptions` directly. A storage writer could reset a
@@ -751,7 +753,7 @@ corrected G9 matrix also rejects signer-anomalous capability, caveat, manifest,
 auth-strength, zero-use, duplicate-binding, and cross-capability accounting
 edges.
 
-## RF-30 — promotion/revert can partially commit or mutate without a signed event — remediation in review (W-14)
+## RF-30 — promotion/revert can partially commit or mutate without a signed event — fixed by W-14 (PR #43)
 
 **Severity: high. Direction: CROSS-STORE INTEGRITY / UNRECORDED MUTATION.**
 Both paths previously restored stores sequentially, then appended their event
@@ -773,7 +775,7 @@ Recovery negatives additionally reject mistyped, wrong-version, symlink,
 directory, and event/manifest-misbound journals before restore; a forced store
 sync failure rolls every root and the event transaction back.
 
-## RF-31 — parked promotion approval trusts unsigned candidate selectors — remediation in review (W-14)
+## RF-31 — parked promotion approval trusts unsigned candidate selectors — fixed by W-14 (PR #43)
 
 **Severity: high. Direction: HUMAN-APPROVAL MISBINDING.** The mutable
 `promotions` row supplied manifest and preview while its signed escalation
@@ -786,7 +788,7 @@ context. Approval recomputes and verifies that binding before auth-strength,
 drift, or merge work; table-only and swapped rows are inert. The signed
 approval repeats the candidate digest and commits atomically with promotion.
 
-## RF-32 — tools/list advertises revoked, expired, stale, or ungranted capability surfaces — remediation in review (W-14)
+## RF-32 — tools/list advertises revoked, expired, stale, or ungranted capability surfaces — fixed by W-14 (PR #43)
 
 **Severity: low. Direction: STALE AUTHORITY SURFACE / FAIL-CLOSED CONFUSION.**
 Advertisement previously verified only the capability object. Dispatch still
@@ -801,7 +803,64 @@ Corrected W-14 assurance is green: strict Clippy; 24 contracts with 131
 contracted tests and 93 frozen legacy tests; all 224 workspace tests and both
 acceptance demos; 152 targeted mutants (140 caught, 12 compiler-unviable, zero
 survivors/timeouts); and the deep 4,096-authority-case / 512-model-history
-release lane. Independent-context re-review remains the merge gate.
+release lane. The independent-context re-review (fresh context, not the
+authoring session) returned APPROVE WITH NON-BLOCKING FOLLOW-UPS on
+2026-07-13; RF-19/RF-20/RF-29–RF-32 and P16 are closed by the merge in
+PR #43. The re-review confirmed the implementation conforms to its
+oracle filings SI-31 (owned-state transition/journal), SI-33 (event-derived
+consumable authority), and SI-34 (approval candidate binding), and verified
+against source — not the diff alone — that the Allow arm still reserves a
+pending call with its checks (the RF-3 pipelined-propose fail-open stays
+closed), the promotion event body carries `merged` so a real crashed
+promotion rolls forward, and the recovery journal's commit point is exact
+(linked event committed iff its SQLite transaction committed). Two
+non-blocking follow-ups were filed (RF-33/RF-34) plus a P22 line-reference
+correction and a per-decision-scan performance note carried to W-15.
+
+## RF-33 — decision budget consumption is no longer durable across a crash restart — accepted (posture residual)
+
+**Severity: medium. Direction: FAIL-OPEN across a process restart, bounded
+by the LOCAL/DEBUG posture.** Surfaced by the W-14 independent re-review
+(2026-07-13). Under W-14, decision-time budget and exemption headroom are
+reconstructed from verified signed `tool_call`/`escalation`/`approval` events
+plus the broker's in-memory pending dispatch reservations (the SI-33
+doctrine); `broker_meters` is no longer written or read, and `exemptions` is
+written but never read for authorization. This intentionally drops the
+incidental durability the old decision-time `broker_meters` write provided.
+
+**Residual:** a call that is Allowed (ticket issued, possibly dispatched
+downstream) but whose result is never recorded — a crash between dispatch and
+`record_result` — loses its in-memory reservation on restart. No signed
+`tool_call` event exists for it, so its budget is not counted and the agent
+may re-propose, over-granting by the lost reservation. This is the same
+in-flight-reservation residual already tracked as **P22 / RF-3**, now
+uniformly event-sourced rather than incidentally persisted.
+
+**Why bounded under the current posture:** local effects land only on the
+branch; the promotion gate recounts budget from signed events; and RF-9
+strands any branch mutation whose root diverges from the last signed
+`tool_call.state_root_after`, so over-granted extra writes cannot reach trunk
+and revert covers them. **Must close before first live egress** with the
+durable external-effect protocol (P22): a remote effect that already crossed
+the boundary cannot be un-sent, so the reservation must become durable
+(signed dispatch/reservation record) before the effect is dispatched.
+Accepted for dogfooding; no code change.
+
+## RF-34 — operator promotion listing fails closed on a single malformed parked row — open (low)
+
+**Severity: low. Direction: FAIL-CLOSED (operator availability/legibility).**
+Surfaced by the W-14 independent re-review (2026-07-13). `list_promotions`
+now verifies every pending row against its signed candidate binding
+(`w14_verify_promotion_candidate`, the RF-31 fix) and returns `Err` if any
+one row fails. A storage writer who corrupts or injects a single
+`promotions` row therefore breaks the listing of *all* pending promotions
+rather than surfacing just the bad one. No unauthorized effect occurs and a
+database writer already holds broader denial options, so this is fail-closed;
+but it is an operator surface, and per the G9 operator-command discipline it
+should report per-row findings (which row failed, and why) with a bounded
+non-zero exit — the W-19 ledger-integrity pattern — rather than a single
+all-or-nothing error. Non-blocking hardening; schedule with the next
+operator-surface / RF-9 recovery pass.
 
 ## Verified sound during review (recorded so they aren't re-litigated)
 

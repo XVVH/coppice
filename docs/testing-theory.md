@@ -427,8 +427,9 @@ independent review demonstrated that its passing 18-mutant lane omitted live
 decision caches, SQLite staging, multi-root transactionality, parked candidate
 binding, promotion-strength aggregation, and advertisement liveness. G12
 records the corrected cross-consumer matrix and expanded mutation surface.
-Independent-context re-review remains the merge gate. The matrix is a caller-
-boundary complement to G5 mutation testing, not a substitute for it.
+The independent-context re-review returned APPROVE WITH NON-BLOCKING
+FOLLOW-UPS and the change merged in PR #43. The matrix is a caller-boundary
+complement to G5 mutation testing, not a substitute for it.
 
 **G11. Universal signed-event body conformance.** W-19 closes the retained-row
 cryptographic and envelope boundary for operator diagnostics: strict JSON,
@@ -442,7 +443,7 @@ current attacker cannot sign the malformed event—but G9 requires it to remain
 explicit. W-6 owns machine-readable per-kind schemas and pass/fail fixtures;
 authority consumers continue to fail closed on missing fields in the meantime.
 
-**G12. W-14 cross-consumer assurance gap — remediation in review.** The first
+**G12. W-14 cross-consumer assurance gap — closed (PR #43).** The first
 independent review correctly found that the original inverse map cited an
 escalation-approval test for promotion-strength aggregation, claimed immutable
 SQLite preparation while retaining a mutable pathname, and mutated only the
@@ -455,8 +456,11 @@ now includes the broker, kernel, tools, proxy, trace, and snapshot enforcement
 boundaries. The corrected run covered 152 mutants: 140 caught, 12 compiler-
 unviable, zero survivors or timeouts. Required CI passed 24 contracts / 131
 contracted tests / 93 frozen tests, all 224 workspace tests, and both demos;
-deep passed 4,096 authority cases and 512 model histories. Independent-context
-re-review remains the merge gate.
+deep passed 4,096 authority cases and 512 model histories. The
+independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS
+(RF-33/RF-34) and the change merged in PR #43; the re-review verified the
+enforcing paths against source, not the diff alone (Allow-arm reservation,
+promotion-body `merged` field, and the exact recovery-journal commit point).
 
 ## Automation lanes
 

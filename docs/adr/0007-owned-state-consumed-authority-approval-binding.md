@@ -1,7 +1,9 @@
 # ADR 0007 — Owned-state transition, consumed authority, and approval candidate binding (retro-ratification of W-14's in-PR protocols)
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
-2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
+2026-07-14, MERGED the same day as PR #48 after seven independent-context
+review rounds plus an internal pre-round-6 review (operator gate
+decision) — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
 **as adjusted by the post-review adjustments R1–R25 (review rounds 1–7;
 round 7 scoped to the round-6 delta, completing R24/R25 in place) and
 the internal pre-round-6 review's completions (the adjustments win

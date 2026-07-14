@@ -122,8 +122,15 @@ and the SI-33/SI-34 labels corrected. Round 7, scoped to the round-6
 delta, returned three mediums (no highs, no skeleton findings) —
 R24/R25 completed in place with the reviewer's prescribed wording
 (active-attempt scoping with cleanup exempt; the root excluded from
-the path universe) and the G13(m–q) carrier roll finished. Awaiting
-operator merge decision. Next after merge: item (3), SI-32.
+the path universe) and the G13(m–q) carrier roll finished. **Item (2)
+merged 2026-07-14 as PR #48** (seven external review rounds + one
+internal pre-round-6 review; R1–R25; RF-35–RF-40 and SI-39 filed;
+operator gate decision). Practice note for the batch's remaining
+items: the internal independent-context pre-review before each paid
+external round caught 13 findings (two high) at a fraction of a
+round's cost — carry it forward for items (3)–(6) and consider it in
+the W-20 close-out as standing practice for authority-surface PRs.
+Next: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`

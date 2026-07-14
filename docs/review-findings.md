@@ -862,6 +862,48 @@ non-zero exit — the W-19 ledger-integrity pattern — rather than a single
 all-or-nothing error. Non-blocking hardening; schedule with the next
 operator-surface / RF-9 recovery pass.
 
+## RF-35 — journal recovery lacks the ratified freshness predicate, pre-restore capture/attribution, and home/epoch binding — open (medium, posture-bounded)
+
+**Severity: medium. Direction: UNRECORDED MUTATION / DATA LOSS on the
+reopen-recovery path, measured against clauses ratified after the merge.**
+Filed by the A24 ratification (W-20, 2026-07-14, ADR 0007 D31-2/D31-4/
+D31-6): the merged W-14 recovery conforms to its oracle as reviewed, and
+the ratification then *adjusted* the protocol in three places the
+implementation does not yet meet.
+
+1. **Freshness (D31-4):** `recover_pending_state_change` validates the
+   journal against itself (linked event presence; kind/manifest/tuple
+   agreement with the journal's own fields), never against the substrate's
+   current-roots view **V**. A stale retained journal — a backup restore,
+   a copied home directory, a replant — whose linked event is committed
+   rolls live stores back to a historical tuple; one whose event never
+   committed rolls them to its `before` images. Unrecorded,
+   kernel-executed state mutation, surfacing only as later unattributed
+   drift.
+2. **Attribution (D31-6, the serious half):** recovery restores without
+   capturing live roots to CAS or recording drift, and the fs apply's
+   first pass deletes live files the target does not contain. Human edits
+   made between crash and reopen — an unbounded window, in the store
+   humans actually edit — are deleted or overwritten with **no CAS copy
+   and no ledger trace** (M8's clause, missing at the recovery consumer).
+3. **Binding (D31-2/H3/R9):** the journal carries no home/epoch; a
+   pre-migration journal would be honored post-migration. Unimplementable
+   before W-15 introduces epochs.
+
+**Why bounded under the current posture:** the adversarial replant is moot
+while RF-14 leaves the fabric key cleartext in the home (a same-uid
+attacker forges rather than replants), so the live exposure is
+*accidental* staleness plus the downtime-edit data-loss window, which
+requires a crash landing exactly between journal publication and journal
+removal followed by pre-reopen edits to affected roots. Dogfooding's
+failure mode remains "revert and shrug" — except for item 2's lost
+downtime edits, which is why this is medium, not low. **Carried by W-15**,
+which already rewrites the same function for S4 prefix-bounding; the
+adversarial value of item 1 activates with W-17 key custody. Founding
+determinations and the V-derivation (transition roots ∘ drift
+`observed_root`, manifest-attested at genesis) are ADR 0007's; the
+enforcing tests land with W-15's contract lanes.
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

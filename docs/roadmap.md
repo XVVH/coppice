@@ -63,6 +63,13 @@ oracle-backed independent re-review (SI-31/SI-33/SI-34 are that
 oracle); W-1 dogfooding continues unaffected. *Provenance: the
 2026-07-13 spec-cohesion analysis of the PR #43 review cycle; sequences
 the existing ratify-first clauses of W-15/W-16/W-17 as one campaign.*
+**Progress:** item (1) ratified 2026-07-13 as A23 (spec v0.8 §6.2, ADR
+0006, PR #47). Item (2) ratified 2026-07-14 as A24–A26 (spec v0.9, ADR
+0007) — challenge pass + fresh-eyes source verification over the merged
+PR #43 candidate; three adjustments beyond as-built (D31-4 journal
+freshness, D31-6 capture-before-restore, journal home/epoch binding)
+filed as RF-35 and carried by W-15; G13 files the outstanding
+negatives. Next: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -90,8 +97,11 @@ resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and replacing the per-decision full `verified_events` scan
-with checkpoint-keyed incremental caching; the writer-fence-as-lease
+prefix-bounded and to the A24 adjusted clauses (RF-35: the D31-4
+freshness predicate over the signed current-roots view, D31-6
+capture-and-attribute before restore, and the journal's home/epoch
+TracePosition binding per H3/R9), and replacing the per-decision full
+`verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
 abstraction (D5); the migration epoch (invalidation + the R3
 pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
 predicate (fail-closed from day one); and the durable-commit synchronous

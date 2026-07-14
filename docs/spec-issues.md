@@ -9,11 +9,16 @@
 > v0.5 as A20); SI-21 is resolved in **v0.6 as A21**; SI-22 is
 > interpreted (W-2); SI-24 is resolved in **v0.7 as A22** (implementation
 > is W-8); SI-23 remains open. The 2026-07-12 cryptographic mechanism
-> audit filed **SI-25…SI-30**. The 2026-07-13 spec-cohesion analysis of
-> the PR #43 (W-14) review cycle filed **SI-31…SI-34** — protocol
-> questions that cycle answered in code without ratification, re-filed
-> at the spec layer (W-20 batches their ratification; PR #43's required
-> independent re-review uses SI-31/SI-33/SI-34 as its oracle). **SI-35**
+> audit filed **SI-25…SI-30**; SI-25 is resolved in **v0.8 as A23**
+> (W-20 session; implementation is W-15). The 2026-07-13 spec-cohesion
+> analysis of the PR #43 (W-14) review cycle filed **SI-31…SI-34** —
+> protocol questions that cycle answered in code without ratification,
+> re-filed at the spec layer (W-20 batches their ratification; PR #43's
+> required independent re-review used SI-31/SI-33/SI-34 as its oracle).
+> **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
+> retro-ratification, 2026-07-14, ADR 0007 — three adjustments beyond
+> as-built tracked by RF-35, carried by W-15); SI-32 remains open, next
+> in the W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
@@ -167,7 +172,38 @@ extension process should registrations use, and should evidence inherit the
 work item's domain or remain a separate domain? Resolve before these labels
 feed portable rules, trust compilation, or published conformance artifacts.
 
-## SI-34 — what exactly does a human approval bind to? (§5.3, §6, C1) — open
+## SI-34 — what exactly does a human approval bind to? (§5.3, §6, C1) — RESOLVED (author, 2026-07-14)
+
+**Resolution: ratified as amendment A26 (spec v0.9, §6) — approval
+candidate binding, with the merged W-14 implementation (PR #43) as
+candidate, ratified as built with the re-merge boundary made normative.**
+The general rule the filing asked for: every approval act binds to the
+exact signed candidate presented (what-you-see-is-what-you-approve); the
+escalation signs candidate identity, both resolutions repeat it, consumers
+verify before auth-strength/drift/merge work; candidates without their
+exact signed escalation are inert. C1 gave approvals provenance; A26 gives
+them an object. Per-type identity fixed: parked promotion = promotion id +
+manifest + JCS digest of the exact preview + JCS digest of the branch-root
+tuple + versioned policy context (committed atomically inside the A24
+transition transaction); escalation exemption = §5.5's exact-match rule
+(one rule, instantiated); rule ratification = the drafted rule *and* the
+counterfactuals shown (R1 lineage — pre-declared, implemented at W-3). §6
+bodies gain the candidate fields normatively; digests are §0 JCS + SHA-256
+and inherit SI-26's transcript/type-binding reservation (type-untagged
+today); full schemas remain G11/W-6. Policy-context versioning: an
+approval under a superseded policy is structurally inert and **loud** —
+re-presentation is a fresh escalation, never a silent re-park (the
+challenge pass initially misdescribed this as auto-re-park; corrected at
+source verification, ADR 0007). The re-merge boundary is ratified rather
+than left implicit (D34-3): the approval authorizes the candidate, never a
+trunk instant; A11 trunk-wins + M8 attribution force trunk drift to
+narrow, never widen, the applied delta — a widening re-merge is a spec
+violation (G13 files the missing negative). Determinations D34-1…D34-4 in
+ADR 0007 (W-20 session, 2026-07-14). Original filing preserved below.
+
+---
+
+### SI-34 (original filing) — what exactly does a human approval bind to? (§5.3, §6, C1)
 
 C1 gives approvals provenance (channel + auth_strength) and the §6
 `approval` body names its escalation or promotion, but no clause states
@@ -199,7 +235,36 @@ auth-strength, drift, or merge work; the signed approval repeats the
 candidate digest and commits atomically with the promotion. Ratify,
 adjust, or supersede at W-20.
 
-## SI-33 — what is authoritative for consumed authority: meters, exemptions, approval headroom? (§5.1, §6, A9) — open
+## SI-33 — what is authoritative for consumed authority: meters, exemptions, approval headroom? (§5.1, §6, A9) — RESOLVED (author, 2026-07-14)
+
+**Resolution: ratified as amendment A25 (spec v0.9, new §5.5) — consumed
+authority as an event-derived view, with the merged W-14 implementation
+(PR #43) as candidate, ratified as built.** Consumable authority (budget
+headroom, approval uses) is a pure function of the verified event prefix
+plus the broker's declared in-flight reservations; unsigned meter/exemption
+rows are compatibility caches never read for authorization — the A15/A22
+materialized-view rule extended from existence to consumption, exactly the
+doctrine the filing proposed. Pinned: the reservation object (in-memory
+`PendingCall` sanctioned Tier-1-local with RF-33's crash-loss residual
+named; MUST become the durable dispatch/reservation record at first egress,
+P22); the exact-match approval↔escalation binding (substrate order —
+normatively A23's composite order, with within-span signed `seq` the
+sanctioned comparison while both acts share the fabric-lifetime span per
+A15; manifest/capability/caveat equality; M2; C6 auth-strength; zero-use
+inert; duplicates and conflicting bindings fail the **entire view** closed,
+never row-skipping); the one-commit transaction boundary (approval event +
+cache rows; widening state never exists without its signed event); and the
+decision/gate split (decision enforces at the local verified terminal, the
+gate's recount at durable authorization offsets is authoritative for what
+becomes durable — §5.4 extended to consumption, composing with the accepted
+RF-3 residual). Forward consumers stated once: §7 counters and W-3's
+k-counting run over the `VerifiedPrefix` (D2), never mutable rows.
+Determinations D33-1…D33-5 in ADR 0007 (W-20 session, 2026-07-14).
+Original filing preserved below.
+
+---
+
+### SI-33 (original filing) — what is authoritative for consumed authority: meters, exemptions, approval headroom? (§5.1, §6, A9)
 
 §5.1 calls budgets "broker-metered" and A9/SI-13 give approvals `uses`,
 but the spec never states where consumed quantity lives or what a
@@ -256,7 +321,42 @@ verification); the symlink/hardlink/directory-entry rules per store kind
 (fs tree vs. SQLite file); and which publication-safety claims require
 containment before G-PUBLISH.
 
-## SI-31 — owned-state transition: "atomically" has no commit point, journal semantics, or crash matrix (§5.3) — open
+## SI-31 — owned-state transition: "atomically" has no commit point, journal semantics, or crash matrix (§5.3) — RESOLVED (author, 2026-07-14)
+
+**Resolution: ratified as amendment A24 (spec v0.9, §5.3) — the owned-state
+transition protocol, with the merged W-14 implementation (PR #43) as
+candidate.** Ratified as built: the canonical
+prepare/stage/journal/apply/commit sequence under one SQLite commit point
+(inheriting ADR 0006's S1–S5/R6/R8 seam verbatim); the fabric-signed
+recovery journal as a normatively defined protocol artifact — deliberately
+**not** a §6 event kind (removal is protocol-meaningful; the transition
+event owns permanence) and deliberately a **file outside the database**
+(the write-ahead record for the transaction cannot be a row the crash
+erases — the inverse of R8's checkpoint-is-a-row); fail-closed recovery
+validation; ordinary-failure rollback with journal-retained-on-rollback-
+failure; retry-as-fresh-event. **Adjusted beyond as-built** (the challenge
+pass's two findings, D31-4/D31-6 in ADR 0007): recovery gains a freshness
+predicate — the journal must agree with the current-roots view **V**
+derived from signed events (never the unsigned `expected_roots` cache; the
+A25 doctrine at its third consumer), so stale journals from backups, copied
+homes, or replants fail closed instead of driving an unrecorded restore —
+and a capture-and-attribute clause: live roots are CAS-captured and
+drift-attributed before any restore mutation, closing the M8 gap where
+vault edits made during crash-to-reopen downtime were deleted with no CAS
+copy and no ledger trace. The journal gains home/epoch (TracePosition)
+binding at W-15 (H3/R9 extended to recovery artifacts). RF-35 tracks the
+merged-code gap against the adjusted clauses; W-15 carries all three
+mechanisms alongside its existing S4 prefix-bounding of the same function.
+Journal freshness against *joint* journal+database rollback remains SI-25
+layer 2's question (S4/anchor-ahead), as filed. Scope fences held:
+Tier-1-local only; filesystem adversary tiers → SI-32; syscall crash
+matrix → G3. Determinations D31-1…D31-6 in ADR 0007; challenge pass and
+fresh-eyes source verification 2026-07-14 (W-20 session). Original filing
+preserved below.
+
+---
+
+### SI-31 (original filing) — owned-state transition: "atomically" has no commit point, journal semantics, or crash matrix (§5.3)
 
 §5.3 makes promotion the only mutation and has revert restore all roots
 "atomically", and A20/M8 serialize gates — but no clause defines the

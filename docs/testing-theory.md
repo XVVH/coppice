@@ -462,6 +462,28 @@ independent-context re-review returned APPROVE WITH NON-BLOCKING FOLLOW-UPS
 enforcing paths against source, not the diff alone (Allow-arm reservation,
 promotion-body `merged` field, and the exact recovery-journal commit point).
 
+**G13. Ratified-clause negatives outstanding after A24–A26 (W-20
+retro-ratification, 2026-07-14).** The retro-ratification produced normative
+sentences whose enforcing structure exists but which lack a dedicated
+negative, plus one coverage argument recorded so G9 counts it as
+dimension coverage rather than structural analogy. (a) **Trunk-drift-cannot-
+widen (D34-3):** the enforcing structure is A11 trunk-wins inside the merge
+(`promote.rs`) plus M8's pre-merge attribution, but no test demonstrates
+that a trunk moved between escalation and approval cannot expand the
+applied agent-originated delta beyond the signed candidate — the
+⊆-narrowing claim is design rationale until a negative pins it. (b)
+**Rollback-failure-during-rollback retains the journal** (`kernel.rs`
+compound-error arm): enforced, error-message-visible, no direct test;
+G3-adjacent (it is one cell of the syscall crash matrix, nameable now
+because A24 made the clause citable). (c) **Policy-context rotation:** no
+per-field negative rotates `policy_context` alone; recorded as covered
+because the dimension enters the candidate-digest preimage, so field-level
+and whole-candidate mismatch are the same enforcing comparison at the same
+line (`w14_verify_promotion_candidate`'s digest equality) — the edge-by-edge
+argument G9 requires, stated here once. The D31-4/D31-6/H3-binding
+enforcement gaps are RF-35's (implementation absent, not tests absent);
+their contract lanes land with W-15.
+
 ## Automation lanes
 
 | Lane | Purpose |

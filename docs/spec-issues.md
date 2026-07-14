@@ -17,7 +17,8 @@
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
 > retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
-> adjusted by review rounds 1–5, R1–R23; spec-code deltas tracked by
+> adjusted by review rounds 1–6 plus an internal pre-round-6 review,
+> R1–R25; spec-code deltas tracked by
 > RF-35–RF-37/RF-39 (adjusted beyond as-built) and RF-40 (as-built
 > defects through the fs pipeline), carried by W-15/W-22; SI-39 files
 > the multi-window recovery enhancement); SI-32 remains open, next in
@@ -216,7 +217,10 @@ feed portable rules, trust compilation, or published conformance artifacts.
 
 **Resolution: ratified as amendment A26 (spec v0.9, §6) — approval
 candidate binding, with the merged W-14 implementation (PR #43) as
-candidate, ratified as built with the re-merge boundary made normative.**
+candidate. The promotion-candidate core is ratified as built; the
+re-merge outcome mechanism, its preview referent, and the exemption
+version binding are adjusted beyond as-built (R2/R12/R16/R20, RF-37;
+R10, RF-39 — carried by W-22).**
 The general rule the filing asked for: every approval act binds to the
 exact signed candidate presented (what-you-see-is-what-you-approve); the
 escalation signs candidate identity, both resolutions repeat it, consumers
@@ -264,8 +268,10 @@ branch_roots), so previews gain per-store `merged` root references,
 CAS-retained at escalation and digest-covered by construction;
 approval-time re-derivation from signed inputs was rejected as
 recomputation ambiguity. Determinations D34-1…D34-4 as adjusted by
-R2/R5, R10/R12, R16, and R20 in ADR 0007 (W-20 session, 2026-07-14).
-Original filing preserved below.
+R2/R5, R10/R12, R16, and R20, plus the internal pre-round-6 completions
+(comparison at canonical-entry grain — never content hash alone — and
+the opaque trunk-wins corner comparing the branch image identity), in
+ADR 0007 (W-20 session, 2026-07-14). Original filing preserved below.
 
 ---
 
@@ -305,7 +311,9 @@ adjust, or supersede at W-20.
 
 **Resolution: ratified as amendment A25 (spec v0.9, new §5.5) — consumed
 authority as an event-derived view, with the merged W-14 implementation
-(PR #43) as candidate, ratified as built.** Consumable authority (budget
+(PR #43) as candidate. The doctrine core is ratified as built; the
+temporal edge and gate-consumer parity are adjusted beyond as-built
+(R1/R17, RF-36, carried by W-22).** Consumable authority (budget
 headroom, approval uses) is a pure function of the verified event prefix
 plus the broker's declared in-flight reservations; unsigned meter/exemption
 rows are compatibility caches never read for authorization — the A15/A22
@@ -478,11 +486,12 @@ layer 1's; the drafted "can never drive a restore" overclaimed), and
 widened RF-40 to the merge planner (R23 — mode-only branch changes
 promoted as silent no-ops). Determinations D31-1…D31-6 as adjusted by
 R3/R4, R8/R9/R11/R13, R14/R15, R18, R19/R23 (the D31-1 realization
-sentence and its planner widening), and R21/R22 in ADR 0007 — plus the
-internal pre-round-6 completions (R21's kind-complete walk pin, R23's
-A17 composition rule, the widened topology quantifier); challenge pass
-and fresh-eyes source verification 2026-07-14 (W-20 session). Original
-filing preserved below.
+sentence and its planner widening), R21/R22, and R24/R25 (round 6: the
+kind-complete scan on every attempt; the tagged path-state domain) in
+ADR 0007 — plus the internal pre-round-6 completions (the kind-complete
+walk pin, R23's A17 composition rule, the widened topology quantifier);
+challenge pass and fresh-eyes source verification 2026-07-14 (W-20
+session). Original filing preserved below.
 
 ---
 

@@ -923,10 +923,14 @@ live/capture/target with absence as a value — because live-elements-only
 was vacuous for deletions; round 5 (R21) completed canonical entry
 identity as (path, **kind**, presence, content hash, mode), with
 non-canonical kinds (symlink, fifo, socket, device) definitionally
-unexplained — the check's live-state walk MUST surface every directory
-entry regardless of kind (the internal pre-round-6 completion: capture
-rejects symlinks but silently skips other non-file kinds, so a
-capture-shaped walk satisfies the exclusion vacuously) — and (R22)
+unexplained — the kind-complete scan runs on **every recovery attempt,
+first and retry alike, before the capture record and any mutation**
+(R24, round 6: the retry-scoped version left the first attempt free to
+capture around a socket and restore over it; capture rejects symlinks
+but silently skips other non-file kinds, so a capture-shaped walk
+satisfies the exclusion vacuously), over the R25 tagged path-state
+domain (absent | file(hash, mode) | implicit-directory, directories
+derived as proper ancestors of tracked file paths) — and (R22)
 layer-qualified the freshness guarantee: layer 1
 rejects stale journals against a non-rolled-back local prefix; joint
 journal+database rollback is layer 2's anchor-ahead case, with the

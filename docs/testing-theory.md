@@ -507,7 +507,20 @@ Round 5 added two: (k) **live symlink untouched, no closing record**
 before mutation; RF-35's lane); (l) **mode-only branch promotion**
 (R23 — a branch differing from base only in executable mode must
 surface as an op or conflict, never promote as a silent no-op —
-RF-40's planner dimension). The D31-4/D31-6/H3-binding enforcement
+RF-40's planner dimension). Round 6 added five for the internal-review
+completions: (m) **non-symlink special kind** (socket/fifo — capture
+treats these differently from symlinks — on the FIRST recovery attempt
+and on retry: recovery fails closed in place, entry untouched, no
+capture record published on the first-attempt case; R24); (n)
+**rename+chmod** (exact-hash pairing preserved as one rename/move op
+AND the destination gains the mode `modify` refinement — neither
+un-pairing nor silent mode drop); (o) **pre-existing empty directory
+occupying a target file path** (resolved before rename; non-empty fails
+closed); (p) **A26 outcome comparison at canonical-entry grain** (a
+re-merge differing from the preview only in mode or kind at a touched
+path must re-park); (q) **opaque trunk-wins comparison** (human trunk
+edit to the opaque store between preview and approval does NOT re-park;
+a changed branch image does). The D31-4/D31-6/H3-binding enforcement
 gaps are RF-35's (implementation absent, not tests absent); their
 contract lanes land with W-15, as do RF-40's (i)/(j)/(l) and (k).
 

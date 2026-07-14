@@ -2,7 +2,7 @@
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
 2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
-**as adjusted by the post-review adjustments R1–R23 (review rounds 1–5)
+**as adjusted by the post-review adjustments R1–R25 (review rounds 1–6)
 and the internal pre-round-6 review's completions (the adjustments win
 where they differ**; D31-1, D31-2, D31-4, D31-6, D33-3, D33-4, D34-2,
 and D34-3 are read as adjusted). The spec text is the normative
@@ -54,8 +54,18 @@ mode rides along" rationale fails when no side is chosen (R23). Round 5
 also cleared, as verified sound, three seeded attack surfaces: R17's
 cross-span position semantics, R20's referent retention (composing with
 the scalability record's parked-promotions-as-GC-roots requirement),
-and RF-40's topology remedy under the excluded-dirs rule. The corrected
-text awaits round 6.**
+and RF-40's topology remedy under the excluded-dirs rule. Before round
+6 an internal pre-round-6 adversarial review corrected 13 further
+findings (its own section below). Round 6 returned REQUEST CHANGES with
+the narrowest composition of the cycle — one high, three encodings, all
+in the completion text, the completeness table fully green — ratified
+as **R24** (the kind-complete scan runs on every recovery attempt,
+before the capture record and any mutation, closing the first-attempt
+bypass) and **R25** (the tagged path-state domain: absent |
+file(hash, mode) | implicit-directory, defining directories over the
+files-only tree), with G13(m)–(q) filing the named negatives and the
+SI-33/SI-34 "ratified as built" labels corrected to the three-category
+discipline.**
 
 ## Context
 
@@ -868,6 +878,63 @@ attacked the surviving absolute claims ("recovery never moves V",
 "unrepresentable", "orphaned capture record unreachable", the R22
 joint-rollback residual) — all held.
 
+## Post-review adjustments — round 6 (W-20, 2026-07-14 — operator-ratified under the standing cost directive)
+
+Round 6 returned REQUEST CHANGES with the narrowest composition of the
+cycle: one high and three encodings, **all in the round-5/internal-
+review completion text, none against the determination skeleton**; the
+completeness table returned fully green and the verified-sound list
+covers every prior clause. The reviewer classified the high as "an
+existing-predicate correction, not a new protocol or SI."
+
+**R24 — the kind-complete scan runs on every attempt (finding 1).** The
+internal review's R21 completion scoped the kind-complete walk to
+*retries* (the explanation check's native home), leaving the first
+recovery attempt unprotected: capture silently skips fifos/sockets/
+devices, so attempt one could capture around a socket, restore a
+regular file over it, and — the captured canonical root still equalling
+V — complete with no window drift and no record: R21's promise broken
+on the path that runs first. Ratified: the scan runs on **every**
+recovery attempt, before the capture record is published and before any
+mutation; any non-canonical entry within the canonical boundary fails
+recovery closed in place. The reviewer's alternative (capture itself
+rejecting all non-canonical kinds) converges to the same behavior; the
+scan formulation keeps grammar enforcement in one named check on both
+paths rather than splitting it between capture and retry.
+
+**R25 — the tagged path-state domain (finding 2).** The union
+quantifier never defined directory path-states over a files-only tree:
+a literal union bricks every nested store (live directories have no
+capture/target entries), filtering misses file↔directory mixed states.
+Ratified: path-state ∈ `absent` | `file(content hash, executable
+mode)` | `implicit-directory`, where a path is implicit-directory in a
+files-only tree exactly when it is a proper ancestor of a tracked file
+path; directories carry no content/mode dimensions; kind mismatches
+between file and implicit-directory status are unexplained; untracked
+empty directories stay outside the boundary with their apply-time
+obstruction handling under RF-40's widened topology rule.
+
+**Finding 3 (G13 dimension coverage):** the internal-review additions
+lacked named negatives. G13 gains (m)–(q): non-symlink special kind on
+first attempt and retry; rename+chmod pairing preserved with the
+destination `modify` refinement; pre-existing empty directory occupying
+a target file path; A26 comparison mode/kind sensitivity; opaque
+trunk-wins branch-image comparison. W-15/W-22 carrier descriptions name
+them.
+
+**Finding 4 (stale "ratified as built" labels):** SI-33's and SI-34's
+resolution summaries now distinguish the as-built core from the
+adjusted clauses (RF-36's temporal edge and gate parity; RF-37/RF-39's
+comparison and binding mechanisms), and SI-34's adjustment list extends
+past R20 to the canonical-entry-grain and trunk-wins completions.
+
+Round 6 also verified sound: the full journal/commit-point core, V's
+source completeness across first-transition/later-manifest/branch/
+drift/interleaving cases, positional freshness without over-constraint,
+the double-crash evidence closure for representable canonical state,
+within-span `seq` validity, whole-view anomaly containment, the A26
+outcome basis avoiding blanket re-park, and RF-35–RF-40's accuracy.
+
 ## Implementation deltas (RF-35/RF-40 → W-15; RF-36/RF-37/RF-39 → W-22)
 
 1. D31-4 freshness predicate as adjusted through round 2: total V
@@ -875,16 +942,17 @@ joint-rollback residual) — all held.
    per-store binding (R11), journal-store-set projection — in
    `recover_pending_state_change` (same function W-15 already upgrades to
    the `VerifiedPrefix` per S4). [RF-35 / W-15]
-2. D31-6 as adjusted through round 5: CAS capture + the recovery capture
+2. D31-6 as adjusted through round 6: CAS capture + the recovery capture
    record before restore (R9 — first-write-wins; exact-set validation
-   per R15); the R14/R18/R21 explanation check on retry — path-state
-   over the union of live/capture/target, absence as a value,
-   canonical-entry identity including **kind** (non-canonical kinds
-   definitionally unexplained) — with fail-closed-in-place on
-   unexplained state; per-store window-drift/closing pairs with
-   `recovery` linkage in one transaction after restore (R13); pinned
-   removal and check orders; restore-skip when live == V. [RF-35 /
-   W-15]
+   per R15); the R24 kind-complete scan on **every** attempt before the
+   capture record and any mutation; the R14/R18/R21 explanation check
+   on retry — the R25 tagged path-state domain (absent |
+   file(hash, mode) | implicit-directory) over the union of
+   live/capture/target, canonical-entry identity including **kind**
+   (non-canonical kinds definitionally unexplained, fail closed in
+   place) — per-store window-drift/closing pairs with `recovery`
+   linkage in one transaction after restore (R13); pinned removal and
+   check orders; restore-skip when live == V. [RF-35 / W-15]
 3. Journal `home`/`epoch` (TracePosition) binding with the R3 per-arm
    guard, plus the R11 per-store prior-attestation positions. [RF-35 /
    W-15]

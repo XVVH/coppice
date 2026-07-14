@@ -112,8 +112,14 @@ plus an internal independent-context adversarial pre-review, which
 returned 13 findings (two high, both in the round-5 text no external
 round had reviewed: the R23×A17 rename/mode composition gap and the
 kind-complete-walk vacuity) — all corrected and recorded in ADR 0007's
-internal-review section before pushing. Awaiting round 6. Next after
-merge: item (3), SI-32.
+internal-review section before pushing. Round 6 came back the
+narrowest of the cycle — completeness table fully green, no finding
+against the determination skeleton — ratified as R24 (the
+kind-complete scan on every recovery attempt, closing the
+first-attempt bypass the internal review missed) and R25 (the tagged
+path-state domain over the files-only tree), with G13(m–q) negatives
+and the SI-33/SI-34 labels corrected. Awaiting round 7 / operator
+merge decision. Next after merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`

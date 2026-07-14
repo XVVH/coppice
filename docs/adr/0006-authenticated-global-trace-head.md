@@ -2,7 +2,7 @@
 
 **Status: RATIFIED as amendment A23 (spec v0.8, §6.2) on 2026-07-13 — as
 adjusted by this document's ratification addendum (determinations D1–D7,
-durability seam S1–S5, post-review adjustments R1–R7). The addendum wins
+durability seam S1–S5, post-review adjustments R1–R9). The addendum wins
 wherever the candidate prose below differs from it; §6.2 is the normative
 text; this document is the design rationale and provenance record. SI-25 is
 RESOLVED. W-15 implements layer 1; layer 2 is graduation-gated
@@ -1213,6 +1213,65 @@ performs the first anchor binding for an existing home is **reserved to the
 layer-2 implementation, composed with SI-27's key-lifecycle** (anchoring and
 key custody graduate together); §6.2 must not imply it falls out of
 `initialize`.
+
+**R8 — journal-before-stores is authoritative; the checkpoint is a DB row,
+not a file (fourth-review operator Q1).** S5's durable-commit sentence and the
+canonical numbered sequence conflicted: the sentence said "fsync stores, then
+the journal, then commit" and called the checkpoint a *file*, while the
+canonical sequence publishes the journal *before* mutating stores and S1 makes
+the checkpoint a SQLite *row* in the transaction. The canonical order wins —
+crash-safety forces it: the recovery record must be durable before the thing
+it records, or a crash mid-store-mutation leaves stores half-applied with no
+journal, no drift event, and no recovery (write-ahead logging at the
+journal↔stores boundary, the sibling of R5 at the DB↔anchor boundary and
+S1–S5 at the DB↔stores boundary). The checkpoint is a row inside the one
+transaction (with the event, expected-roots, outbox, and companion approval),
+so it commits atomically with the events it certifies and can never get ahead
+of them — no third durability artifact, no checkpoint-ahead-of-events window.
+**No implementation change:** W-14's `commit_state_change` already publishes
+and fsyncs the journal before applying stores; R8 corrects the S5 wording to
+match the code and the canonical sequence.
+
+**R9 — activation is barrier-gated, ordering/closure are lineage-continuous;
+this is what makes the migration barrier real (fourth-review operator Q2).**
+R7 asserted the migration activation barrier; R9 is its mechanism, and it
+answers the reviewer's correct objection that M2 (`cap.bound_manifest ==
+man.id`) is a content-address equality check that does not by itself fail
+across an epoch. The verified prefix serves two questions with **different
+extents**: *ordering* ("did X precede Y?") spans the whole epoch lineage (a
+revoke in E0 still orders before and closes an effect in E1 — R7);
+*activation* ("is this object live authority?") reads only the prefix from the
+last migration barrier forward. Activation-prefix membership is a precondition
+of **resolving any authority-bearing object** — grant, capability, *and
+manifest* — extending A15's materialized-view rule (object live only once its
+event is on the trusted chain) into the epoch dimension. Therefore a
+pre-migration capability is dead in a migration epoch because *both* its grant
+(condition 1) and its `bound_manifest` (M2 cannot resolve a live pre-barrier
+manifest to compare against) sit behind the barrier — enforced by prefix
+membership, not by recognizing the id. A re-granted old id cannot resurrect:
+the fresh grant is post-barrier, but the manifest is still pre-barrier, so M2
+fails; and re-sealing the manifest too is not resurrection — it is minting
+fresh, C1-attributed, accountable authority in the new epoch, exactly what
+"re-mint and re-ratify" permits. Consequences: **no-resurrection rests on the
+barrier, enforceable at layer 1** (prefix membership, no anchor, no SI-27);
+R3's refusal is demoted to loud defense-in-depth (its id-recognition knowledge
+gap, reserved to SI-27, now affects only loudness, not safety). A
+**key-rotation** epoch does *not* reset the activation prefix (extends the
+parent's; authority carries across under SI-27's certificate chain), so only
+migration is a barrier. In normal single-epoch operation R9 is a no-op (the
+activation prefix is the whole chain, exactly A15 today); it defines migration
+behavior without changing anything before it. W-15 must make object
+*resolution* — not just grant lookup — activation-prefix-aware.
+
+**Q3 clarification — two acknowledgments (fourth-review Q3).** D4's "a
+revoke's durability acknowledgment awaits the anchor" and "the kill switch
+never waits on the network" coexist because they are two separate acks, the
+operational shadow of R6's two terminals: (1) the **local closure ack** —
+immediate, the revoke is in the local verified terminal and narrows every
+subsequent local decision now; (2) the **anchored-durability ack** — later,
+the revoke's checkpoint has an `AnchorReceipt` and is rollback-proof. The
+operator sees closure take effect on ack (1); ack (2) is a background
+durability confirmation, not a precondition of the kill switch acting.
 
 **R5 — the synchronous level follows the anchor, not the gate
 (second-review operator question, ratified 2026-07-13).** S5's

@@ -82,8 +82,11 @@ W-3's founding examples. *Provenance: 2026-07-13 branch-inventory sweep
 + operator decision same day.*
 
 **W-15 — authenticated global trace order: layer-1 implementation.**
-SI-25 is ratified as A23 (spec v0.8 §6.2; determinations D1–D7/S1–S5/R1–R4
-in ADR 0006's addendum). W-15 implements **layer 1 only**: signed
+SI-25 is ratified as A23 (spec v0.8 §6.2; determinations D1–D7/S1–S5/R1–R9
+in ADR 0006's addendum — note the security-critical ones W-15 must honor: R6
+two-terminals/local-closure, R7/R9 cross-epoch order + migration activation
+barrier, R8 journal-before-stores, R9's activation-prefix-aware object
+resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to

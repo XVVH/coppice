@@ -83,6 +83,15 @@ read surface into the exfiltration perimeter.
 - **P22** In-flight allowed-but-unrecorded calls held in memory; remote
   effect can land before it is recorded. → **Durable external-effect
   protocol** (roadmap parked); RF-3 (accepted residual).
+- **Anchor-before-dispatch (A23/D4) — required at this gate.** An
+  irreversible external-effect dispatch is a signed global event whose
+  `TraceCheckpoint` MUST be durably anchored (`AnchorReceipt`) **before** the
+  effect crosses the boundary — a rollback afterward leaves a real effect with
+  no durable authorization and no way to un-send it. This gate therefore
+  requires layer 2 (the anchor), not only P22's durable-effect protocol; the
+  two compose (P22 gives dispatch/idempotency, D4 gives the pre-dispatch
+  anchor). A checklist that satisfies P22 without an anchored dispatch
+  checkpoint is incomplete.
 - **P11** `external_reach` has no mock router (external ⇒ needs `live`). →
   same egress gate.
 - **P27** Broker-injected credentials cross into the downstream tool and an

@@ -115,11 +115,15 @@ kind-complete-walk vacuity) — all corrected and recorded in ADR 0007's
 internal-review section before pushing. Round 6 came back the
 narrowest of the cycle — completeness table fully green, no finding
 against the determination skeleton — ratified as R24 (the
-kind-complete scan on every recovery attempt, closing the
+kind-complete scan on every active restore attempt, closing the
 first-attempt bypass the internal review missed) and R25 (the tagged
 path-state domain over the files-only tree), with G13(m–q) negatives
-and the SI-33/SI-34 labels corrected. Awaiting round 7 / operator
-merge decision. Next after merge: item (3), SI-32.
+and the SI-33/SI-34 labels corrected. Round 7, scoped to the round-6
+delta, returned three mediums (no highs, no skeleton findings) —
+R24/R25 completed in place with the reviewer's prescribed wording
+(active-attempt scoping with cleanup exempt; the root excluded from
+the path universe) and the G13(m–q) carrier roll finished. Awaiting
+operator merge decision. Next after merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -147,18 +151,21 @@ resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 5 and the internal pre-round-6
-review: the positional D31-4 freshness predicate over total V —
-including unbranched `tool_call.state_root_after` — the D31-6 recovery
-capture record (exact-set validation, R14/R18/R21 path-state
-explanation over a kind-complete walk, fail-closed-in-place) with
-paired per-store window-drift/`fabric_recovery` closing emission, the
+prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 7: the positional D31-4
+freshness predicate over total V — including unbranched
+`tool_call.state_root_after` — the D31-6 recovery capture record
+(exact-set validation; the R24 kind-complete scan on every active
+restore attempt, before capture-record publication and before any
+mutation, closing-record cleanup exempt; R14/R18/R21/R25 path-state
+explanation over the tagged domain — absent | file(hash, mode) |
+implicit-directory, root excluded — fail-closed-in-place) with paired
+per-store window-drift/`fabric_recovery` closing emission, the
 journal's home/epoch + prior-attestation-position binding, and the
-G13(e–g) journal-validation negatives; plus RF-40's as-built
-fs-pipeline entry-identity fixes — planner mode-only ops with the A17
-composition rule, mode-only writes, file↔directory pass ordering over
-the widened empty-directory quantifier — with the G13(i–l) and R21
-symlink negatives), and replacing the per-decision full
+G13(e–g)/(k)/(m) negatives; plus RF-40's as-built fs-pipeline
+entry-identity fixes — planner mode-only ops with the A17 composition
+rule (rename+chmod, G13(n)), mode-only writes, file↔directory pass
+ordering over the widened empty-directory quantifier (G13(o)) — with
+the G13(i–l) negatives), and replacing the per-decision full
 `verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
 abstraction (D5); the migration epoch (invalidation + the R3
 pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
@@ -191,7 +198,8 @@ any difference as a fresh candidate — which requires the R20 referent:
 parked previews gain CAS-retained per-store `merged` root references at
 escalation, entering the candidate digest (a broker preview-
 serialization change, not just a comparison; supplies the G13(a)
-outcome-equality negative); RF-39 — exemption approvals bind the exact
+outcome-equality, G13(p) canonical-grain, and G13(q) opaque
+trunk-wins-branch-image negatives); RF-39 — exemption approvals bind the exact
 signed escalation version presented (`escalation_event` in the approval
 body) and C2 listings render from or verify against signed events (the
 RF-31 class on the exemption surface; supplies the version-swap and

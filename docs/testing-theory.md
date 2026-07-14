@@ -465,7 +465,8 @@ promotion-body `merged` field, and the exact recovery-journal commit point).
 **G13. Ratified-clause negatives outstanding after A24–A26 (W-20
 retro-ratification, 2026-07-14; maintained through the PR #48 review
 rounds).** Normative sentences lacking a dedicated negative; round 1
-corrected this entry in both directions, rounds 3–5 extended it. (a)
+corrected this entry in both directions, rounds 3–6 extended it
+(letters (a)–(q)). (a)
 **Re-merge outcome equality (D34-3 as revised in round 1):** round 1
 *refuted* the original ⊆-narrowing claim outright (a trunk-wins conflict
 preview followed by trunk returning to base installs the full
@@ -522,7 +523,9 @@ path must re-park); (q) **opaque trunk-wins comparison** (human trunk
 edit to the opaque store between preview and approval does NOT re-park;
 a changed branch image does). The D31-4/D31-6/H3-binding enforcement
 gaps are RF-35's (implementation absent, not tests absent); their
-contract lanes land with W-15, as do RF-40's (i)/(j)/(l) and (k).
+contract lanes land with W-15, as do RF-40's (i)/(j)/(l)/(n)/(o) and
+RF-35's (k)/(m); (p)/(q) land with RF-37's W-22 lane, and (d)/(h) with
+RF-36's.
 
 ## Automation lanes
 

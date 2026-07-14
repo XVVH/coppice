@@ -17,8 +17,9 @@
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
 > retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
-> adjusted by review rounds 1–6 plus an internal pre-round-6 review,
-> R1–R25; spec-code deltas tracked by
+> adjusted by review rounds 1–7 (round 7 scoped to the round-6 delta)
+> plus an internal pre-round-6 review, R1–R25; spec-code deltas tracked
+> by
 > RF-35–RF-37/RF-39 (adjusted beyond as-built) and RF-40 (as-built
 > defects through the fs pipeline), carried by W-15/W-22; SI-39 files
 > the multi-window recovery enhancement); SI-32 remains open, next in
@@ -486,8 +487,9 @@ layer 1's; the drafted "can never drive a restore" overclaimed), and
 widened RF-40 to the merge planner (R23 — mode-only branch changes
 promoted as silent no-ops). Determinations D31-1…D31-6 as adjusted by
 R3/R4, R8/R9/R11/R13, R14/R15, R18, R19/R23 (the D31-1 realization
-sentence and its planner widening), R21/R22, and R24/R25 (round 6: the
-kind-complete scan on every attempt; the tagged path-state domain) in
+sentence and its planner widening), R21/R22, and R24/R25 as completed in round 7 (the kind-complete scan on
+every active restore attempt, closing-record cleanup exempt; the tagged
+path-state domain over non-empty paths below the store root) in
 ADR 0007 — plus the internal pre-round-6 completions (the kind-complete
 walk pin, R23's A17 composition rule, the widened topology quantifier);
 challenge pass and fresh-eyes source verification 2026-07-14 (W-20

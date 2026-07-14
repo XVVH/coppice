@@ -2,8 +2,9 @@
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
 2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
-**as adjusted by the post-review adjustments R1–R25 (review rounds 1–6)
-and the internal pre-round-6 review's completions (the adjustments win
+**as adjusted by the post-review adjustments R1–R25 (review rounds 1–7;
+round 7 scoped to the round-6 delta, completing R24/R25 in place) and
+the internal pre-round-6 review's completions (the adjustments win
 where they differ**; D31-1, D31-2, D31-4, D31-6, D33-3, D33-4, D34-2,
 and D34-3 are read as adjusted). The spec text is the normative
 *language*. Claims about the candidate code carry one of three
@@ -934,6 +935,42 @@ drift/interleaving cases, positional freshness without over-constraint,
 the double-crash evidence closure for representable canonical state,
 within-span `seq` validity, whole-view anomaly containment, the A26
 outcome basis avoiding blanket re-park, and RF-35–RF-40's accuracy.
+
+## Post-review adjustments — round 7 (scoped delta review, 2026-07-14)
+
+Round 7 was scoped to the round-6 fix commit only; the settled record
+was out of scope. It returned REQUEST CHANGES with three mediums, no
+highs, no skeleton findings — all three the reviewer's own prescribed
+completions, applied verbatim:
+
+- **R24 completed:** "every attempt" split by execution path — an
+  attempt that has not yet published a capture record scans before
+  publication and any mutation; a retry with an existing record scans
+  before any restore mutation (the explanation check's own walk); a
+  retry finding committed closing records is **not an active restore
+  attempt** — it routes to artifact cleanup per the settled idempotency
+  rule, and a non-canonical entry appearing after the completed restore
+  belongs to M8 drift attribution at next gate consumption, never to
+  recovery. (The round-6 wording demanded a scan "before publication"
+  on retries where publication had already happened, and would have
+  blocked completed recoveries from cleaning up.)
+- **R25 completed:** the path universe is the non-empty canonical
+  relative paths strictly below the store root; the root is the
+  boundary, not a path-state — always present, created at
+  materialization, never pruned — so an empty capture against an empty
+  target recovers trivially instead of failing closed on the root.
+- **Mirror roll completed:** the G13(m)–(q) carrier assignments now
+  reach the W-15/W-22 roadmap entries and the G13 intro/footer
+  ((m)/(k) → RF-35, (n)/(o) → RF-40, (p)/(q) → RF-37; (d)/(h) →
+  RF-36), closing the gap where a carrier implemented from the roadmap
+  alone could omit the newly filed dimensions.
+
+Round 7's fix-verification table: round-6 findings 3 and 4 closed by
+the round-6 commit; findings 1 and 2 closed by these completions. It
+verified sound: the delta's code-fact claims (capture's kind handling),
+R25's topology walks including composition with RF-40's obstruction
+rule, all five G13(m)–(q) scenarios pinning their dimensions, and every
+count/label roll except the carrier gap above.
 
 ## Implementation deltas (RF-35/RF-40 → W-15; RF-36/RF-37/RF-39 → W-22)
 

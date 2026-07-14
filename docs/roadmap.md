@@ -81,12 +81,31 @@ sessions — dogfooding surface, not an authority protocol. Feeds W-1 and
 W-3's founding examples. *Provenance: 2026-07-13 branch-inventory sweep
 + operator decision same day.*
 
-**W-15 — authenticated global trace head (design then implementation).**
-Ratify SI-25, then bind global order, completeness, home/epoch, export order,
-and rollback freshness with an explicit recovery story. Closes RF-13/P15's
-production and standing-authority gate. W-11 has landed; W-3 may collect
-disposable examples but may not compile standing authority until W-15 lands.
-*Provenance: RF-13 + 2026-07-12 cryptographic mechanism audit.*
+**W-15 — authenticated global trace order: layer-1 implementation.**
+SI-25 is ratified as A23 (spec v0.8 §6.2; determinations D1–D7/S1–S5/R1–R9
+in ADR 0006's addendum — note the security-critical ones W-15 must honor: R6
+two-terminals/local-closure, R7/R9 cross-epoch order + migration activation
+barrier, R8 journal-before-stores, R9's activation-prefix-aware object
+resolution). W-15 implements **layer 1 only**: signed
+`home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
+`TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
+decision, gate, and recovery — upgrading W-14's journal recovery to
+prefix-bounded and replacing the per-decision full `verified_events` scan
+with checkpoint-keyed incremental caching; the writer-fence-as-lease
+abstraction (D5); the migration epoch (invalidation + the R3
+pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
+predicate (fail-closed from day one); and the durable-commit synchronous
+plumbing. Closes RF-13/P15's **order/completeness half**; unblocks W-3
+beyond disposable examples (G-RATCHET). **Layer 2 (`AnchorStore`) is out of
+scope** — it lands at G-ROAMING-SURFACE (coordination), G-EGRESS (dispatch
+gating), and G-PRODUCTION (freshness authority), where the freshness half
+of RF-13/P15 closes. Implementation seams: the four recovery-note items at
+the top of ADR 0006 (W-14 journal composition, W-13 initialize boundary,
+W-19 diagnostic surface, W-9 baseline re-pin); the unpushed sketch on
+`agent/si25-authenticated-head-design` predates W-12…W-14 and needs rebase.
+W-3 may collect disposable examples but may not compile standing authority
+until W-15 lands. *Provenance: RF-13 + 2026-07-12 cryptographic mechanism
+audit; scope re-cut 2026-07-13 by the A23 ratification.*
 
 **W-16 — payload envelope v2 and shred protocol.** Ratify SI-28/SI-29, then
 bind canonical AAD and algorithm/version/key metadata, enforce the KEK wrap

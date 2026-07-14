@@ -17,9 +17,11 @@
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
-> Y" amendments — the re-manifest link and the amend-vs-new-run boundary)
-> was filed 2026-07-13 from an operator question during the SI-25 session;
-> new issues start at **SI-37**.
+> Y" amendments — re-manifest link and amend-vs-new-run boundary) was filed
+> 2026-07-13 and merged via PR #46; **SI-37** (TracePosition agreement
+> predicate) was filed by the second independent review of PR #47; **SI-38**
+> (TracePosition genesis representation) by the fourth (2026-07-14); new
+> issues start at **SI-39**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -32,6 +34,47 @@ tests encode it; flipping the reading is cheap.
 
 ---
 
+## SI-38 — TracePosition has no genesis representation for the first capture in an epoch (§3.1, §6.2, A23) — open
+
+`TracePosition { home, epoch, global_seq, event }` (A23) has a non-null
+`event`, and `Intent.captured_before` must point at an event *earlier* than
+the intent's own countersigning `intent` event (the pre-contamination proof).
+But the first capture in an epoch has no earlier event to name, and it cannot
+name its own countersigning event without a content-address cycle. So
+`captured_before` is undefined before an epoch's first event. Surfaced by the
+fourth independent-context review of PR #47 (2026-07-14).
+
+**Options to decide (SI-38):** (a) epoch initialization guarantees a
+**bootstrap event** at `global_seq` 0 (a genesis `register`/epoch event that
+every later `captured_before` can name — the likely resolution, and it
+composes with R9's activation prefix, which already begins at the epoch's
+first event); (b) `event` becomes **nullable at genesis**, with the
+`(home, epoch, global_seq=0)` triple as the position and no event id; or
+(c) a reserved sentinel. Option (a) is preferred — it keeps `event` non-null
+(so SI-37's agreement predicate stays total) and gives the activation prefix a
+well-defined floor. Decide with SI-37 and SI-26 at W-20's next transcript
+touch; W-15 needs a floor regardless, so it implements (a) provisionally
+unless overridden.
+
+## SI-37 — TracePosition fields have no agreement predicate with the event they name (§6.2, A23) — open
+
+`TracePosition { home, epoch, global_seq, event }` (A23) denormalizes three
+signed event fields beside an event id. No normative clause requires a
+consumer to verify that the named event's signed `home`, `epoch`, and
+`global_seq` equal the position's other three fields, so a signed object can
+carry an internally inconsistent position — its signature attests the
+*claim*, not the *agreement*. Surfaced by the second independent-context
+review of PR #47 (2026-07-13), which correctly declined to infer the
+predicate silently.
+
+**Candidate resolution (the W-11 pattern; flipping is cheap):** a verifier
+consuming a `TracePosition` MUST resolve `event` within the `VerifiedPrefix`
+and require exact agreement of the three denormalized fields; any mismatch
+fails closed (doubt never widens) — W-11's signed/materialized
+selector-agreement rule applied to the new denormalized tuple. Natural
+ratification companion to SI-26's transcript decision at W-20's next touch;
+W-15 implementation should enforce it from day one regardless of when the
+amendment text lands (fail-closed is the conservative free default).
 ## SI-36 — mid-run "actually do Y" amendments have no rule for re-manifesting or the amend-vs-new-run boundary (§3.1, §3, M1/M5) — open
 
 §3.1 makes a mid-run instruction ("actually do Y") an amendment: a signed,
@@ -308,7 +351,13 @@ so decide a versioned type/domain transcript (or a signed type field), expected
 prefix verification, migration of existing objects, and whether distinct role
 keys also become mandatory. This must resolve before W-6 publishes fixtures.
 
-## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — open
+## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — RESOLVED (author, 2026-07-13)
+
+**Resolution: ratified as amendment A23 (spec v0.8, new §6.2) — a two-layer authenticated global order.** Layer 1 (signed per-home `global_seq`/`global_prev` on every event, plus the local signed `TraceCheckpoint` at every profile) is normative now and closes RF-13/RF-16's order + completeness-between-events with pure local cryptography, making the "verified substrate prefix" a mechanically available `VerifiedPrefix`. Layer 2 (publication of layer 1's checkpoints to an external monotonic `AnchorStore`) adds freshness against rollback and is graduation-gated; unanchored homes run at the `local-integrity` assurance label. Ratified in the W-20 session via challenge pass → determinations **D1–D7** + durability seam **S1–S5** (recorded in ADR 0006's addendum, provenance-preserved). Key determinations: the anchor is an interface (remote shared head reference for the roaming design center, TPM a single-machine fast-path); only irreversible-external-effect dispatch anchors synchronously (D4), so nothing waits on the network before first egress; the writer fence is a lease so concurrent writers are non-foreclosed (D5); the owned-state transition (§5.3/SI-31) shares one commit point (S1–S5) with a durable-commit profile whose synchronous level follows the anchor (R5: `NORMAL` only while unanchored; durable-before-publish on every anchored profile); standing authority counts over the `VerifiedPrefix`, local-integrity single-machine and re-earned at graduation (D2); migration invalidates all pre-migration authority (new epoch, no re-signing). New posture gates G-ROAMING-SURFACE/G-ROAMING-WRITE filed. Reserved to owning issues: SI-26 (transcript), SI-27 (epoch key rotation authorization), W-6 (import/recovery vocabulary), the durable external-effect protocol (dispatch ordering). W-15 carries implementation; RF-13/P15's order/completeness half closes with layer 1, its freshness half when layer 2 lands (coordination at G-ROAMING-SURFACE, synchronous dispatch at G-EGRESS, freshness authority at G-PRODUCTION). The independent-context review of the drafted text (PR #47) returned REQUEST CHANGES — four encoding defects, no design objections — corrected same day with four operator-ratified post-review adjustments (**R1–R4** in the ADR addendum: H9's clause split, the "interior" qualifier, the pre-epoch-grant MUST-refuse, drift epoch-genesis clamping). A second re-review round corrected four further encoding defects (checkpoint layering restored to layer 1 per D1/S3; migration anchoring gated per D1/D2; the W-15 roadmap scope re-cut; the ADR status header), filed **SI-37** (TracePosition agreement predicate), and ratified **R5** (the synchronous level follows the anchor). A third round surfaced the first two *semantic* defects — a fail-open closure window (the anchored head was wrongly bounding closure) and cross-epoch bare-integer comparison — ratified as **R6** (two terminals: closure and owned-state recovery read the local verified terminal, so a locally committed revoke is seen before it is anchored; freshness and standing-authority counting read the anchored terminal; the anchor never shortens the local prefix and anchor-ahead is the rollback signal) and **R7** (cross-epoch order by epoch lineage, never reset integers; a migration epoch is an activation barrier so no-resurrection rests on the barrier + M2 with R3's refusal as loud defense-in-depth and the id-level mechanism reserved to SI-27; layer-2 graduation for an existing home is a reserved ceremony). A fourth round found no fail-open defects (severity converging) — a High gate-completeness omission (G-EGRESS lacked the anchor-before-dispatch edge) plus four medium/low encoding fixes — and ratified **R8** (journal-before-stores is authoritative and the checkpoint is a DB row, not a file — reconciling S5 with the canonical sequence and the W-14 code, zero implementation change) and **R9** (activation is barrier-gated by verified-prefix membership while ordering/closure are lineage-continuous — extending A15 to epochs, so a pre-migration capability's grant *and* its `bound_manifest` are unresolvable in the new epoch and no-resurrection is enforceable at layer 1 without SI-27; R3's refusal demoted to loud defense-in-depth), and filed **SI-38** (TracePosition genesis representation). A fifth round found **no normative-body or determination defect** — it explicitly confirmed the two terminals, migration barrier, no-resurrection basis, offset-consumer sweep, and SI-26/SI-27 reservations correct — and returned only three stale-summary realignments (the changelog's rejected-alternative and R3-as-enforcement-edge lagging R5/R6/R7/R9; the posture freshness residual still mapped to W-15 rather than layer 2), now fixed. Five review rounds total; nine determinations (R1–R9), no new ones after round 4. Original analysis and the awaiting-ratification candidate below, preserved as provenance.
+
+---
+
+### SI-25 (original filing) — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6)
 
 Per-span signed chains authenticate records within the rows a verifier sees,
 but the global substrate offset is unsigned and no expected head detects tail
@@ -341,6 +390,32 @@ in the ADR are ratified and integrated into the spec. Provenance note
 from `agent/si25-authenticated-head-design`, an unpushed local branch based
 before W-12/W-13/W-19/W-14 — the ADR is W-20's ratification input; the
 sketch needs rebase before W-15 implementation.
+
+**Ratification in progress (W-20, 2026-07-13):** the challenge pass has
+produced operator-ratified determinations D1–D7 — recorded in ADR 0006's
+"Ratification-session determinations" addendum (A22-adjustment style). Spine:
+the two-layer construction is accepted with **layer 1 (signed global chain +
+local checkpoints) normative for W-15 now** and **layer 2 (external monotonic
+anchor) deferred to a graduation gate**; the design center is corrected to
+**one human / one home / multiple roaming control surfaces over a stable
+always-on base**; only irreversible-external-effect dispatch is
+synchronous-anchor-gated (everything else async-loud-degraded); the writer
+fence is a lease abstraction from day one so concurrent writers are a
+non-foreclosed required future; and two new gates (G-ROAMING-SURFACE near,
+G-ROAMING-WRITE future) are proposed. The **SI-25 × SI-31
+durability seam** (choice #9, the first composition-review seam) is now
+**resolved** (determinations S1–S5 in the ADR addendum): SI-31 is a strict
+extension of SI-25's event append over one shared SQLite commit point; the
+recovery journal is a layer-1 artifact and the anchor-outbox a layer-2 one;
+SI-31 recovery consults the verified prefix whose extent SI-25 defines; one
+posture-scoped durable-commit profile (grounded finding: merged W-14 runs
+WAL+`synchronous=NORMAL`, process-crash-atomic but not power-loss-atomic — the
+dogfooding level; production upgrades to `synchronous=FULL` at G-PRODUCTION,
+carried by W-15). **SI-25 is therefore ready to resolve as A23**, requiring zero
+change to the merged W-14 code. Sibling-coordinated items that do not block
+A23's core remain: SI-26 transcript, SI-27 rotation, W-6 export vocabulary.
+(Historical pointer: SI-25 was resolved as A23 the same day — see the
+resolution block at the head of this entry.)
 
 ---
 
@@ -647,6 +722,15 @@ forces this yet — no actuation-scoped tool exists in Coppice — but the
 issue must be resolved BEFORE one ever registers, because the vulnerable
 surface is the approval mechanism itself: the conservative default cannot
 save this class retroactively.
+
+*Roaming seam (A23/D7, 2026-07-13): the ratified design center — one human
+driving one home from multiple roaming control surfaces — makes this
+concrete and near-term. C5's sender-binding gives device-agnostic approval
+(the roaming ergonomics), which is exactly the device-agnosticism this
+issue's review adjustment #4 flags as undecidable under actuation. The
+operator's own usage pattern is therefore a standing argument that SI-23
+must resolve before any actuation grant; see ADR 0006's D7 and the
+G-ROAMING-SURFACE gate.*
 
 Two related gaps:
 

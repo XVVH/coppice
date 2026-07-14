@@ -83,6 +83,15 @@ read surface into the exfiltration perimeter.
 - **P22** In-flight allowed-but-unrecorded calls held in memory; remote
   effect can land before it is recorded. → **Durable external-effect
   protocol** (roadmap parked); RF-3 (accepted residual).
+- **Anchor-before-dispatch (A23/D4) — required at this gate.** An
+  irreversible external-effect dispatch is a signed global event whose
+  `TraceCheckpoint` MUST be durably anchored (`AnchorReceipt`) **before** the
+  effect crosses the boundary — a rollback afterward leaves a real effect with
+  no durable authorization and no way to un-send it. This gate therefore
+  requires layer 2 (the anchor), not only P22's durable-effect protocol; the
+  two compose (P22 gives dispatch/idempotency, D4 gives the pre-dispatch
+  anchor). A checklist that satisfies P22 without an anchored dispatch
+  checkpoint is incomplete.
 - **P11** `external_reach` has no mock router (external ⇒ needs `live`). →
   same egress gate.
 - **P27** Broker-injected credentials cross into the downstream tool and an
@@ -137,9 +146,15 @@ default cannot save this class retroactively.
 
 ### G-RATCHET — before ledger events compile into standing authority (W-3)  *(no invariant relaxed — the substrate becomes policy-bearing)*
 - **P15 / RF-16** Standing authority may not derive from a substrate whose
-  authority view can be changed through unsigned index columns or whose head
-  can be rolled back. W-11 closes verified-row use; SI-25/W-15 closes global
-  completeness/freshness before W-3 proceeds beyond disposable experiments.
+  authority view can be changed through unsigned index columns or whose
+  global order/completeness is unauthenticated. W-11 closes verified-row use;
+  **W-15 layer 1** (the A23 signed global chain / `VerifiedPrefix`) must land
+  before W-3 proceeds beyond disposable experiments. Freshness (rollback
+  detection, layer 2) is **scoped per A23/D2**: single-machine compilation
+  under the `local-integrity` label is valid within this posture and
+  re-earned at graduation; the anchored head becomes mandatory for counting
+  at G-ROAMING-SURFACE (multi-location) and for production claims at
+  G-PRODUCTION — it does not gate single-machine W-3.
 - **P26** Corpus-ingest homes (`asf corpus ingest`) sign placeholder
   principals and a placeholder behavior bundle into a REAL substrate —
   P8's class, second site. Nothing mechanical distinguishes a corpus
@@ -161,6 +176,29 @@ default cannot save this class retroactively.
 - **P20** `current_manifest` / `current_span` are mutable **home-global**
   pointers; a second session clobbers the first's M2 binding; the broker is
   behind one process mutex. → SessionContext refactor (roadmap parked).
+
+### G-ROAMING-SURFACE — before one human drives one home from multiple control surfaces  *(relaxes 1TEN "single-machine" for the control plane)*  **NEW gate (A23/SI-25)**
+The A23 design center: one human, one logical home, reached from multiple
+roaming control surfaces (keyboard ↔ mobile handoff) over a stable always-on
+base where the agent keeps executing. This is near-term, not a distant gate.
+- Multiple live approval/monitoring surfaces per home need a **single coherent
+  head** all surfaces read (agree on head, pending queue, revocations). → A23
+  layer 2's shared anchored head consumed as a *coordination* point (its
+  freshness/rollback role stays deferred to G-PRODUCTION). C5 sender-binding
+  already gives device-agnostic *approval*; the head adds device-consistent
+  *monitoring*.
+- Composes with **SI-23**: the same C5 device-agnosticism is what SI-23 flags
+  as dangerous under actuation (the broker cannot tell whether a surface is
+  reachable by granted hands) — no actuation grant before SI-23 resolves.
+
+### G-ROAMING-WRITE — before concurrent appenders to one home  *(relaxes 1SESS/1TEN for the write plane)*  **NEW gate (A23/SI-25) — required future**
+- The A23 per-home writer fence is a **lease** (host-local `flock` at the base
+  today); concurrent writers require a witness-mediated distributed lease so two
+  machines cannot fork the global chain. The chain substrate (signed
+  `global_seq`/`global_prev` + monotonic head + fork-detection) is
+  forward-compatible, so this is an implementation swap, not a protocol change.
+  → W-15 lease abstraction; composes with P20 (SessionContext) and P21
+  (cross-host fencing).
 
 ### G-MULTITENANT — before tenants share one uid, home, or storage namespace  *(relaxes 1TEN / SU)*
 Separate fabric homes under separate Unix identities retain today's enforced
@@ -187,13 +225,25 @@ in scope, or when storage leaves that filesystem boundary.
   store, and commit the ledger last. Ordinary failure rolls back all roots;
   reopen rolls back when the linked event is absent and forward when present.
   Residual: the journal is mutable local metadata, so a full-home rollback
-  that restores journal and database together is SI-25/W-15's freshness
-  problem, not this row's; and the hard-exit-at-each-syscall matrix remains G3
-  evidence work. SI-31 ratifies the protocol at W-20 with this as candidate.
+  that restores journal and database together is **layer 2's** freshness
+  problem (A23/D1: W-15 implements layer 1 only; freshness closes when the
+  anchor lands at G-ROAMING-SURFACE/G-EGRESS/G-PRODUCTION), not this row's nor
+  W-15's; and the hard-exit-at-each-syscall matrix remains G3 evidence work. **Durability level (SI-25×SI-31 seam, W-20):** closed at the
+  *dogfooding* level only — W-14 runs WAL+`synchronous=NORMAL`, crash-atomic
+  against a process crash (its tests' level) but not against power loss / OS
+  crash. Per A23/R5 the synchronous level follows the anchor, not the gate:
+  `NORMAL` is permitted only while unanchored; every anchored profile — from
+  G-ROAMING-SURFACE on — requires durable-before-publish (`synchronous=FULL`
+  or an equivalent pre-publication WAL-sync barrier), carried by the layer-2
+  implementation. SI-31 ratifies the protocol
+  at W-20 with this as candidate.
 - **P15** Trace tamper-evidence incomplete: no durable/external signed head
   (tail-truncation and whole-span deletion undetectable); substrate `offset`
   is an unsigned rowid backing all cross-span ordering claims. → RF-13
-  (open); audit High; trace-head anchoring (roadmap parked).
+  (open); audit High. **A23 (SI-25) splits the remediation:** cross-span
+  *order/completeness* closes with **W-15 layer 1** (signed `global_seq`, the
+  `VerifiedPrefix`); *freshness/rollback* closes with **layer 2** (the
+  external anchor) at G-ROAMING-SURFACE/G-EGRESS/G-PRODUCTION — not with W-15.
 - **P13** Crypto-shred is logical only; WAL/freelist/snapshot/backup residue
   may retain old ciphertext and wrapped-DEK pairs, which RF-14's persistent
   KEK can decrypt. KEK survival alone cannot recreate a deleted random DEK.
@@ -256,7 +306,7 @@ All 27 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P12 | Flat `auth_rank` total order (`local_session==passkey`) | `capability.rs:47-58` | NOACT | SI-23 (open) |
 | P13 | Logical-only crypto-shred; old ciphertext + wrapped-DEK pairs may survive | `payload.rs:4-5,172-197`, `keys.rs:131-141` | DEBUG 1TEN | roadmap parked; audit; `AGENTS.md` |
 | P14 | Plaintext-hash confirmation oracle; cross-tenant only if future storage deduplicates globally | `payload.rs:71-100` | 1TEN | RF-7 (accepted; global-dedup topology flagged here) |
-| P15 | No durable trace head; unsigned `offset` still backs cross-span ordering while W-11 closes denormalized-selector authority use | `trace.rs`; `broker.rs` | DEBUG 1TEN | RF-13/SI-25/W-15; RF-16 closed by W-11 |
+| P15 | No durable trace head; unsigned `offset` still backs cross-span ordering while W-11 closes denormalized-selector authority use | `trace.rs`; `broker.rs` | DEBUG 1TEN | RF-13; SI-25 resolved as A23 — order/completeness → W-15 layer 1, freshness → layer 2 gates; RF-16 closed by W-11 |
 | P16 | ~~Promotion/revert not crash-atomic across roots~~ **CLOSED by W-14 (PR #43):** fabric-signed journal + linked DB transaction + all-root rollback/roll-forward | `snapshot.rs`, `kernel.rs`, `broker.rs` | — (implemented) | RF-30; W-14; SI-31 ratifies at W-20; full-home rollback freshness → SI-25 |
 | P18 | Drift attributed to the one human by default | `kernel.rs:448-453` | 1HUMAN | multi-actor (parked); SI-20; `dogfooding.md` |
 | P19 | AEAD binds no associated data and stored algorithm/key-link metadata is not enforced | `keys.rs:210-269`, `payload.rs:122-156` | DEBUG 1TEN | RF-22; SI-28; W-16 |

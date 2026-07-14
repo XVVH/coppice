@@ -1,12 +1,19 @@
 # ADR 0006 — Authenticated global trace order and rollback anchor
 
-**Status: PROPOSED — SI-25 design candidate, awaiting human ratification.**
+**Status: RATIFIED as amendment A23 (spec v0.8, §6.2) on 2026-07-13 — as
+adjusted by this document's ratification addendum (determinations D1–D7,
+durability seam S1–S5, post-review adjustments R1–R9). The addendum wins
+wherever the candidate prose below differs from it; §6.2 is the normative
+text; this document is the design rationale and provenance record. SI-25 is
+RESOLVED. W-15 implements layer 1; layer 2 is graduation-gated
+(G-ROAMING-SURFACE / G-EGRESS / G-PRODUCTION).**
 
-This ADR is not a specification amendment and authorizes no implementation.
-SI-25 remains open. The field names below are candidate wire shapes, not a
-published format. If ratified, the decision must be integrated into the schema
-specification under the repository's amendment discipline before W-15 changes
-runtime code.
+*(Original status, preserved: PROPOSED — SI-25 design candidate, awaiting
+human ratification. This ADR is not a specification amendment and authorizes
+no implementation. SI-25 remains open. The field names below are candidate
+wire shapes, not a published format. If ratified, the decision must be
+integrated into the schema specification under the repository's amendment
+discipline before W-15 changes runtime code.)*
 
 > **Recovery note (2026-07-13, appended at import — not part of the
 > original draft).** This ADR was drafted at PR #38 and recovered from
@@ -911,3 +918,377 @@ The outage rule and key-transition certificate should be ratified jointly with
 their owning issues rather than improvised in W-15. Until those choices are
 made, local-only signed checkpoints may be implemented only as explicitly
 non-production scaffolding and must not close SI-25, RF-13, or P15.
+
+## Ratification-session determinations (W-20, 2026-07-13 — ratified as A23)
+
+Operator-ratified determinations from the SI-25 ratification challenge pass
+and five independent-context review rounds, recorded in the A22-adjustment
+style. They are integrated into spec amendment A23 (v0.8 §6.2), the posture
+ledger (G-ROAMING gates), and W-15's scope; **SI-25 is RESOLVED**. This
+addendum is the normative record where it and the candidate prose above
+differ. W-15 implements layer 1; nothing here changes runtime code before
+that implementation lands under its own review.
+
+**Design-center correction (load-bearing, operator-confirmed).** The target is
+not a single physical machine but **one human, one logical fabric home, reached
+from multiple locations**. Because the agent keeps executing while the operator
+walks away, the home + broker + agent run at a **stable always-on base**; the
+operator's devices are **roaming control surfaces that attach to it**. The
+realistic pattern is constant keyboard↔mobile handoff with the agent live
+throughout — not a quiesced "finish here, then start there." Every
+determination below is scoped against that architecture.
+
+**D1 — Two-layer split; layer 1 normative now, anchor deferred.** Layer 1 (the
+signed global chain — `home`/`epoch`/`global_seq`/`global_prev` per event plus
+local signed checkpoints) is pure local cryptography, buildable single-machine,
+and is what makes "verified substrate prefix" a mechanically available object:
+it closes the security-critical half of RF-13/RF-16 (reorder, middle-delete,
+whole-span-delete, and rowid laundering of an ordering violation — the
+fail-open case). Ratified for W-15 now. Layer 2 (the external monotonic anchor)
+adds *freshness only* (suffix-truncation, full-home rollback) and defers to a
+graduation gate. The candidate's assurance tiers stay as the honesty mechanism;
+dogfooding runs at the "local-integrity-only" label, stated, not hidden.
+
+**D2 — W-3 standing authority: local-integrity single-machine, anchored-head
+multi-location.** Contra the candidate's "local-integrity examples never count
+toward k": on a genuinely single machine, standing authority compiled under the
+local-integrity profile is valid within that posture's threat model (the
+same-user attacker holds the fabric key anyway, so an anchor buys nothing
+against it) and is re-earned at graduation — the A1 re-earn-on-boundary-change
+pattern applied to the assurance profile. The moment the home is reached from
+more than one location, W-3's k≥3 counting binds to the shared head (there is
+no single local prefix to count over). Rationale: otherwise single-machine
+W-1→W-3 produces nothing durable before production, contradicting W-1's stated
+purpose.
+
+**D3 — The anchor is an interface; the reference implementation is
+deployment-shaped.** A TPM/secure-element is hardware-bound and cannot anchor a
+home that roams between machines. Therefore, for the roaming design center the
+**remote shared head is the reference anchor** (the only anchor all locations
+share); a local TPM is a **single-machine fast-path** where applicable. This
+restores the candidate's remote-witness recommendation, but for the correct
+reason (roaming coordination), not the candidate's reason (production
+security). Quorum (candidate choice #3) is "more than one required
+`AnchorStore`" — a deployment policy, not a first-implementation concern.
+
+**D4 — Only irreversible-external-effect dispatch is synchronous-anchor-gated;
+everything else commits locally and anchors asynchronously under a loud
+freshness-degraded label.** Decompose "authority operations" by failure
+direction under rollback — the doubt-never-widens asymmetry A21/A22 already
+enshrine. Widening acts (grant, approval, standing-compile) that a rollback
+erases fail *closed* (lost authority) → async-safe. A revoke narrows local
+decisions the instant it commits and only its *durability acknowledgment* waits
+(H7 already says this) → the kill switch never waits on the network. Only
+dispatching an irreversible external effect must anchor *before* it acts,
+because a rollback after the effect crossed the boundary leaves it with no
+authorization evidence and it cannot be un-sent (the RF-33 /
+durable-external-effect case). Consequence: for the entire local→pre-egress
+life of the project there is **no synchronous witness on any hot path**, and
+even in production only egress-dispatch pays it. This is what makes a
+remote-anchored *roaming* operator usable — load-bearing, not an optimization —
+and it refines candidate choice #4 into the project's fail-open-loud posture
+rather than H9's blanket fail-closed for standing-authority reads.
+
+**D5 — Single-writer at the base now; the writer fence is a lease abstraction
+from day one.** The candidate's per-home single-writer critical section is
+implemented as a *lease* — a local `flock` at the base today — but the protocol
+treats it as a lease a witness could mediate later. Concurrent writers (a
+*required future*, from the operator's handoff pattern) then become an
+implementation swap (flock → witness-mediated lease), not a protocol change:
+the signed global chain + monotonic anchored head + H5/H10 fork-detection are
+already the primitive concurrent-writer safety needs. Leaning sequential defers
+the lease *mechanism*, never the data structures.
+
+**D6 — New graduation gates (proposed; file in the posture ledger at
+resolution).** The ledger's G-CONCURRENT (second concurrent session), G-2HUMAN
+(second human), and G-MULTITENANT (shared uid) do not cover one human / one
+home / multiple machines. Split by axis:
+- **G-ROAMING-SURFACE** (near-term): multiple control surfaces over one base
+  home. Needs layer 2's shared head consumed for *coordination* (all surfaces
+  agree on head, pending queue, and revocations) plus C5-channel monitoring.
+  Composes with SI-23's multi-surface approval work.
+- **G-ROAMING-WRITE** (required future): concurrent appenders to one home. Needs
+  the witness-mediated write lease (D5); the chain substrate is
+  forward-compatible.
+
+**D7 — SI-23 seam recorded, out of scope here.** The roaming pattern makes
+multi-surface approval concrete and near-term. C5's sender-binding already gives
+device-agnostic *approval* (a Telegram escalation is answerable from any device
+on the same identity); SI-25's shared head adds device-consistent *monitoring*.
+But the same C5 device-agnosticism is exactly what SI-23 flags as dangerous
+under actuation (the broker cannot tell whether the approval surface is
+reachable by granted hands — SI-23 review adjustment #4). The roaming pattern is
+therefore a strong argument that SI-23 must resolve before any actuation grant.
+Recorded for SI-23; not decided here.
+
+**Still open in the SI-25 session.** Candidate choice #2 (checkpoint /
+anchor-latency budget) defers with layer 2; choices #5/#6/#7 (rotation →
+SI-27; wire transcript → SI-26; import/recovery vocabulary → W-6) coordinate
+with their owning issues and are not finalized here. The shared durability
+profile (candidate choice #9) — the first W-20 composition-review seam — is
+resolved below.
+
+## SI-25 × SI-31 durability seam — resolved (W-20, 2026-07-13)
+
+A promotion/revert is simultaneously an owned-state transition (SI-31) and a
+trace event that must join the global chain and be checkpointed/anchored
+(SI-25), so one operation must satisfy both durability contracts at once. It
+resolves by making SI-31 a **strict extension of SI-25's event append over one
+shared commit point**. Grounded in the merged W-14 code (PR #43).
+
+**S1 — One transaction, one commit point.** `kernel.rs::commit_state_change`
+already opens one `conn.transaction()`, appends via `append_in_tx`, and
+`tx.commit()`s it. W-15 adds SI-25's work *into that same transaction* — the
+event's `home`/`epoch`/`global_seq`/`global_prev` fields, the cached-tip
+update, the terminal checkpoint row, and the anchor-outbox item — alongside
+SI-31's `expected_roots`, journal-linked event, and companion approval. The
+SQLite commit is the single authoritative commit point for both protocols;
+there is never a two-transaction window where one committed and the other did
+not.
+
+**S2 — SI-31 extends the base append.** SI-25 owns event durability for *all*
+events. SI-31 is the specialization for the two kinds (promotion, revert) that
+also move Tier-1 roots, wrapping store-restore + journal + rollback around the
+shared transaction. Grant/revoke/tool_call run the base append with no store
+work. W-15 grows the one existing transaction; it does not introduce a second
+protocol.
+
+**S3 — Two recovery artifacts, deliberately different lifetimes = the layer
+split made concrete.** The recovery journal is a **layer-1** artifact: local
+state coherence, always present, its job ends at DB commit. The
+anchor-outbox/receipt is a **layer-2** artifact: freshness, present only in the
+anchored profile, its job ends at the anchor receipt. They share the commit
+transaction. In the dogfooding layer-1-only profile there is no outbox — only
+the journal — which is exactly D1's deferral realized at the commit protocol.
+
+**S4 — SI-31 recovery consults the verified prefix, whose extent SI-25
+defines.** "Roll the journal forward or back?" is answered by whether the
+linked event is in the verified prefix. Today (layer 1) that is all
+signature-verified events — exactly the merged W-14 check
+(`recover_pending_state_change` over `verified_events`). When W-15 introduces
+checkpoints, the prefix is bounded by the anchored head, so a
+full-home-rollback-erased event is simply not in the prefix and the journal
+correctly rolls *back* rather than resurrecting it. This dissolves the ADR's
+"the journal is mutable local metadata" warning without coupling: the journal
+never overrides the anchor because the roll-forward *condition* is
+prefix-membership and the anchor bounds the prefix. Backward-compatible — the
+only W-15 touch is upgrading that one check from `verified_events` to the
+`verified_prefix`.
+
+**S5 — One durability profile, posture-scoped (this answers candidate choice
+#9), plus a grounded finding.** Both protocols reference one *durable-commit
+profile*: the SQLite synchronous level; fsync every mutated store before
+commit; fsync the journal/checkpoint files; fsync parent dirs after rename; in
+the order stores-then-journal-then-commit. The concrete synchronous level is
+posture-scoped (§0 convention). **Finding:** the merged W-14 sets
+`journal_mode=WAL` with no `synchronous` pragma — i.e. `synchronous=NORMAL` —
+which is crash-atomic against a *process* crash (its `panic`/`catch_unwind`
+tests exercise exactly that) but **not against power loss or OS crash**, where
+WAL can lose the last transaction(s). That is the DEBUG "revert and shrug"
+level and is correct for dogfooding. The ADR's SI-25 append requires
+`synchronous=FULL` for the anchored/production profile. **Determination:** keep
+WAL+NORMAL as the dogfooding durability level; the production/anchored profile
+upgrades to `synchronous=FULL` plus the full fsync discipline at G-PRODUCTION,
+an upgrade W-15 carries. **Corollary:** P16's "closed by W-14" is closed at the
+dogfooding durability level; power-loss crash-atomicity is a named
+production-gate residual alongside the full-home-rollback freshness residual.
+
+**Canonical promotion/revert sequence (both protocols, one commit).**
+1. Acquire the base's writer lease (D5).
+2. Prepare forward + rollback store images; capture current == before or abort (SI-31).
+3. Open one SQLite tx: append event with global-chain fields (SI-25) +
+   `expected_roots` + journal-linked event + companion approval (SI-31) +
+   terminal checkpoint (SI-25, every profile — a layer-1 artifact per D1) +
+   anchor-outbox row (SI-25, anchored profiles only per S3).
+4. Publish the recovery journal to disk; fsync file + dir (SI-31, layer 1).
+5. Apply store restores; fsync each store (SI-31), per the durable-commit profile.
+6. **Commit the tx** — the single authoritative commit point.
+7. Remove the journal (SI-31; state now durable in the committed tx).
+8. *(Anchored profile, async — a promotion is owned-state/revertible, not an
+   irreversible external effect, so per D4 it never blocks on the anchor)*
+   publish the checkpoint to the anchor and store the receipt (SI-25, layer 2).
+
+Every crash window recovers to one classified outcome: before commit → journal
+present, event absent → roll back; after commit before journal-removal →
+journal present, event in prefix → roll forward (idempotent); after
+journal-removal before anchor → no journal, outbox pending → publish checkpoint
+(idempotent). The journal and outbox recover different things and never
+conflict.
+
+**Consequence.** The durability seam was the last open cross-protocol item, so
+**SI-25 is ready to resolve as A23**. It requires *zero* change to the merged
+W-14 code; the only future touches are W-15 (add the SI-25 fields/rows into the
+shared transaction; upgrade recovery to prefix-bounded; `synchronous=FULL` for
+production) and the SI-31 retro-ratification, which inherits S1–S5 verbatim.
+The remaining SI-25 items (SI-26 transcript, SI-27 rotation, W-6 vocabulary)
+are sibling-coordinated and do not block A23's core.
+
+## Post-review adjustments (W-20, 2026-07-13 — operator-ratified)
+
+The independent-context review of the drafted A23 text (PR #47) returned
+REQUEST CHANGES with four encoding defects and three determination-level
+questions; the operator ratified the following adjustments. They are part of
+the SI-25 ratification record and the A23 text encodes them.
+
+**R1 — H9's status under D2/D4 (review Q1).** H9 splits into two clauses.
+Clause (i) — an unreachable anchor means the view cannot be labeled *fresh* —
+**survives intact**: the loud degraded/`local-integrity` label is mandatory.
+Clause (ii) — standing authority cannot be compiled or used without the
+anchor — is **superseded** by D2/D4: compilation and widening acts proceed
+under the loud label, with validity scoped per D2. The future per-capability
+`on_broker_outage` policy is not preempted; it governs *effect-side* outage
+behavior, and D4 already keeps irreversible-external-effect dispatch
+synchronous-anchor-gated. H7's "does not close SI-25/P15" framing is likewise
+superseded by the resolution: layer 1 closes order/completeness, layer 2
+closes freshness at its gates.
+
+**R2 — the "interior" qualifier (review Q2).** Ratified as precision, not
+adjustment: a whole-span deletion whose events occupy the global tail *is*
+suffix truncation. Layer 1 catches interior whole-span deletion; suffix
+truncation — including tail-position spans — is layer 2's job.
+
+**R3 — MUST-refuse for pre-epoch capability ids (review Q3).** The migration
+invalidation gains its enforcement edge in A23 itself: the broker MUST refuse
+to grant a capability id minted in a prior epoch, parallel to §5.4's
+closed-id refusal. Rationale: a descriptive-only invalidation is the
+SI-10/A21 lie surface — a rule enforcement never reads.
+
+**R4 — drift `between` encoding and epoch clamping.** `TracePosition
+{ home, epoch, global_seq, event }` is defined canonically in §6.2 (SI-26's
+transcript reservation applies to it equally). Drift `between` endpoints are
+bare `global_seq` integers scoped by the drift event's own signed
+`home`/`epoch` (the event already binds both; per-endpoint duplication
+invites mismatch). A divergence window that would span an epoch transition
+**clamps its lower endpoint to the epoch genesis** (`global_seq` 0); the
+epoch record's `prior`/`legacy_commitment` carries the discontinuity. This is
+the reading forced by H12 (no retroactive authentication) plus the
+no-bare-integer-comparison-across-epochs rule.
+
+**R6 — two terminals: closure and recovery read local, freshness reads
+anchored (third-review blocker 1 + operator Q1).** The `VerifiedPrefix` has
+two terminals, and different consumers read different ones — the faithful
+encoding of D4 (a revoke narrows local decisions the instant it commits) and
+the crash matrix (a locally committed event rolls forward). (a) The **local
+verified terminal** is the head of the locally committed, signature-verified
+layer-1 chain; it is authoritative for §5.4 closure/liveness (a revoke at
+`global_seq` 11 is seen even when the anchor is at 10 — the fail-open the
+review caught) and for owned-state recovery (a locally committed event is in
+the prefix and rolls *forward*, per S4 and ADR line 1109). (b) The **anchored
+terminal** is the head an `AnchorReceipt` confirms; it is authoritative only
+for freshness/assurance labels and for standing-authority counting (D2,
+multi-location). Under R5 the anchor is never ahead of the durable local head,
+so the gap `[anchored, local]` is the committed-but-unanchored tail — locally
+authoritative, merely not yet fresh; **the anchor never shortens the local
+prefix.** Anchor-ahead-of-local is impossible in normal operation and is
+therefore the rollback signal: reopen observing it fails closed (the R5 case).
+Supersedes the earlier "bounded by the anchored head in the production
+profile" and "layer 2 = through the anchored head" wordings, which conflated
+the two.
+
+**R7 — no-resurrection rests on the migration activation barrier, not on
+R3's refusal; epoch types split (third-review blocker 2 + operator Q2).**
+Cross-epoch ordering: positions in different epochs order by **epoch lineage**
+(the `prior` DAG — an epoch precedes its descendants), never by comparing
+`global_seq` (which resets to zero per epoch); within one epoch `global_seq`
+orders; comparison across incomparable (forked) epochs fails closed. §5.4's
+`<` is this composite order. Epoch types differ in **activation**, not
+ordering: a **migration** epoch is an *activation barrier* — a pre-migration
+`grant` and the capability's `bound_manifest` are not in the new epoch's
+verified prefix, so liveness condition 1 and M2 both fail and the capability
+is dead by construction, independent of whether the broker recognizes the id;
+a **key-rotation** epoch is *activation-continuous* (authority carries across
+it under SI-27's ordered certificate chain). Both preserve cross-epoch
+*ordering* for closure — a revoke closes across any epoch boundary. Therefore
+the no-resurrection guarantee rests on the barrier + M2, which are enforceable
+today via the epoch-scoped prefix; R3's MUST-refuse is the **loud
+defense-in-depth** (fail loud, not silently-not-live), and the *id-level*
+mechanism that lets the broker recognize a prior-epoch id is **reserved to
+SI-27's epoch-key binding**. The "absolute no-resurrection" claim is corrected
+to rest on the barrier, not on R3 alone.
+
+**Q3 resolution — layer-2 graduation is an explicit ceremony (reserved).**
+An existing layer-1 home acquiring its first anchor cannot reuse `initialize`'s
+accept-once binding (unreachable from reopen). The graduation ceremony that
+performs the first anchor binding for an existing home is **reserved to the
+layer-2 implementation, composed with SI-27's key-lifecycle** (anchoring and
+key custody graduate together); §6.2 must not imply it falls out of
+`initialize`.
+
+**R8 — journal-before-stores is authoritative; the checkpoint is a DB row,
+not a file (fourth-review operator Q1).** S5's durable-commit sentence and the
+canonical numbered sequence conflicted: the sentence said "fsync stores, then
+the journal, then commit" and called the checkpoint a *file*, while the
+canonical sequence publishes the journal *before* mutating stores and S1 makes
+the checkpoint a SQLite *row* in the transaction. The canonical order wins —
+crash-safety forces it: the recovery record must be durable before the thing
+it records, or a crash mid-store-mutation leaves stores half-applied with no
+journal, no drift event, and no recovery (write-ahead logging at the
+journal↔stores boundary, the sibling of R5 at the DB↔anchor boundary and
+S1–S5 at the DB↔stores boundary). The checkpoint is a row inside the one
+transaction (with the event, expected-roots, outbox, and companion approval),
+so it commits atomically with the events it certifies and can never get ahead
+of them — no third durability artifact, no checkpoint-ahead-of-events window.
+**No implementation change:** W-14's `commit_state_change` already publishes
+and fsyncs the journal before applying stores; R8 corrects the S5 wording to
+match the code and the canonical sequence.
+
+**R9 — activation is barrier-gated, ordering/closure are lineage-continuous;
+this is what makes the migration barrier real (fourth-review operator Q2).**
+R7 asserted the migration activation barrier; R9 is its mechanism, and it
+answers the reviewer's correct objection that M2 (`cap.bound_manifest ==
+man.id`) is a content-address equality check that does not by itself fail
+across an epoch. The verified prefix serves two questions with **different
+extents**: *ordering* ("did X precede Y?") spans the whole epoch lineage (a
+revoke in E0 still orders before and closes an effect in E1 — R7);
+*activation* ("is this object live authority?") reads only the prefix from the
+last migration barrier forward. Activation-prefix membership is a precondition
+of **resolving any authority-bearing object** — grant, capability, *and
+manifest* — extending A15's materialized-view rule (object live only once its
+event is on the trusted chain) into the epoch dimension. Therefore a
+pre-migration capability is dead in a migration epoch because *both* its grant
+(condition 1) and its `bound_manifest` (M2 cannot resolve a live pre-barrier
+manifest to compare against) sit behind the barrier — enforced by prefix
+membership, not by recognizing the id. A re-granted old id cannot resurrect:
+the fresh grant is post-barrier, but the manifest is still pre-barrier, so M2
+fails; and re-sealing the manifest too is not resurrection — it is minting
+fresh, C1-attributed, accountable authority in the new epoch, exactly what
+"re-mint and re-ratify" permits. Consequences: **no-resurrection rests on the
+barrier, enforceable at layer 1** (prefix membership, no anchor, no SI-27);
+R3's refusal is demoted to loud defense-in-depth (its id-recognition knowledge
+gap, reserved to SI-27, now affects only loudness, not safety). A
+**key-rotation** epoch does *not* reset the activation prefix (extends the
+parent's; authority carries across under SI-27's certificate chain), so only
+migration is a barrier. In normal single-epoch operation R9 is a no-op (the
+activation prefix is the whole chain, exactly A15 today); it defines migration
+behavior without changing anything before it. W-15 must make object
+*resolution* — not just grant lookup — activation-prefix-aware.
+
+**Q3 clarification — two acknowledgments (fourth-review Q3).** D4's "a
+revoke's durability acknowledgment awaits the anchor" and "the kill switch
+never waits on the network" coexist because they are two separate acks, the
+operational shadow of R6's two terminals: (1) the **local closure ack** —
+immediate, the revoke is in the local verified terminal and narrows every
+subsequent local decision now; (2) the **anchored-durability ack** — later,
+the revoke's checkpoint has an `AnchorReceipt` and is rollback-proof. The
+operator sees closure take effect on ack (1); ack (2) is a background
+durability confirmation, not a precondition of the kill switch acting.
+
+**R5 — the synchronous level follows the anchor, not the gate
+(second-review operator question, ratified 2026-07-13).** S5's
+"production/anchored profile" wording is adjusted: `synchronous=NORMAL` is
+permitted only in the unanchored `local-integrity` profile. Every anchored
+profile — including coordination-only roaming at G-ROAMING-SURFACE —
+requires **durable-before-publish**: a commit must be durable on disk before
+its checkpoint is published to any anchor; in practice `synchronous=FULL`,
+or an equivalent pre-publication durability barrier (the publisher forces
+one WAL sync immediately before each anchor CAS, amortizing one fsync across
+the batched commits). Rationale: under `NORMAL` a returned commit can be
+lost to power failure; if the anchor accepted the checkpoint first, reopen
+finds the anchor ahead of a home that cannot distinguish "I forgot" from "I
+was rolled back" — the exact signature layer 2 exists to catch — and
+correctly fails closed into a recovery ceremony. A leniency rule there would
+gut the rollback guarantee, so the ordering is absolute: the witness never
+forgets, therefore it must never learn a statement the database is still
+permitted to forget. G-PRODUCTION adds nothing — it is simply always
+anchored. The latency cost is a local fsync (milliseconds), never a network
+round trip; D4's hot-path decomposition is untouched.

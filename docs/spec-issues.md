@@ -246,7 +246,13 @@ so decide a versioned type/domain transcript (or a signed type field), expected
 prefix verification, migration of existing objects, and whether distinct role
 keys also become mandatory. This must resolve before W-6 publishes fixtures.
 
-## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — open (ratification in progress, W-20)
+## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — RESOLVED (author, 2026-07-13)
+
+**Resolution: ratified as amendment A23 (spec v0.8, new §6.2) — a two-layer authenticated global order.** Layer 1 (signed per-home `global_seq`/`global_prev` on every event) is normative now and closes RF-13/RF-16's order + completeness-between-events with pure local cryptography, making the "verified substrate prefix" a mechanically available `VerifiedPrefix`. Layer 2 (a `TraceCheckpoint` + an external monotonic `AnchorStore`) adds freshness against rollback and is graduation-gated; unanchored homes run at the `local-integrity` assurance label. Ratified in the W-20 session via challenge pass → determinations **D1–D7** + durability seam **S1–S5** (recorded in ADR 0006's addendum, provenance-preserved). Key determinations: the anchor is an interface (remote shared head reference for the roaming design center, TPM a single-machine fast-path); only irreversible-external-effect dispatch anchors synchronously (D4), so nothing waits on the network before first egress; the writer fence is a lease so concurrent writers are non-foreclosed (D5); the owned-state transition (§5.3/SI-31) shares one commit point (S1–S5) with a posture-scoped durable-commit profile (WAL+`NORMAL` dogfooding → `FULL` production); standing authority counts over the `VerifiedPrefix`, local-integrity single-machine and re-earned at graduation (D2); migration invalidates all pre-migration authority (new epoch, no re-signing). New posture gates G-ROAMING-SURFACE/G-ROAMING-WRITE filed. Reserved to owning issues: SI-26 (transcript), SI-27 (epoch key rotation authorization), W-6 (import/recovery vocabulary), the durable external-effect protocol (dispatch ordering). W-15 carries implementation; RF-13/P15 close when layer 2 lands at its gate. Original analysis and the awaiting-ratification candidate below, preserved as provenance.
+
+---
+
+### SI-25 (original filing) — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6)
 
 Per-span signed chains authenticate records within the rows a verifier sees,
 but the global substrate offset is unsigned and no expected head detects tail
@@ -303,8 +309,8 @@ dogfooding level; production upgrades to `synchronous=FULL` at G-PRODUCTION,
 carried by W-15). **SI-25 is therefore ready to resolve as A23**, requiring zero
 change to the merged W-14 code. Sibling-coordinated items that do not block
 A23's core remain: SI-26 transcript, SI-27 rotation, W-6 export vocabulary.
-SI-25 stays **open** until the A23 amendment is drafted and integrated into the
-spec.
+(Historical pointer: SI-25 was resolved as A23 the same day — see the
+resolution block at the head of this entry.)
 
 ---
 

@@ -162,6 +162,29 @@ default cannot save this class retroactively.
   pointers; a second session clobbers the first's M2 binding; the broker is
   behind one process mutex. → SessionContext refactor (roadmap parked).
 
+### G-ROAMING-SURFACE — before one human drives one home from multiple control surfaces  *(relaxes 1TEN "single-machine" for the control plane)*  **NEW gate (A23/SI-25)**
+The A23 design center: one human, one logical home, reached from multiple
+roaming control surfaces (keyboard ↔ mobile handoff) over a stable always-on
+base where the agent keeps executing. This is near-term, not a distant gate.
+- Multiple live approval/monitoring surfaces per home need a **single coherent
+  head** all surfaces read (agree on head, pending queue, revocations). → A23
+  layer 2's shared anchored head consumed as a *coordination* point (its
+  freshness/rollback role stays deferred to G-PRODUCTION). C5 sender-binding
+  already gives device-agnostic *approval*; the head adds device-consistent
+  *monitoring*.
+- Composes with **SI-23**: the same C5 device-agnosticism is what SI-23 flags
+  as dangerous under actuation (the broker cannot tell whether a surface is
+  reachable by granted hands) — no actuation grant before SI-23 resolves.
+
+### G-ROAMING-WRITE — before concurrent appenders to one home  *(relaxes 1SESS/1TEN for the write plane)*  **NEW gate (A23/SI-25) — required future**
+- The A23 per-home writer fence is a **lease** (host-local `flock` at the base
+  today); concurrent writers require a witness-mediated distributed lease so two
+  machines cannot fork the global chain. The chain substrate (signed
+  `global_seq`/`global_prev` + monotonic head + fork-detection) is
+  forward-compatible, so this is an implementation swap, not a protocol change.
+  → W-15 lease abstraction; composes with P20 (SessionContext) and P21
+  (cross-host fencing).
+
 ### G-MULTITENANT — before tenants share one uid, home, or storage namespace  *(relaxes 1TEN / SU)*
 Separate fabric homes under separate Unix identities retain today's enforced
 0700/0600 confidentiality boundary; they require fleet machinery, but not a

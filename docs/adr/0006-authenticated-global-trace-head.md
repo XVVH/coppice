@@ -1,12 +1,19 @@
 # ADR 0006 — Authenticated global trace order and rollback anchor
 
-**Status: PROPOSED — SI-25 design candidate, awaiting human ratification.**
+**Status: RATIFIED as amendment A23 (spec v0.8, §6.2) on 2026-07-13 — as
+adjusted by this document's ratification addendum (determinations D1–D7,
+durability seam S1–S5, post-review adjustments R1–R4). The addendum wins
+wherever the candidate prose below differs from it; §6.2 is the normative
+text; this document is the design rationale and provenance record. SI-25 is
+RESOLVED. W-15 implements layer 1; layer 2 is graduation-gated
+(G-ROAMING-SURFACE / G-EGRESS / G-PRODUCTION).**
 
-This ADR is not a specification amendment and authorizes no implementation.
-SI-25 remains open. The field names below are candidate wire shapes, not a
-published format. If ratified, the decision must be integrated into the schema
-specification under the repository's amendment discipline before W-15 changes
-runtime code.
+*(Original status, preserved: PROPOSED — SI-25 design candidate, awaiting
+human ratification. This ADR is not a specification amendment and authorizes
+no implementation. SI-25 remains open. The field names below are candidate
+wire shapes, not a published format. If ratified, the decision must be
+integrated into the schema specification under the repository's amendment
+discipline before W-15 changes runtime code.)*
 
 > **Recovery note (2026-07-13, appended at import — not part of the
 > original draft).** This ADR was drafted at PR #38 and recovered from
@@ -1089,7 +1096,8 @@ production-gate residual alongside the full-home-rollback freshness residual.
 2. Prepare forward + rollback store images; capture current == before or abort (SI-31).
 3. Open one SQLite tx: append event with global-chain fields (SI-25) +
    `expected_roots` + journal-linked event + companion approval (SI-31) +
-   terminal checkpoint + anchor-outbox row (SI-25, anchored profile only).
+   terminal checkpoint (SI-25, every profile — a layer-1 artifact per D1) +
+   anchor-outbox row (SI-25, anchored profiles only per S3).
 4. Publish the recovery journal to disk; fsync file + dir (SI-31, layer 1).
 5. Apply store restores; fsync each store (SI-31), per the durable-commit profile.
 6. **Commit the tx** — the single authoritative commit point.

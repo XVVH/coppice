@@ -16,8 +16,10 @@
 > independent re-review uses SI-31/SI-33/SI-34 as its oracle). **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
-> that number) at its W-21 revival decision; new issues start at
-> **SI-36**.
+> that number) at its W-21 revival decision. **SI-36** is claimed by the
+> in-flight amendment-scope filing (PR #46, not yet merged); **SI-37**
+> (TracePosition agreement predicate) was filed 2026-07-13 by the second
+> independent review of PR #47; new issues start at **SI-38**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -29,6 +31,26 @@ interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
 
 ---
+
+## SI-37 — TracePosition fields have no agreement predicate with the event they name (§6.2, A23) — open
+
+`TracePosition { home, epoch, global_seq, event }` (A23) denormalizes three
+signed event fields beside an event id. No normative clause requires a
+consumer to verify that the named event's signed `home`, `epoch`, and
+`global_seq` equal the position's other three fields, so a signed object can
+carry an internally inconsistent position — its signature attests the
+*claim*, not the *agreement*. Surfaced by the second independent-context
+review of PR #47 (2026-07-13), which correctly declined to infer the
+predicate silently.
+
+**Candidate resolution (the W-11 pattern; flipping is cheap):** a verifier
+consuming a `TracePosition` MUST resolve `event` within the `VerifiedPrefix`
+and require exact agreement of the three denormalized fields; any mismatch
+fails closed (doubt never widens) — W-11's signed/materialized
+selector-agreement rule applied to the new denormalized tuple. Natural
+ratification companion to SI-26's transcript decision at W-20's next touch;
+W-15 implementation should enforce it from day one regardless of when the
+amendment text lands (fail-closed is the conservative free default).
 
 ## SI-35 — workboard domain labels precede domain-taxonomy governance (§4, brief §10.2) — open
 
@@ -248,7 +270,7 @@ keys also become mandatory. This must resolve before W-6 publishes fixtures.
 
 ## SI-25 — what authenticates global substrate order, completeness, and freshness? (§3, §3.1, §5.4, §6) — RESOLVED (author, 2026-07-13)
 
-**Resolution: ratified as amendment A23 (spec v0.8, new §6.2) — a two-layer authenticated global order.** Layer 1 (signed per-home `global_seq`/`global_prev` on every event) is normative now and closes RF-13/RF-16's order + completeness-between-events with pure local cryptography, making the "verified substrate prefix" a mechanically available `VerifiedPrefix`. Layer 2 (a `TraceCheckpoint` + an external monotonic `AnchorStore`) adds freshness against rollback and is graduation-gated; unanchored homes run at the `local-integrity` assurance label. Ratified in the W-20 session via challenge pass → determinations **D1–D7** + durability seam **S1–S5** (recorded in ADR 0006's addendum, provenance-preserved). Key determinations: the anchor is an interface (remote shared head reference for the roaming design center, TPM a single-machine fast-path); only irreversible-external-effect dispatch anchors synchronously (D4), so nothing waits on the network before first egress; the writer fence is a lease so concurrent writers are non-foreclosed (D5); the owned-state transition (§5.3/SI-31) shares one commit point (S1–S5) with a posture-scoped durable-commit profile (WAL+`NORMAL` dogfooding → `FULL` production); standing authority counts over the `VerifiedPrefix`, local-integrity single-machine and re-earned at graduation (D2); migration invalidates all pre-migration authority (new epoch, no re-signing). New posture gates G-ROAMING-SURFACE/G-ROAMING-WRITE filed. Reserved to owning issues: SI-26 (transcript), SI-27 (epoch key rotation authorization), W-6 (import/recovery vocabulary), the durable external-effect protocol (dispatch ordering). W-15 carries implementation; RF-13/P15's order/completeness half closes with layer 1, its freshness half when layer 2 lands (coordination at G-ROAMING-SURFACE, synchronous dispatch at G-EGRESS, freshness authority at G-PRODUCTION). The independent-context review of the drafted text (PR #47) returned REQUEST CHANGES — four encoding defects, no design objections — corrected same day with four operator-ratified post-review adjustments (**R1–R4** in the ADR addendum: H9's clause split, the "interior" qualifier, the pre-epoch-grant MUST-refuse, drift epoch-genesis clamping); re-review pending. Original analysis and the awaiting-ratification candidate below, preserved as provenance.
+**Resolution: ratified as amendment A23 (spec v0.8, new §6.2) — a two-layer authenticated global order.** Layer 1 (signed per-home `global_seq`/`global_prev` on every event, plus the local signed `TraceCheckpoint` at every profile) is normative now and closes RF-13/RF-16's order + completeness-between-events with pure local cryptography, making the "verified substrate prefix" a mechanically available `VerifiedPrefix`. Layer 2 (publication of layer 1's checkpoints to an external monotonic `AnchorStore`) adds freshness against rollback and is graduation-gated; unanchored homes run at the `local-integrity` assurance label. Ratified in the W-20 session via challenge pass → determinations **D1–D7** + durability seam **S1–S5** (recorded in ADR 0006's addendum, provenance-preserved). Key determinations: the anchor is an interface (remote shared head reference for the roaming design center, TPM a single-machine fast-path); only irreversible-external-effect dispatch anchors synchronously (D4), so nothing waits on the network before first egress; the writer fence is a lease so concurrent writers are non-foreclosed (D5); the owned-state transition (§5.3/SI-31) shares one commit point (S1–S5) with a posture-scoped durable-commit profile (WAL+`NORMAL` dogfooding → `FULL` production); standing authority counts over the `VerifiedPrefix`, local-integrity single-machine and re-earned at graduation (D2); migration invalidates all pre-migration authority (new epoch, no re-signing). New posture gates G-ROAMING-SURFACE/G-ROAMING-WRITE filed. Reserved to owning issues: SI-26 (transcript), SI-27 (epoch key rotation authorization), W-6 (import/recovery vocabulary), the durable external-effect protocol (dispatch ordering). W-15 carries implementation; RF-13/P15's order/completeness half closes with layer 1, its freshness half when layer 2 lands (coordination at G-ROAMING-SURFACE, synchronous dispatch at G-EGRESS, freshness authority at G-PRODUCTION). The independent-context review of the drafted text (PR #47) returned REQUEST CHANGES — four encoding defects, no design objections — corrected same day with four operator-ratified post-review adjustments (**R1–R4** in the ADR addendum: H9's clause split, the "interior" qualifier, the pre-epoch-grant MUST-refuse, drift epoch-genesis clamping); re-review pending. Original analysis and the awaiting-ratification candidate below, preserved as provenance.
 
 ---
 

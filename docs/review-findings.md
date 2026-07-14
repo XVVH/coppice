@@ -900,13 +900,20 @@ failure mode remains "revert and shrug" — except for item 2's lost
 downtime edits, which is why this is medium, not low. **Carried by W-15**,
 which already rewrites the same function for S4 prefix-bounding; the
 adversarial value of item 1 activates with W-17 key custody. Founding
-determinations and the V-derivation are ADR 0007's — **as adjusted by its
-round-1 review adjustments R3/R4** (total V among
-snapshot/promotion/revert/drift/closing-record attestations, projected
-onto the journal's store set; capture-before-restore with emission
-deferred until after restore, paired window-drift + `fabric_recovery`
-closing record; per-arm epoch guard). The enforcing tests land with
-W-15's contract lanes.
+determinations and the V-derivation are ADR 0007's — **as adjusted through review rounds 1–2 (R3/R4, R8/R9/R11/R13)**: total
+V now includes unbranched `tool_call.state_root_after` (round 2 showed
+its omission bricks a genuine revert-crash recovery) and is projected
+onto the journal's store set; freshness is positional (per-store
+prior-attestation positions in the journal — value-only equality passes
+same-epoch ABA replays); the **recovery capture record** (fabric-signed
+write-ahead of the captured roots between capture and restore —
+first-write-wins, journal validation family, removed before the journal;
+without it a crash between restore and emission erases the downtime-edit
+evidence); per-store window-drift + `fabric_recovery` closing pairs
+carrying the journal id, pair-or-neither, with the pinned orderings
+(closing-record idempotency check before the freshness predicate);
+per-arm epoch guard. Recovery never moves V (normative invariant). The
+enforcing tests land with W-15's contract lanes.
 
 ## RF-36 — gate replay grants approval headroom without binding, order, or double-resolution checks — open (high, posture-bounded)
 
@@ -946,10 +953,13 @@ conflict and installs the full branch edit the human was shown *not*
 landing. `approve_promotion` re-merges pinned branch roots against live
 trunk and applies the result with no comparison to the previewed outcome.
 
-**Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2 — the
-re-merge MUST reproduce the previewed outcome exactly (per-store results,
-op-set, conflict resolutions); any difference re-parks as a fresh
-candidate with a fresh escalation and digest. Bounded meanwhile: the
+**Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2 and
+re-quantified by R12 (round 2) — the re-merge MUST reproduce the
+previewed outcome exactly, outcome meaning the **agent-originated applied
+op-set and conflict decisions** (never the whole-store merged root, whose
+equality would re-park on every unrelated human trunk edit); any
+difference re-parks as a fresh candidate with a fresh escalation and
+digest. Bounded meanwhile: the
 applied content is still the digest-pinned branch content, the gate
 re-verifies trace-vs-capability, drift is attributed first (M8), and
 Tier-1 promotion remains revertible. Carried by **W-22**; the
@@ -971,6 +981,36 @@ short of an epoch action clears it. If the remedy needs a new record kind
 (a ratified supersession/quarantine record), it graduates to an SI per
 the triage rule before implementation. Schedule with the next
 operator-surface pass (alongside RF-34).
+
+## RF-39 — exemption approval does not bind the presented escalation version; the C2 listing renders unsigned rows — open (high, posture-bounded)
+
+**Severity: high. Direction: HUMAN-APPROVAL MISBINDING on the exemption
+surface — the RF-31 defect class, found alive on the second approval
+surface.** Found by round 2 of the PR #48 independent review (finding 3);
+verified at source. Three legs: (1) A9 batching appends a **new signed
+escalation event per violation under one numeric id** with evolving
+`count`/`sample` (`enqueue_escalation`), so "the signed escalation" is
+version-ambiguous per id and nothing identifies which version the human
+reviewed; (2) the approval event body names only the numeric id,
+capability, and caveat — no escalation event id, digest, count, or
+sample — so the approval binds no specific presented candidate; (3)
+`list_escalations`, the C2 display surface, renders id, capability,
+manifest, caveat, count, and samples directly from the mutable
+`escalations` table with no verification against the signed chain — a
+storage write can present benign samples for a hostile batch.
+
+**Clause:** A26 §6 exemption candidate identity as adjusted by ADR 0007
+R10 — the approval body carries `escalation_event` (the exact signed
+version presented, verified at resolution); newer batch versions never
+widen the grant and remain visible; C2 listings render from, or verify
+against, signed escalation events (the RF-34/W-19 pattern). **Why
+bounded:** approval surfaces are broker-owned (C2) and local-only; the
+authority tuple (capability, caveat, manifest, auth-strength, uses) is
+already exact-match verified from signed events, so the misbinding scope
+is *which batch instance* the human believed they approved, not which
+capability widens; and a table writer already needs home access (RF-14
+posture). Carried by **W-22**; its lane supplies the version-swap and
+tampered-listing negatives.
 
 ## Verified sound during review (recorded so they aren't re-litigated)
 

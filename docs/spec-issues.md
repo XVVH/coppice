@@ -17,8 +17,8 @@
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
 > retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
-> adjusted by the round-1 review adjustments R1–R7; as-built gaps
-> tracked by RF-35–RF-37, carried by W-15/W-22); SI-32 remains open,
+> adjusted by review rounds 1–2, R1–R13; as-built gaps tracked by
+> RF-35–RF-37 and RF-39, carried by W-15/W-22); SI-32 remains open,
 > next in the W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
@@ -206,9 +206,16 @@ previewed outcome exactly, any difference re-parking as a fresh candidate
 precisely (R5: the presented candidate is the signed escalation; `uses`
 is resolution-authored human input, its rendering fidelity the C2
 surface's contract; the exemption's policy context is the immutable
-content-addressed capability). Determinations D34-1…D34-4 as adjusted by
-R2/R5 in ADR 0007 (W-20 session, 2026-07-14). Original filing preserved
-below.
+content-addressed capability). Round 2 adjusted both halves again
+(R10/R12): the exemption candidate is a specific signed escalation
+**version** — the approval body gains `escalation_event`, and C2
+listings must render from or verify against signed events, never the
+mutable table (RF-39, the RF-31 class on the exemption surface); and
+outcome equality was re-quantified to the agent-originated applied
+op-set and conflict decisions — whole-root equality would have re-parked
+on every unrelated human trunk edit, recreating the blanket re-park R2
+rejects. Determinations D34-1…D34-4 as adjusted by R2/R5 and R10/R12 in
+ADR 0007 (W-20 session, 2026-07-14). Original filing preserved below.
 
 ---
 
@@ -275,9 +282,12 @@ checks — the gate was weaker than the advisory check); ratified as ADR
 0007 R1: the recount MUST apply the same exact-match predicate at each
 effect's durable authorization offset (RF-36, carried by W-22). Round 1
 also ratified the whole-view anomaly failure as intentional home-level
-scope, filing the operator recovery path as RF-38 (R7). Determinations
-D33-1…D33-5 as adjusted in ADR 0007 (W-20 session, 2026-07-14).
-Original filing preserved below.
+scope, filing the operator recovery path as RF-38 (R7). Round 2 moved the batch-candidate identity half of the approval binding
+(which signed escalation *version* an approval names — A9 batching
+appends one signed event per violation under a single id) to A26/R10
+with the as-built gap filed as RF-39; the §5.5 authority tuple itself
+is unchanged. Determinations D33-1…D33-5 as adjusted in ADR 0007 (W-20
+session, 2026-07-14). Original filing preserved below.
 
 ---
 
@@ -377,9 +387,22 @@ now V is total — snapshot/promotion/revert/drift/closing-record
 attestations, projected onto the journal's store set — capture precedes
 restore but emission follows it, one atomic transaction pairing the
 window drift with a `fabric_recovery` closing record, the new A12 class).
-Determinations D31-1…D31-6 as adjusted by R3/R4 in ADR 0007; challenge
-pass and fresh-eyes source verification 2026-07-14 (W-20 session).
-Original filing preserved below.
+Round 2 refuted the round-1 repairs in turn and was ratified as
+R8/R9/R11/R13: V's source list gained unbranched
+`tool_call.state_root_after` (its omission bricked a genuine
+revert-crash recovery); the **recovery capture record** joined the
+protocol (a second fabric-signed write-ahead artifact between capture
+and restore — without it a crash between restore and emission erases
+the downtime-edit evidence; intentions are write-ahead files,
+attestations are write-behind events); freshness became **positional**
+(the journal binds per-store prior-attestation positions — value
+equality passes same-epoch ABA replays); and emission became per-store
+window-drift/closing **pairs** (pair-or-neither, `recovery` linkage,
+pinned removal and check orders). Recovery is V-preserving by
+construction. Determinations D31-1…D31-6 as adjusted by R3/R4 and
+R8/R9/R11/R13 in ADR 0007; challenge pass and fresh-eyes source
+verification 2026-07-14 (W-20 session). Original filing preserved
+below.
 
 ---
 

@@ -76,7 +76,15 @@ W-22 — plus the per-arm journal epoch guard, total V with post-restore
 emission and the `fabric_recovery` closing record, precise exemption
 candidate identity, evidence corrections (G13), and intentional
 home-level anomaly scope with the recovery path filed as RF-38.
-Awaiting round 2. Next after merge: item (3), SI-32.
+Round 2 returned REQUEST CHANGES (seven findings, three high),
+ratified as R8–R13: V's missing `tool_call.state_root_after` source,
+the recovery capture record (new protocol artifact — write-ahead of
+the captured roots, so downtime-edit evidence survives a second
+crash), positional freshness (ABA replay defeats value equality), the
+R12 outcome quantifier (agent-originated ops, not whole roots),
+exemption version binding (`escalation_event`; RF-39 → W-22), and
+per-store drift/closing pairing. Recovery is now V-preserving by
+construction. Awaiting round 3. Next after merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -104,10 +112,11 @@ resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and to the A24 adjusted clauses (RF-35: the D31-4
-freshness predicate over the signed current-roots view, D31-6
-capture-and-attribute before restore, and the journal's home/epoch
-TracePosition binding per H3/R9), and replacing the per-decision full
+prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 2: the positional D31-4
+freshness predicate over total V — including unbranched
+`tool_call.state_root_after` — the D31-6 recovery capture record with
+paired per-store window-drift/`fabric_recovery` closing emission, and
+the journal's home/epoch + prior-attestation-position binding), and replacing the per-decision full
 `verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
 abstraction (D5); the migration epoch (invalidation + the R3
 pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
@@ -131,9 +140,14 @@ replay applies the same exact-match approval binding predicate as
 decision time, evaluated at each effect's durable authorization offset
 (the W-2 shared-evaluator discipline extended to consumption; supplies
 the G13(d) double-resolution negative); RF-37 — the approval-time
-re-merge compares its outcome to the signed candidate preview and
+re-merge compares its agent-originated outcome (op-set + conflict
+decisions, the R12 quantifier) to the signed candidate preview and
 re-parks on any difference as a fresh candidate (supplies the G13(a)
-outcome-equality negative). Both under the two-sided contract and
+outcome-equality negative); RF-39 — exemption approvals bind the exact
+signed escalation version presented (`escalation_event` in the approval
+body) and C2 listings render from or verify against signed events (the
+RF-31 class on the exemption surface; supplies the version-swap and
+tampered-listing negatives). All under the two-sided contract and
 targeted-mutation discipline. Sequenced after W-15 because RF-36
 rewrites the same gate-replay region W-15 converts to
 checkpoint-keyed `VerifiedPrefix` consumption — landing RF-36 first

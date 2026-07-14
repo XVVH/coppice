@@ -6,13 +6,16 @@
 adjustments win where they differ; D31-2, D31-4, D31-6, D33-4, D34-2, and
 D34-3 are read as adjusted). The spec text is the normative *language*.
 SI-31, SI-33, and SI-34 are RESOLVED. The candidate-code gaps are tracked
-as RF-35 (recovery, carried by W-15) and RF-36/RF-37 (gate binding parity
-and re-merge outcome equality, carried by W-22); RF-38 files the
-anomaly-recovery question. Round 1 of the independent-context review
-returned REQUEST CHANGES (nine findings, four high — one authority-replay
-mismatch, one widening re-merge, two recovery-protocol contradictions);
-all nine verified at source and ratified as R1–R7 below. The corrected
-text awaits round 2.**
+as RF-35 (recovery, carried by W-15), RF-36/RF-37 (gate binding parity
+and re-merge outcome equality, carried by W-22), and RF-39 (exemption
+candidate binding, carried by W-22); RF-38 files the anomaly-recovery
+question. Round 1 of the independent-context review returned REQUEST
+CHANGES (nine findings, four high), ratified as R1–R7. Round 2 returned
+REQUEST CHANGES (seven findings, three high — a missing V source, a
+non-durable capture, an unbound exemption candidate, plus ABA freshness
+and a defective equality quantifier), all verified at source and ratified
+as R8–R13 below, adding one new protocol artifact (the recovery capture
+record) and positional freshness. The corrected text awaits round 3.**
 
 ## Context
 
@@ -416,20 +419,153 @@ kind it graduates to an SI per the triage rule.
 Finding 9 (stale `AGENTS.md` and roadmap version strings) was mechanical
 and corrected directly.
 
-## Implementation deltas (RF-35 → W-15; RF-36/RF-37 → W-22)
+## Post-review adjustments — round 2 (W-20, 2026-07-14 — operator-ratified)
 
-1. D31-4 freshness predicate (total V, journal-store-set projection) in
+The second review round returned REQUEST CHANGES: seven findings, three
+high, all verified at source. Two are protocol additions the operator
+examined and ratified explicitly (R9's second recovery artifact, R11's
+positional binding); the reviewer's refuting scenarios are preserved as
+the record.
+
+**R8 — V gains signed `tool_call.state_root_after` (finding 1).** Round
+1's "total" V omitted a real signed root source: unbranched tool calls
+capture live stores and advance trunk expectations
+(`record_tool_call` — non-`branch:` keys; branched runs capture under
+`branch:` keys and never move trunk). Refuting scenario: snapshot attests
+`B`; an unbranched tool call moves live to `C` (signed
+`state_root_after = C`); a revert toward `B` crashes pre-commit; V says
+`B`, the legitimate rollback arm requires `before(=C) == V(=B)`, and the
+home bricks. Adjusted: V's source list is stated *intensionally* — every
+signed event field attesting a store's live trunk root — and enumerated:
+manifest `snapshot`, unbranched `tool_call.state_root_after` (non-
+`branch:` keys only; a branch capture never joins trunk V), promotion
+`merged`, revert `roots_restored`, drift `observed_root`, the closing
+record.
+
+**R9 — the recovery capture record (finding 2; protocol addition).**
+Round 1's convergence claim was false across a double crash: the captured
+downtime-edit root had no durable name until the post-restore emission
+transaction, so a crash between restore and emission left the retry
+seeing live == V with nothing to say — the divergence window vanished
+unrecorded, violating M8. The forcing chain: evidence must be
+ledger-visible (M8); emission before restore poisons V (round 1);
+emission after restore has the durability hole. The only remaining
+placement is a non-event artifact between capture and restore. Ratified:
+the **recovery capture record** — a second fabric-signed, typed,
+versioned recovery artifact naming the journal id and per-store captured
+roots, published and fsynced after capture, before any restore mutation.
+This is the write-ahead principle at its third boundary (journal↔stores
+R8-ADR0006, database↔anchor R5-ADR0006, now capture↔restore), and it
+crystallizes a two-sided rule: **intentions are write-ahead files;
+attestations are write-behind events** (a pre-restore closing event
+would attest an incomplete restore — a signed lie in the crash window;
+a post-restore-only capture is non-durable). Pinned lifecycle:
+**first-write-wins** (a retry never re-captures over an existing record —
+the original capture is the evidence and live may be half-restored);
+validated by the journal's fail-closed family (signature, type, version,
+journal-id linkage, store set ⊆ the journal's) before being consulted;
+removed **before** the journal (so "journal present, capture record
+absent, closing records committed" is a legible cleanup cell and an
+orphaned capture record is unreachable). A committed closing record
+naming the journal id is the idempotency marker routing retries to
+cleanup. Crash matrix: before the record → clean re-run; after record,
+before/during restore → restore idempotently, emit from the record;
+after restore, before emission (the refuting cell) → emit from the
+record, evidence preserved; after emission → cleanup. Rejected: the
+scope-down alternative (ratify R11 only, accept single-crash evidence
+durability as a residual) — recovery windows are when crashes are least
+rare, and it would ratify knowingly-unsound M8 semantics.
+
+**R10 — exemption approvals bind the presented escalation version;
+RF-39 (finding 3).** A9 batching appends a **new signed escalation event
+per violation under one numeric id** with evolving `count`/`sample`, so
+"the signed escalation" is ambiguous per id; the approval body named only
+the numeric id; and the C2 listing surface renders from the mutable
+`escalations` table unverified — the RF-31 defect class alive on the
+exemption surface (a storage write can show benign samples; even without
+tampering, nothing identifies which version the human reviewed).
+Adjusted: the approval body gains **`escalation_event`** — the event id
+of the exact signed escalation version presented; newer batch versions
+never widen the grant (`uses` caps it) and remain visible; C2 listing
+surfaces MUST render from, or verify against, the signed escalation
+events, never the bare table (the RF-34/W-19 pattern). The round-1
+"reservation to C2/SI-23" is narrowed to rendering *fidelity* (pixels vs
+named candidate); data-source integrity is RF-39's, filed and carried by
+W-22. D34-2/R5 are read as extended.
+
+**R11 — positional freshness (finding 4; protocol addition).** Value
+equality answers "same state?"; freshness asks "same *moment*?" — roots
+recur (the ABA replay `B→A`, later `A→C→A`, replant: `after == V` passes
+and a historical journal drives a restore), positions never do. This is
+A23's own doctrine — offsets are order, values are claims — applied to
+the last consumer still comparing values. Adjusted: the journal records,
+per journaled store, the **event id of the latest root attestation at
+prepare time** (well-defined: the journal is built inside the gate lock
+after `check_drift`); roll-back requires each recorded position to still
+be the latest attestation for its store; roll-forward requires the
+linked event itself to be the latest; value agreement is retained as
+belt-and-braces. **Pinned check order (normative):** the closing-record
+idempotency check runs before the freshness predicate — after emission
+the closing record *is* the latest attestation, and a naive positional
+check would fail every post-emission retry. Rejected: binding a single
+global head offset (works only under today's single-writer lease;
+over-constrains under D5's concurrent-writer future; per-store positions
+express exactly the journal's dependency and reuse V's computation —
+V returns (root, position)). Residual honesty: joint journal+database
+rollback still presents as internally consistent — SI-25 layer 2's
+freshness question, reservation unchanged.
+
+**R12 — outcome equality re-quantified (finding 5).** Round 1's "same
+per-store results" meant whole-store merged-root equality — which
+incorporates unrelated concurrent human trunk edits, so any human edit
+re-parks every pending candidate: the blanket re-park R2 explicitly
+rejects, recreated by quantifier error. Adjusted: equality is over the
+**agent-originated applied op-set and the conflict decisions** (the A13
+vocabulary — the same objects the preview renders); unrelated trunk-side
+changes flow through under M8 as always; opaque stores compare conflict
+classification plus installed-image identity (the branch image is
+already digest-pinned). D34-3 is read as re-quantified; RF-37's clause
+description corrected to match.
+
+**R13 — per-store pairing and the V-preservation invariant (finding 6).**
+A drift body is per-store; one singular "closing record" cannot attest a
+multi-store tuple. Adjusted: per divergent store, one window drift
+ordered before one closing record — **pair-or-neither** (a store whose
+capture equals V emits nothing) — all pairs in the single emission
+transaction; the closing record carries one additive field
+`recovery: <journal id>` (§0 extensibility; the round-1 "zero body-schema
+motion" claim softens to "one additive field"). Emergent invariant,
+elevated to normative text: **recovery never moves V** — both arms'
+restore target equals V by the freshness predicate and each pair nets V
+to itself, so the round-1 poisoning is unrepresentable rather than merely
+avoided.
+
+Finding 7 (the v0.9 status line still said "adjusted in three places")
+was mechanical and corrected directly.
+
+## Implementation deltas (RF-35 → W-15; RF-36/RF-37/RF-39 → W-22)
+
+1. D31-4 freshness predicate as adjusted through round 2: total V
+   including unbranched `tool_call.state_root_after` (R8), positional
+   per-store binding (R11), journal-store-set projection — in
    `recover_pending_state_change` (same function W-15 already upgrades to
    the `VerifiedPrefix` per S4). [RF-35 / W-15]
-2. D31-6 as adjusted by R4: CAS capture before restore; window drift +
-   `fabric_recovery` closing record in one transaction after restore;
-   restore-skip when live == V. [RF-35 / W-15]
+2. D31-6 as adjusted through round 2: CAS capture + the recovery capture
+   record before restore (R9, first-write-wins, journal validation
+   family); per-store window-drift/closing pairs with `recovery` linkage
+   in one transaction after restore (R13); pinned removal and check
+   orders; restore-skip when live == V. [RF-35 / W-15]
 3. Journal `home`/`epoch` (TracePosition) binding with the R3 per-arm
-   guard. [RF-35 / W-15]
+   guard, plus the R11 per-store prior-attestation positions. [RF-35 /
+   W-15]
 4. Gate replay binding parity (R1): shared exact-match predicate at each
    effect's durable authorization offset. [RF-36 / W-22]
-5. Re-merge outcome-equality check with re-park-on-difference (R2).
+5. Re-merge outcome-equality check, R12 quantifier (agent-originated
+   op-set + conflict decisions), with re-park-on-difference (R2).
    [RF-37 / W-22]
+6. Exemption candidate binding (R10): `escalation_event` in the approval
+   body; C2 listings render from or verify against signed escalation
+   events. [RF-39 / W-22]
 
 Every remaining clause of A24–A26 is enforced by the merged W-14
 implementation, mapped line-by-line in the ratification PR's corrected G9

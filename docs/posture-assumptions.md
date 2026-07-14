@@ -221,8 +221,11 @@ in scope, or when storage leaves that filesystem boundary.
   evidence work. **Durability level (SI-25×SI-31 seam, W-20):** closed at the
   *dogfooding* level only — W-14 runs WAL+`synchronous=NORMAL`, crash-atomic
   against a process crash (its tests' level) but not against power loss / OS
-  crash. The production/anchored profile upgrades to `synchronous=FULL` + full
-  fsync discipline at G-PRODUCTION, carried by W-15. SI-31 ratifies the protocol
+  crash. Per A23/R5 the synchronous level follows the anchor, not the gate:
+  `NORMAL` is permitted only while unanchored; every anchored profile — from
+  G-ROAMING-SURFACE on — requires durable-before-publish (`synchronous=FULL`
+  or an equivalent pre-publication WAL-sync barrier), carried by the layer-2
+  implementation. SI-31 ratifies the protocol
   at W-20 with this as candidate.
 - **P15** Trace tamper-evidence incomplete: no durable/external signed head
   (tail-truncation and whole-span deletion undetectable); substrate `offset`

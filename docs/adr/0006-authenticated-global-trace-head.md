@@ -1161,3 +1161,23 @@ invites mismatch). A divergence window that would span an epoch transition
 epoch record's `prior`/`legacy_commitment` carries the discontinuity. This is
 the reading forced by H12 (no retroactive authentication) plus the
 no-bare-integer-comparison-across-epochs rule.
+
+**R5 — the synchronous level follows the anchor, not the gate
+(second-review operator question, ratified 2026-07-13).** S5's
+"production/anchored profile" wording is adjusted: `synchronous=NORMAL` is
+permitted only in the unanchored `local-integrity` profile. Every anchored
+profile — including coordination-only roaming at G-ROAMING-SURFACE —
+requires **durable-before-publish**: a commit must be durable on disk before
+its checkpoint is published to any anchor; in practice `synchronous=FULL`,
+or an equivalent pre-publication durability barrier (the publisher forces
+one WAL sync immediately before each anchor CAS, amortizing one fsync across
+the batched commits). Rationale: under `NORMAL` a returned commit can be
+lost to power failure; if the anchor accepted the checkpoint first, reopen
+finds the anchor ahead of a home that cannot distinguish "I forgot" from "I
+was rolled back" — the exact signature layer 2 exists to catch — and
+correctly fails closed into a recovery ceremony. A leniency rule there would
+gut the rollback guarantee, so the ordering is absolute: the witness never
+forgets, therefore it must never learn a statement the database is still
+permitted to forget. G-PRODUCTION adds nothing — it is simply always
+anchored. The latency cost is a local fsync (milliseconds), never a network
+round trip; D4's hot-path decomposition is untouched.

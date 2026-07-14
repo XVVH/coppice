@@ -16,11 +16,12 @@
 > independent re-review uses SI-31/SI-33/SI-34 as its oracle). **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
-> that number) at its W-21 revival decision. **SI-36** is claimed by the
-> in-flight amendment-scope filing (PR #46, not yet merged); **SI-37**
-> (TracePosition agreement predicate) was filed 2026-07-13 by the second
-> independent review of PR #47; **SI-38** (TracePosition genesis
-> representation) by the fourth (2026-07-14); new issues start at **SI-39**.
+> that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
+> Y" amendments — re-manifest link and amend-vs-new-run boundary) was filed
+> 2026-07-13 and merged via PR #46; **SI-37** (TracePosition agreement
+> predicate) was filed by the second independent review of PR #47; **SI-38**
+> (TracePosition genesis representation) by the fourth (2026-07-14); new
+> issues start at **SI-39**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -74,6 +75,65 @@ selector-agreement rule applied to the new denormalized tuple. Natural
 ratification companion to SI-26's transcript decision at W-20's next touch;
 W-15 implementation should enforce it from day one regardless of when the
 amendment text lands (fail-closed is the conservative free default).
+## SI-36 — mid-run "actually do Y" amendments have no rule for re-manifesting or the amend-vs-new-run boundary (§3.1, §3, M1/M5) — open
+
+§3.1 makes a mid-run instruction ("actually do Y") an amendment: a signed,
+channel-stamped, offset-stamped IntentArtifact chained via `amends`, judged
+against the chain, with the directionality rule (narrowing free from any
+registered channel; expanding requires `auth_strength ≥ approval.min_auth` or
+parks) and the C5 wall (un-channeled text — e.g. from a fetched page — is data,
+not an instruction). The mechanism is well-specified for the *intent* and for
+authority *within the existing state fork*. Two connections to the
+manifest/state machinery are implied but never stated, and an implementer can
+get either wrong:
+
+1. **An expanding amendment that needs un-forked state must re-manifest, not
+   widen.** M1 makes stores absent from the manifest "outside the run's
+   universe" (least privilege by omission), so "actually do Y" where Y touches a
+   store the current manifest never forked cannot be satisfied by widening the
+   capability — M1 rejects it. The correct path is a re-manifest at the next
+   step boundary: a child manifest forking the added store(s), a new/attenuated
+   capability bound to it, parent lineage preserved (the M5
+   re-manifest-on-behavior-change machinery, applied to intent expansion). Every
+   piece exists; the rule connecting them does not, so a naive implementation
+   might attempt a capability widening that violates M1, or block a legitimate
+   expansion that should have re-manifested. Open too: which intent a re-manifest
+   binds — presumably the amended head, with the `amends` chain preserving
+   "started as X."
+
+2. **The amend-vs-new-run boundary is undefined.** A refining "actually do Y"
+   (also file under MOCs) is an amendment continuing the manifest lineage; a
+   pivoting "actually, forget that, do this unrelated thing" is arguably a *new*
+   signed intent founding a new run (new manifest lineage; the old branch
+   abandoned and GC'd with its capability expired) rather than an amendment. The
+   protocol carries both shapes — amendment (`amends != null`, one judged chain)
+   and fresh intent (new run) — but states no rule for which a given mid-run
+   instruction becomes. It is authority-relevant, not cosmetic: an amendment
+   inherits the run's capability subject to directionality, a new run mints
+   fresh; the two differ in lineage, state-fork continuity, and authority.
+
+**Interpretation today:** the kernel captures amendments per §3.1 (the
+`amendment` event kind exists, SI-11) and re-manifests on behavior change (M5);
+it encodes neither the intent-expansion→re-manifest rule nor an
+amendment/new-run discriminator. These paths are exercised by UX, not enforced —
+no code silently picks.
+
+**Decide:** (a) a normative rule that an expanding amendment requiring un-forked
+state re-manifests with an expanded fork, and which intent the child binds; and
+(b) whether amend-vs-new-run is a defined predicate (e.g. scope/domain overlap
+with the founding intent) or an explicitly judge/UX-owned call. **Boundary
+(already governed):** "actually stop doing Y and never do it again" is a
+*narrowing amendment plus a capability revoke* — two distinct acts, per A22
+§5.4's adjacent-lifecycles rule that revert/supersede/expire/revoke are distinct
+verbs; SI-36 does not reopen that. Both open questions are
+intent/authority-lifecycle shaped and fold into the W-20 batch; they compose
+with SI-25's now-authenticated amendment ordering (the injection-relevant
+"before or after the agent read the untrusted page" question).
+
+Provenance: surfaced 2026-07-13 as an operator question during the SI-25
+durability-seam session. Not a conflict with the intent-binding thesis (§3.1 /
+brief principle 10 — the front door owns the consent moment); the mechanism is
+designed-for, the state-machinery connections are simply unwritten.
 
 ## SI-35 — workboard domain labels precede domain-taxonomy governance (§4, brief §10.2) — open
 

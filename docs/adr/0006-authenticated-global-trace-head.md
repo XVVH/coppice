@@ -1012,10 +1012,103 @@ reachable by granted hands — SI-23 review adjustment #4). The roaming pattern 
 therefore a strong argument that SI-23 must resolve before any actuation grant.
 Recorded for SI-23; not decided here.
 
-**Still open in the SI-25 session.** The shared durability profile (candidate
-choice #9) that checkpoint publication and SI-31's owned-state recovery journal
-must agree on — the first W-20 composition-review seam (journal freshness ↔
-SI-25). Candidate choice #2 (checkpoint / anchor-latency budget) defers with
-layer 2; choices #5/#6/#7 (rotation → SI-27; wire transcript → SI-26;
-import/recovery vocabulary → W-6) coordinate with their owning issues and are
-not finalized here.
+**Still open in the SI-25 session.** Candidate choice #2 (checkpoint /
+anchor-latency budget) defers with layer 2; choices #5/#6/#7 (rotation →
+SI-27; wire transcript → SI-26; import/recovery vocabulary → W-6) coordinate
+with their owning issues and are not finalized here. The shared durability
+profile (candidate choice #9) — the first W-20 composition-review seam — is
+resolved below.
+
+## SI-25 × SI-31 durability seam — resolved (W-20, 2026-07-13)
+
+A promotion/revert is simultaneously an owned-state transition (SI-31) and a
+trace event that must join the global chain and be checkpointed/anchored
+(SI-25), so one operation must satisfy both durability contracts at once. It
+resolves by making SI-31 a **strict extension of SI-25's event append over one
+shared commit point**. Grounded in the merged W-14 code (PR #43).
+
+**S1 — One transaction, one commit point.** `kernel.rs::commit_state_change`
+already opens one `conn.transaction()`, appends via `append_in_tx`, and
+`tx.commit()`s it. W-15 adds SI-25's work *into that same transaction* — the
+event's `home`/`epoch`/`global_seq`/`global_prev` fields, the cached-tip
+update, the terminal checkpoint row, and the anchor-outbox item — alongside
+SI-31's `expected_roots`, journal-linked event, and companion approval. The
+SQLite commit is the single authoritative commit point for both protocols;
+there is never a two-transaction window where one committed and the other did
+not.
+
+**S2 — SI-31 extends the base append.** SI-25 owns event durability for *all*
+events. SI-31 is the specialization for the two kinds (promotion, revert) that
+also move Tier-1 roots, wrapping store-restore + journal + rollback around the
+shared transaction. Grant/revoke/tool_call run the base append with no store
+work. W-15 grows the one existing transaction; it does not introduce a second
+protocol.
+
+**S3 — Two recovery artifacts, deliberately different lifetimes = the layer
+split made concrete.** The recovery journal is a **layer-1** artifact: local
+state coherence, always present, its job ends at DB commit. The
+anchor-outbox/receipt is a **layer-2** artifact: freshness, present only in the
+anchored profile, its job ends at the anchor receipt. They share the commit
+transaction. In the dogfooding layer-1-only profile there is no outbox — only
+the journal — which is exactly D1's deferral realized at the commit protocol.
+
+**S4 — SI-31 recovery consults the verified prefix, whose extent SI-25
+defines.** "Roll the journal forward or back?" is answered by whether the
+linked event is in the verified prefix. Today (layer 1) that is all
+signature-verified events — exactly the merged W-14 check
+(`recover_pending_state_change` over `verified_events`). When W-15 introduces
+checkpoints, the prefix is bounded by the anchored head, so a
+full-home-rollback-erased event is simply not in the prefix and the journal
+correctly rolls *back* rather than resurrecting it. This dissolves the ADR's
+"the journal is mutable local metadata" warning without coupling: the journal
+never overrides the anchor because the roll-forward *condition* is
+prefix-membership and the anchor bounds the prefix. Backward-compatible — the
+only W-15 touch is upgrading that one check from `verified_events` to the
+`verified_prefix`.
+
+**S5 — One durability profile, posture-scoped (this answers candidate choice
+#9), plus a grounded finding.** Both protocols reference one *durable-commit
+profile*: the SQLite synchronous level; fsync every mutated store before
+commit; fsync the journal/checkpoint files; fsync parent dirs after rename; in
+the order stores-then-journal-then-commit. The concrete synchronous level is
+posture-scoped (§0 convention). **Finding:** the merged W-14 sets
+`journal_mode=WAL` with no `synchronous` pragma — i.e. `synchronous=NORMAL` —
+which is crash-atomic against a *process* crash (its `panic`/`catch_unwind`
+tests exercise exactly that) but **not against power loss or OS crash**, where
+WAL can lose the last transaction(s). That is the DEBUG "revert and shrug"
+level and is correct for dogfooding. The ADR's SI-25 append requires
+`synchronous=FULL` for the anchored/production profile. **Determination:** keep
+WAL+NORMAL as the dogfooding durability level; the production/anchored profile
+upgrades to `synchronous=FULL` plus the full fsync discipline at G-PRODUCTION,
+an upgrade W-15 carries. **Corollary:** P16's "closed by W-14" is closed at the
+dogfooding durability level; power-loss crash-atomicity is a named
+production-gate residual alongside the full-home-rollback freshness residual.
+
+**Canonical promotion/revert sequence (both protocols, one commit).**
+1. Acquire the base's writer lease (D5).
+2. Prepare forward + rollback store images; capture current == before or abort (SI-31).
+3. Open one SQLite tx: append event with global-chain fields (SI-25) +
+   `expected_roots` + journal-linked event + companion approval (SI-31) +
+   terminal checkpoint + anchor-outbox row (SI-25, anchored profile only).
+4. Publish the recovery journal to disk; fsync file + dir (SI-31, layer 1).
+5. Apply store restores; fsync each store (SI-31), per the durable-commit profile.
+6. **Commit the tx** — the single authoritative commit point.
+7. Remove the journal (SI-31; state now durable in the committed tx).
+8. *(Anchored profile, async — a promotion is owned-state/revertible, not an
+   irreversible external effect, so per D4 it never blocks on the anchor)*
+   publish the checkpoint to the anchor and store the receipt (SI-25, layer 2).
+
+Every crash window recovers to one classified outcome: before commit → journal
+present, event absent → roll back; after commit before journal-removal →
+journal present, event in prefix → roll forward (idempotent); after
+journal-removal before anchor → no journal, outbox pending → publish checkpoint
+(idempotent). The journal and outbox recover different things and never
+conflict.
+
+**Consequence.** The durability seam was the last open cross-protocol item, so
+**SI-25 is ready to resolve as A23**. It requires *zero* change to the merged
+W-14 code; the only future touches are W-15 (add the SI-25 fields/rows into the
+shared transaction; upgrade recovery to prefix-bounded; `synchronous=FULL` for
+production) and the SI-31 retro-ratification, which inherits S1–S5 verbatim.
+The remaining SI-25 items (SI-26 transcript, SI-27 rotation, W-6 vocabulary)
+are sibling-coordinated and do not block A23's core.

@@ -189,7 +189,12 @@ in scope, or when storage leaves that filesystem boundary.
   Residual: the journal is mutable local metadata, so a full-home rollback
   that restores journal and database together is SI-25/W-15's freshness
   problem, not this row's; and the hard-exit-at-each-syscall matrix remains G3
-  evidence work. SI-31 ratifies the protocol at W-20 with this as candidate.
+  evidence work. **Durability level (SI-25×SI-31 seam, W-20):** closed at the
+  *dogfooding* level only — W-14 runs WAL+`synchronous=NORMAL`, crash-atomic
+  against a process crash (its tests' level) but not against power loss / OS
+  crash. The production/anchored profile upgrades to `synchronous=FULL` + full
+  fsync discipline at G-PRODUCTION, carried by W-15. SI-31 ratifies the protocol
+  at W-20 with this as candidate.
 - **P15** Trace tamper-evidence incomplete: no durable/external signed head
   (tail-truncation and whole-span deletion undetectable); substrate `offset`
   is an unsigned rowid backing all cross-span ordering claims. → RF-13

@@ -291,11 +291,20 @@ always-on base**; only irreversible-external-effect dispatch is
 synchronous-anchor-gated (everything else async-loud-degraded); the writer
 fence is a lease abstraction from day one so concurrent writers are a
 non-foreclosed required future; and two new gates (G-ROAMING-SURFACE near,
-G-ROAMING-WRITE future) are proposed. Still open before SI-25 resolves and
-integrates as **A23**: the shared durability profile with SI-31 (the first
-composition-review seam), and the sibling-coordinated choices (SI-26 transcript,
-SI-27 rotation, W-6 export vocabulary). SI-25 stays **open** until that
-integration.
+G-ROAMING-WRITE future) are proposed. The **SI-25 × SI-31
+durability seam** (choice #9, the first composition-review seam) is now
+**resolved** (determinations S1–S5 in the ADR addendum): SI-31 is a strict
+extension of SI-25's event append over one shared SQLite commit point; the
+recovery journal is a layer-1 artifact and the anchor-outbox a layer-2 one;
+SI-31 recovery consults the verified prefix whose extent SI-25 defines; one
+posture-scoped durable-commit profile (grounded finding: merged W-14 runs
+WAL+`synchronous=NORMAL`, process-crash-atomic but not power-loss-atomic — the
+dogfooding level; production upgrades to `synchronous=FULL` at G-PRODUCTION,
+carried by W-15). **SI-25 is therefore ready to resolve as A23**, requiring zero
+change to the merged W-14 code. Sibling-coordinated items that do not block
+A23's core remain: SI-26 transcript, SI-27 rotation, W-6 export vocabulary.
+SI-25 stays **open** until the A23 amendment is drafted and integrated into the
+spec.
 
 ---
 

@@ -16,9 +16,9 @@
 > re-filed at the spec layer (W-20 batches their ratification; PR #43's
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
-> retro-ratification, 2026-07-14, ADR 0007 — three adjustments beyond
-> as-built tracked by RF-35, carried by W-15); SI-32 remains open, next
-> in the W-20 batch. **SI-35**
+> retro-ratification, 2026-07-14, ADR 0007, PR #48 — three adjustments
+> beyond as-built tracked by RF-35, carried by W-15); SI-32 remains
+> open, next in the W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do

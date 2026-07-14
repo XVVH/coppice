@@ -65,7 +65,7 @@ oracle); W-1 dogfooding continues unaffected. *Provenance: the
 the existing ratify-first clauses of W-15/W-16/W-17 as one campaign.*
 **Progress:** item (1) ratified 2026-07-13 as A23 (spec v0.8 §6.2, ADR
 0006, PR #47). Item (2) ratified 2026-07-14 as A24–A26 (spec v0.9, ADR
-0007) — challenge pass + fresh-eyes source verification over the merged
+0007, PR #48) — challenge pass + fresh-eyes source verification over the merged
 PR #43 candidate; three adjustments beyond as-built (D31-4 journal
 freshness, D31-6 capture-before-restore, journal home/epoch binding)
 filed as RF-35 and carried by W-15; G13 files the outstanding

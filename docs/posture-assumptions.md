@@ -137,9 +137,15 @@ default cannot save this class retroactively.
 
 ### G-RATCHET — before ledger events compile into standing authority (W-3)  *(no invariant relaxed — the substrate becomes policy-bearing)*
 - **P15 / RF-16** Standing authority may not derive from a substrate whose
-  authority view can be changed through unsigned index columns or whose head
-  can be rolled back. W-11 closes verified-row use; SI-25/W-15 closes global
-  completeness/freshness before W-3 proceeds beyond disposable experiments.
+  authority view can be changed through unsigned index columns or whose
+  global order/completeness is unauthenticated. W-11 closes verified-row use;
+  **W-15 layer 1** (the A23 signed global chain / `VerifiedPrefix`) must land
+  before W-3 proceeds beyond disposable experiments. Freshness (rollback
+  detection, layer 2) is **scoped per A23/D2**: single-machine compilation
+  under the `local-integrity` label is valid within this posture and
+  re-earned at graduation; the anchored head becomes mandatory for counting
+  at G-ROAMING-SURFACE (multi-location) and for production claims at
+  G-PRODUCTION — it does not gate single-machine W-3.
 - **P26** Corpus-ingest homes (`asf corpus ingest`) sign placeholder
   principals and a placeholder behavior bundle into a REAL substrate —
   P8's class, second site. Nothing mechanical distinguishes a corpus

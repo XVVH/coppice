@@ -1112,3 +1112,44 @@ shared transaction; upgrade recovery to prefix-bounded; `synchronous=FULL` for
 production) and the SI-31 retro-ratification, which inherits S1–S5 verbatim.
 The remaining SI-25 items (SI-26 transcript, SI-27 rotation, W-6 vocabulary)
 are sibling-coordinated and do not block A23's core.
+
+## Post-review adjustments (W-20, 2026-07-13 — operator-ratified)
+
+The independent-context review of the drafted A23 text (PR #47) returned
+REQUEST CHANGES with four encoding defects and three determination-level
+questions; the operator ratified the following adjustments. They are part of
+the SI-25 ratification record and the A23 text encodes them.
+
+**R1 — H9's status under D2/D4 (review Q1).** H9 splits into two clauses.
+Clause (i) — an unreachable anchor means the view cannot be labeled *fresh* —
+**survives intact**: the loud degraded/`local-integrity` label is mandatory.
+Clause (ii) — standing authority cannot be compiled or used without the
+anchor — is **superseded** by D2/D4: compilation and widening acts proceed
+under the loud label, with validity scoped per D2. The future per-capability
+`on_broker_outage` policy is not preempted; it governs *effect-side* outage
+behavior, and D4 already keeps irreversible-external-effect dispatch
+synchronous-anchor-gated. H7's "does not close SI-25/P15" framing is likewise
+superseded by the resolution: layer 1 closes order/completeness, layer 2
+closes freshness at its gates.
+
+**R2 — the "interior" qualifier (review Q2).** Ratified as precision, not
+adjustment: a whole-span deletion whose events occupy the global tail *is*
+suffix truncation. Layer 1 catches interior whole-span deletion; suffix
+truncation — including tail-position spans — is layer 2's job.
+
+**R3 — MUST-refuse for pre-epoch capability ids (review Q3).** The migration
+invalidation gains its enforcement edge in A23 itself: the broker MUST refuse
+to grant a capability id minted in a prior epoch, parallel to §5.4's
+closed-id refusal. Rationale: a descriptive-only invalidation is the
+SI-10/A21 lie surface — a rule enforcement never reads.
+
+**R4 — drift `between` encoding and epoch clamping.** `TracePosition
+{ home, epoch, global_seq, event }` is defined canonically in §6.2 (SI-26's
+transcript reservation applies to it equally). Drift `between` endpoints are
+bare `global_seq` integers scoped by the drift event's own signed
+`home`/`epoch` (the event already binds both; per-endpoint duplication
+invites mismatch). A divergence window that would span an epoch transition
+**clamps its lower endpoint to the epoch genesis** (`global_seq` 0); the
+epoch record's `prior`/`legacy_commitment` carries the discontinuity. This is
+the reading forced by H12 (no retroactive authentication) plus the
+no-bare-integer-comparison-across-epochs rule.

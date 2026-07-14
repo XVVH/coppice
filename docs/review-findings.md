@@ -914,39 +914,47 @@ carrying the journal id, pair-or-neither, with the pinned orderings
 (closing-record idempotency check before the freshness predicate);
 per-arm epoch guard. Round 3 (R14/R15): capture-record validation is
 exact-set (a partial record cannot prove non-divergence), and retries
-run the element-wise explanation check — live state explained by neither
-the capture record nor the restore target fails closed in place, so a
-divergence window opened during recovery's own downtime is preserved by
-refusal (automated multi-window preservation is SI-39). Recovery never
+run the explanation check — state explained by neither the capture
+record nor the restore target fails closed in place, so a divergence
+window opened during recovery's own downtime is preserved by refusal
+(automated multi-window preservation is SI-39). Round 4 (R18)
+re-quantified the check over **path-state** — the union of paths in
+live/capture/target with absence as a value, canonical entry identity
+(path, presence, content hash, mode) — because live-elements-only was
+vacuous for deletions. Recovery never
 moves V (normative invariant). The enforcing tests land with W-15's
 contract lanes, including the G13(e)/(f)/(g) journal-validation
 negatives round 3 split out.
 
-## RF-36 — gate replay grants approval headroom without binding, order, or double-resolution checks — open (high, posture-bounded)
+## RF-36 — approval headroom lacks temporal binding at both consumers; gate replay also lacks the binding tuple — open (high, posture-bounded)
 
-**Severity: high. Direction: FAIL-OPEN AUTHORITY at the gate, the
-authoritative recount.** Found by round 1 of the PR #48 independent
-review (finding 1); verified at source. `gate_trace_check` pre-aggregates
+**Severity: high. Direction: FAIL-OPEN AUTHORITY at both consumption
+consumers.** Found by round 1 of the PR #48 independent review (finding
+1, gate replay) and **widened by round 4** (finding 1, decision time);
+both verified at source. Gate replay (`gate_trace_check`) pre-aggregates
 every signed `approved` event into `(capability, caveat) → uses` headroom
 before replaying any tool call — checking none of: a matching prior
-signed escalation; approval-after-escalation or approval-before-effect
-order (a later approval retro-funds an earlier call at replay);
-manifest/M2 agreement; auth strength; conflicting bindings; double
-resolution. Decision time (`w14_decision_authority`) enforces all of
-these, so the gate — which A25/§5.4 make **authoritative for what becomes
-durable** — is strictly weaker than the advisory check, inverting the
-authority hierarchy.
+signed escalation; temporal order; manifest/M2 agreement; auth strength;
+double resolution. Decision time (`w14_decision_authority`) enforces the
+exact-match binding tuple but **also lacks the temporal edge**: it
+preloads all approvals into remaining-headroom before the consumption
+fold, so a signed history containing a tool_call before its approval
+retro-funds the earlier effect and leaves residual uses for new
+dispatch. The round-1 framing "the gate is weaker than decision time"
+was corrected in round 4: neither consumer requires an approval to
+precede the effects it funds.
 
 **Why bounded under the current posture:** locally the broker is the sole
 producer of approval events and emits them correctly bound and ordered,
 so the lax replay is unreachable from the agent. The exposure is
 foreign/replayed substrate — exactly the W-9 corpus surface — and any
 future path where trace rows are ingested rather than produced.
-**Clause:** A25 §5.5 "Decision and gate" as adjusted by ADR 0007 R1 (the
-recount applies the same exact-match binding predicate at each effect's
-durable authorization offset — the W-2 shared-evaluator discipline
-extended to consumption). Carried by **W-22**; its contract lane also
-supplies the double-resolution negative G13 records as outstanding.
+**Clause:** A25 §5.5 "Decision and gate" as adjusted by ADR 0007 R1 and
+R17 — one position-ordered reconstruction shared by both consumers:
+exact-match binding plus the temporal edge (headroom at offset O counts
+only approvals at offsets before O). Carried by **W-22**; its contract lane supplies the double-resolution negative
+(G13(d)) and the decision-time and gate-replay temporal retro-funding
+negatives (G13(h)) under SIGNED-DECISION-AUTH and the gate contracts.
 
 ## RF-37 — approval-time re-merge applies un-previewed outcomes without comparison or re-park — open (medium)
 
@@ -961,14 +969,18 @@ landing. `approve_promotion` re-merges pinned branch roots against live
 trunk and applies the result with no comparison to the previewed outcome.
 
 **Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2,
-re-quantified by R12 (round 2), and given its comparison basis by R16
-(round 3) — the re-merge MUST reproduce the previewed outcome exactly:
-per previewed op, over the op's full touched-path set, the re-merged
-result equals the previewed merged result (the referent tree is part of
-the signed candidate) with conflict status unchanged; never the
-whole-store merged root, whose equality would re-park on every unrelated
-human trunk edit; any difference re-parks as a fresh candidate with a
-fresh escalation and digest. Bounded meanwhile: the
+re-quantified by R12 (round 2), given its comparison basis by R16
+(round 3), and its referent by R20 (round 4 — the round-3 claim that the
+previewed merged tree was already candidate-resident was false: the
+parked preview serializes only ops/conflicts/trace_check/branch_roots) —
+the re-merge MUST reproduce the previewed outcome exactly: per previewed
+op, over the op's full touched-path set, the re-merged result equals the
+previewed merged result, with conflict status unchanged; the referent is
+the preview's new per-store `merged` root references, CAS-retained at
+escalation and digest-covered by construction; never the whole-store
+merged root, whose equality would re-park on every unrelated human trunk
+edit; any difference re-parks as a fresh candidate with a fresh
+escalation and digest. Bounded meanwhile: the
 applied content is still the digest-pinned branch content, the gate
 re-verifies trace-vs-capability, drift is attributed first (M8), and
 Tier-1 promotion remains revertible. Carried by **W-22**; the
@@ -1020,6 +1032,49 @@ is *which batch instance* the human believed they approved, not which
 capability widens; and a table writer already needs home access (RF-14
 posture). Carried by **W-22**; its lane supplies the version-swap and
 tampered-listing negatives.
+
+## RF-40 — the fs restore does not realize every signed target root: mode-only skip and file↔directory deadlock — open (high, as-built defect)
+
+**Severity: high. Direction: (a) SILENT ROOT MISMATCH — a committed
+event names a tuple live state does not realize; (b) FAIL-CLOSED
+availability — a legitimate recovery bricks deterministically.** Found
+by round 4 of the PR #48 independent review (finding 3); both verified
+at source. Distinct from RF-35–RF-39: those track clauses ratified
+*stronger than built*; RF-40 is the cycle's first **as-built defect** —
+merged, dogfooding code failing clauses round 0 certified as faithfully
+built (D31-1 exact realization; D31-3 idempotent recovery).
+
+1. **Mode-only skip:** filesystem capture encodes executable mode in the
+   root hash (`snapshot.rs` mode "755"/"644"), but `apply_fs_in_place`
+   pass 2 skips any file whose **content** hash matches ("write only
+   files whose content differs"). A mode-only transition — e.g. a revert
+   that should restore `644` over a live `755` — commits its signed
+   event and expected root while live retains the old mode: the
+   authoritative-name claim silently broken, and the divergence
+   surfaces later as spurious drift.
+2. **File↔directory deadlock:** pass 1 deletes undesired *files*,
+   pass 2 renames replacements over target paths, pass 3 prunes emptied
+   directories — in that order. A target where path `a` is a file while
+   live has directory `a/` empties the directory in pass 1 but attempts
+   the rename over the still-present directory in pass 2, which fails;
+   pass 3 never runs. Recovery retries hit the identical order and the
+   home stays closed — fail-closed, but wrongly and permanently.
+
+**Clause:** A24/D31-1 as ratified plus the round-4 canonical-entry
+realization sentence ("content, presence, and mode; a store apply that
+skips any differing dimension, or whose pass ordering cannot complete a
+legal topology change, breaks the naming claim"); D31-3 idempotent
+recovery. **Why bounded:** Tier-1-local; the mismatch is between signed
+state and live bytes on an owned store — the CAS retains every image, a
+re-run of a corrected restore converges, and the gate's drift check
+surfaces the mode mismatch on next consumption rather than letting it
+ride into a merge unattributed. Carried by **W-15** (same files and
+lanes as RF-35): pass 2 writes when the canonical entry differs (not
+content alone); emptied directories resolve before rename; registered
+STATE-COMMIT negatives for mode-only exactness and both file↔directory
+crash-recovery directions (G13(i)/(j)). RF-40 may constitute the parked
+RF-27 recovery-hardening trigger; un-parking is an operator gate
+decision, not a review outcome.
 
 ## Verified sound during review (recorded so they aren't re-litigated)
 

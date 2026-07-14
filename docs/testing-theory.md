@@ -496,8 +496,15 @@ proves `O_CREAT|O_EXCL|O_NOFOLLOW` publication fails before any
 mutation when the journal path is occupied); (g) **journal-roots vs
 committed-event disagreement** (the misbinding negative varies kind and
 manifest, not the root tuple). All three land with W-15's RF-35 lane.
+Round 4 added three more: (h) **temporal retro-funding at both
+consumers** (a signed tool_call preceding its approval must not be
+funded by it, at decision time and at gate replay — RF-36's widened
+lane, W-22); (i) **mode-only exactness** (a transition differing only in
+executable mode must realize on live state — RF-40); (j)
+**file↔directory topology crash recovery**, both directions (RF-40).
 The D31-4/D31-6/H3-binding enforcement gaps are RF-35's (implementation
-absent, not tests absent); their contract lanes land with W-15.
+absent, not tests absent); their contract lanes land with W-15, as do
+RF-40's (i)/(j).
 
 ## Automation lanes
 

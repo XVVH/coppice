@@ -17,10 +17,10 @@
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
 > retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
-> adjusted by review rounds 1–3, R1–R16; as-built gaps tracked by
-> RF-35–RF-37 and RF-39, carried by W-15/W-22; SI-39 files the
-> multi-window recovery enhancement); SI-32 remains open, next in the
-> W-20 batch. **SI-35**
+> adjusted by review rounds 1–4, R1–R20; spec-code deltas tracked by
+> RF-35–RF-37/RF-39 (adjusted beyond as-built) and RF-40 (as-built
+> defect), carried by W-15/W-22; SI-39 files the multi-window recovery
+> enhancement); SI-32 remains open, next in the W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
@@ -256,7 +256,13 @@ rejects. Round 3 pinned the comparison basis (R16): equality per
 previewed op over its full touched-path set against the previewed
 merged tree, conflict status unchanged — rename/move made the naive
 bases diverge, and the applied-delta reading was rejected as blanket
-re-park in different clothes. Determinations D34-1…D34-4 as adjusted by
+re-park in different clothes. Round 4 (R20) made the referent real:
+round 3's claim that the merged tree was already candidate-resident was
+false (the parked preview serializes only ops/conflicts/trace_check/
+branch_roots), so previews gain per-store `merged` root references,
+CAS-retained at escalation and digest-covered by construction;
+approval-time re-derivation from signed inputs was rejected as
+recomputation ambiguity. Determinations D34-1…D34-4 as adjusted by
 R2/R5, R10/R12, and R16 in ADR 0007 (W-20 session, 2026-07-14).
 Original filing preserved below.
 
@@ -329,7 +335,11 @@ scope, filing the operator recovery path as RF-38 (R7). Round 2 moved the batch-
 (which signed escalation *version* an approval names — A9 batching
 appends one signed event per violation under a single id) to A26/R10
 with the as-built gap filed as RF-39; the §5.5 authority tuple itself
-is unchanged. Determinations D33-1…D33-5 as adjusted in ADR 0007 (W-20
+is unchanged. Round 4 (R17) added the temporal edge the tuple lacked at
+**both** consumers — headroom at offset O counts only approvals before
+O; decision time was demonstrated to retro-fund an earlier tool_call
+exactly as round 1 showed for gate replay, correcting that round's
+"gate weaker than decision" framing — RF-36 widened accordingly. Determinations D33-1…D33-5 as adjusted in ADR 0007 (W-20
 session, 2026-07-14). Original filing preserved below.
 
 ---
@@ -442,7 +452,16 @@ attestations are write-behind events); freshness became **positional**
 equality passes same-epoch ABA replays); and emission became per-store
 window-drift/closing **pairs** (pair-or-neither, `recovery` linkage,
 pinned removal and check orders). Recovery is V-preserving by
-construction. Round 3 hardened the round-2 additions themselves:
+construction. Round 4 (R18) re-quantified the round-3 explanation check
+over path-state (the union of live/capture/target paths, absence as a
+value, canonical entry identity including presence and mode —
+live-elements-only was vacuous for deletions) and surfaced **RF-40**,
+the cycle's first as-built defects: the merged fs apply skips mode-only
+differences (breaking D31-1's authoritative-naming claim — the state
+machine is ratified; one realization detail of its apply step is
+defective and ledgered) and deadlocks on file↔directory topology swaps
+(a legitimate recovery re-fails forever); carried by W-15. Round 3
+hardened the round-2 additions themselves:
 R14's element-wise explanation check on retry (live state explained by
 neither the capture record nor the restore target fails closed **in
 place** — a divergence window opened during recovery's own downtime is

@@ -2,10 +2,18 @@
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
 2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
-**as adjusted by the post-review adjustments R1–R16 (review rounds 1–3;
-the adjustments win where they differ**; D31-2, D31-4, D31-6, D33-4,
-D34-2, and D34-3 are read as adjusted). The spec text is the normative
-*language*.
+**as adjusted by the post-review adjustments R1–R20 (review rounds 1–4;
+the adjustments win where they differ**; D31-2, D31-4, D31-6, D33-3,
+D33-4, D34-2, and D34-3 are read as adjusted). The spec text is the
+normative *language*. Claims about the candidate code carry one of three
+labels, kept distinct throughout: **ratified as built** (the merged W-14
+mechanism is the ratified semantics), **adjusted beyond as-built** (the
+ratified semantics exceed the code; RF-35/RF-36/RF-37/RF-39 track, W-15/
+W-22 carry), and **as-built defect** (the code fails a clause ratified as
+built; RF-40). A clause in the second or third category binds
+implementations at its carrier gate per the ledger — the W-20 item (6)
+posture-qualifier convention will systematize this status; this batch is
+its founding evidence.
 SI-31, SI-33, and SI-34 are RESOLVED. The candidate-code gaps are tracked
 as RF-35 (recovery, carried by W-15), RF-36/RF-37 (gate binding parity
 and re-merge outcome equality, carried by W-22), and RF-39 (exemption
@@ -22,7 +30,15 @@ bookkeeping — the round-2 protocol's own repeated-crash window, an
 exact-set validation predicate, the R12 comparison basis), ratified as
 R14–R16 below with SI-39 filed for the multi-window enhancement; the
 reviewer confirmed no original SI decision point was silently dropped.
-The corrected text awaits round 4.**
+Round 4 returned REQUEST CHANGES (five findings, three high), ratified
+as R14–R16's successors R17–R20: the temporal-binding gap turned out to
+live at **both** consumers (RF-36 widened; the round-1 "gate weaker than
+decision" record corrected), R14's quantifier was blind to deletions
+(path-state union), two **as-built defects** surfaced in the merged fs
+restore (RF-40 — mode-only skip, file↔directory deadlock: the first
+code-fails-ratified-as-built findings of the cycle), and R16's claimed
+merged-tree referent did not exist (previews gain per-store merged
+roots). The corrected text awaits round 5.**
 
 ## Context
 
@@ -621,32 +637,119 @@ lane. Finding 5 (round-1 wording still controlling in the ADR status,
 changelog intro and its V enumeration, and W-22's count/provenance) was
 mechanical and corrected directly.
 
-## Implementation deltas (RF-35 → W-15; RF-36/RF-37/RF-39 → W-22)
+## Post-review adjustments — round 4 (W-20, 2026-07-14 — operator-ratified)
+
+Round 4 returned REQUEST CHANGES: five findings, three high. Its
+signature is different from rounds 1–3: two of the highs are **as-built
+defects** — merged, dogfooding code failing clauses that round 0 had
+certified as faithfully built — rather than holes in the ratified
+protocol. That distinction is why the three-category labeling in the
+status header exists: "ratified as built" is a per-dimension evidence
+claim, not a per-protocol one, and RF-40 is what it looks like when a
+dimension was missed.
+
+**R17 — temporal binding at both consumers; RF-36 widened; the R1
+record corrected (finding 1).** `w14_decision_authority` preloads every
+approval into headroom before the consumption fold and never requires an
+approval to precede the tool call that consumes it — so a signed history
+containing tool_call-before-approval retro-funds the earlier effect at
+decision time, the identical defect R1 recorded for gate replay alone.
+The round-1 claim that the gate was weaker than decision time is
+corrected: decision time had the binding tuple but not the temporal
+edge; **neither consumer had it**. Ratified (the clause already exists —
+A25's substrate order and the durable-authorization-offset rule; no new
+SI): headroom available at offset `O` counts only approvals at offsets
+before `O` — one position-ordered reconstruction, stated once, shared by
+decision and gate. RF-36 is widened from gate-only to both consumers,
+with a decision-time protected-dispatch negative under
+SIGNED-DECISION-AUTH; carried by W-22.
+
+**R18 — R14 re-quantified over path-state (finding 2).** "Every element
+of live state" is vacuous for deletions: a path deleted during a crashed
+recovery's downtime is not a live element, so the check passed and the
+restore recreated the file with no capture and no drift — undetected,
+violating R14's own promise and M8. Ratified: the explanation predicate
+quantifies over the **union** of paths present in live, capture, and
+target, with **absence as a value**; canonical entry identity is
+(relative path, presence, content hash, executable mode) — content alone
+is not identity; excluded directories and untracked empty directories
+are scoped to the canonical store boundary, matching capture semantics.
+This is squarely R14's detection duty, not SI-39's automation (SI-39
+begins after detection; this window was undetected).
+
+**R19 — RF-40 filed: the fs restore does not realize every signed
+target root (finding 3; as-built defect).** Two defects in the merged
+`apply_fs_in_place` against clauses ratified as built: (a) pass 2 skips
+any file whose **content** hash matches, ignoring mode — a mode-only
+transition commits a signed event naming a root (mode is part of the
+root hash) that live state does not realize: the authoritative-name
+claim of D31-1 silently broken; (b) pass 2's rename-over-target runs
+before pass 3's directory pruning, so a file↔directory topology swap
+fails deterministically and every recovery retry re-fails — a
+legitimate recovery bricks (fail-closed, but wrongly). Mechanism-class
+under existing ratified clauses (D31-1 exact realization, D31-3
+idempotent recovery), not SI-32 attacker-model questions: filed as
+**RF-40** (high), carried by W-15 alongside RF-35 (same files, same
+lanes), with registered STATE-COMMIT negatives for mode-only exactness
+and both file↔directory crash-recovery directions. RF-40 may constitute
+the parked RF-27 recovery-hardening trigger; un-parking is an operator
+gate decision, noted there and not made here. The spec's D31-1 text
+gains the canonical-entry realization sentence; the G9 committed-tuple
+row is qualified until the negatives land.
+
+**R20 — R16's referent made real (finding 4).** R16 claimed the
+previewed merged tree is "part of the signed candidate's stores,
+CAS-resident" — it is not: the parked preview serializes only
+`ops`/`conflicts`/`trace_check`/`branch_roots`, and the composed merged
+root is discarded. Ratified: parked previews gain **per-store `merged`
+root references, CAS-retained at escalation** — entering
+`candidate_digest` by construction (the digest hashes the whole
+preview), restoring the direct referent R16 intended and letting the
+approval surface render from it. Rejected: deriving the expected
+touched-path result at approval time from the signed manifest, branch
+roots, and conflict cards — workable in principle, but re-deriving the
+merge at approval reintroduces recomputation ambiguity, the very thing
+the comparison exists to check. The opaque-store subcase stands as
+reviewed (branch image pinned by `branch_roots`; trunk-wins image
+CAS-captured in the conflict card). RF-37/W-22 implements.
+
+Finding 5 (two sweep rows claimed `VerifiedPrefix`/local-terminal
+enforcement against code that reads `verified_events`) is corrected in
+the PR sweep: "structural logic present; A23 terminal/prefix enforcement
+pending W-15" — matching the treatment already used for home/epoch
+binding.
+
+## Implementation deltas (RF-35/RF-40 → W-15; RF-36/RF-37/RF-39 → W-22)
 
 1. D31-4 freshness predicate as adjusted through round 2: total V
    including unbranched `tool_call.state_root_after` (R8), positional
    per-store binding (R11), journal-store-set projection — in
    `recover_pending_state_change` (same function W-15 already upgrades to
    the `VerifiedPrefix` per S4). [RF-35 / W-15]
-2. D31-6 as adjusted through round 3: CAS capture + the recovery capture
+2. D31-6 as adjusted through round 4: CAS capture + the recovery capture
    record before restore (R9 — first-write-wins; exact-set validation
-   per R15); the R14 element-wise explanation check on retry with
-   fail-closed-in-place on unexplained live state; per-store
-   window-drift/closing pairs with `recovery` linkage in one transaction
-   after restore (R13); pinned removal and check orders; restore-skip
-   when live == V. [RF-35 / W-15]
+   per R15); the R14/R18 explanation check on retry — path-state over
+   the union of live/capture/target, absence as a value,
+   canonical-entry identity — with fail-closed-in-place on unexplained
+   state; per-store window-drift/closing pairs with `recovery` linkage
+   in one transaction after restore (R13); pinned removal and check
+   orders; restore-skip when live == V. [RF-35 / W-15]
 3. Journal `home`/`epoch` (TracePosition) binding with the R3 per-arm
    guard, plus the R11 per-store prior-attestation positions. [RF-35 /
    W-15]
-4. Gate replay binding parity (R1): shared exact-match predicate at each
-   effect's durable authorization offset. [RF-36 / W-22]
-5. Re-merge outcome-equality check, R12 quantifier on the R16 basis
-   (per previewed op, touched-path result equality against the previewed
-   merged tree + conflict status), with re-park-on-difference (R2).
-   [RF-37 / W-22]
+4. Binding parity at both consumers (R1/R17): one position-ordered
+   reconstruction — exact-match binding plus the temporal edge
+   (approvals fund only later offsets) — shared by decision time and
+   gate replay. [RF-36 / W-22]
+5. Re-merge outcome-equality check, R12 quantifier on the R16 basis,
+   with the R20 referent (previews gain CAS-retained per-store `merged`
+   roots, digest-covered) and re-park-on-difference (R2). [RF-37 / W-22]
 6. Exemption candidate binding (R10): `escalation_event` in the approval
    body; C2 listings render from or verify against signed escalation
    events. [RF-39 / W-22]
+7. Exact canonical-entry realization in the fs apply (mode-only writes;
+   file↔directory topology ordering) with mode-exactness and
+   both-direction topology crash negatives. [RF-40 / W-15]
 
 Every remaining clause of A24–A26 is enforced by the merged W-14
 implementation, mapped line-by-line in the ratification PR's corrected G9

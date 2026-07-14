@@ -91,7 +91,18 @@ fail-closed-in-place (the narrowed multi-crash guarantee; SI-39 files
 automated multi-window preservation), exact-set capture validation,
 and the R16 per-op touched-path comparison basis; the reviewer
 confirmed no original SI decision point was silently dropped.
-Awaiting round 4. Next after merge: item (3), SI-32.
+Round 4 returned REQUEST CHANGES (five findings, three high),
+ratified as R17–R20 — and changed character: alongside protocol
+tightening (R17 temporal binding at both consumers, RF-36 widened;
+R18 path-state quantification; R20 the preview merged-root referent),
+it surfaced the cycle's first **as-built defects** in merged
+dogfooding code (RF-40: fs restore skips mode-only differences and
+deadlocks on file↔directory swaps — carried by W-15). The
+three-category labeling (ratified as built / adjusted beyond as-built
+/ as-built defect) is now explicit in ADR 0007 and the changelog;
+unenforced clauses bind at their carrier gates per the ledger, the
+status W-20 item (6) will make first-class. Awaiting round 5. Next
+after merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -119,14 +130,16 @@ resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 3: the positional D31-4
+prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 4: the positional D31-4
 freshness predicate over total V — including unbranched
 `tool_call.state_root_after` — the D31-6 recovery capture record
-(exact-set validation, R14 element-wise explanation with
+(exact-set validation, R14/R18 path-state explanation with
 fail-closed-in-place) with paired per-store
 window-drift/`fabric_recovery` closing emission, the journal's
 home/epoch + prior-attestation-position binding, and the G13(e–g)
-journal-validation negatives), and replacing the per-decision full
+journal-validation negatives; plus RF-40's as-built fs-restore
+realization fixes — mode-only writes, file↔directory pass ordering —
+with the G13(i–j) negatives), and replacing the per-decision full
 `verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
 abstraction (D5); the migration epoch (invalidation + the R3
 pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
@@ -145,11 +158,13 @@ audit; scope re-cut 2026-07-13 by the A23 ratification.*
 
 **W-22 — A25/A26 broker conformance mechanisms.** Close the three
 authority-surface gaps the A24–A26 ratification reviews (rounds 1–2)
-found between the ratified clauses and the merged W-14 broker: RF-36 — gate
-replay applies the same exact-match approval binding predicate as
-decision time, evaluated at each effect's durable authorization offset
-(the W-2 shared-evaluator discipline extended to consumption; supplies
-the G13(d) double-resolution negative); RF-37 — the approval-time
+found between the ratified clauses and the merged W-14 broker: RF-36 — one
+position-ordered consumption reconstruction at **both** consumers
+(exact-match binding plus the temporal edge: headroom at offset O counts
+only approvals before O — round 4 widened this from gate-only after
+demonstrating decision-time retro-funding; the W-2 shared-evaluator
+discipline extended to consumption; supplies the G13(d)
+double-resolution and G13(h) temporal negatives); RF-37 — the approval-time
 re-merge compares its agent-originated outcome (op-set + conflict
 decisions, the R12 quantifier) to the signed candidate preview and
 re-parks on any difference as a fresh candidate (supplies the G13(a)

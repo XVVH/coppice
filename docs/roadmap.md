@@ -84,7 +84,14 @@ crash), positional freshness (ABA replay defeats value equality), the
 R12 outcome quantifier (agent-originated ops, not whole roots),
 exemption version binding (`escalation_event`; RF-39 → W-22), and
 per-store drift/closing pairing. Recovery is now V-preserving by
-construction. Awaiting round 3. Next after merge: item (3), SI-32.
+construction. Round 3 returned REQUEST CHANGES (five findings, two
+high, confined to the round-2 additions and evidence bookkeeping),
+ratified as R14–R16: element-wise explanation on retry with
+fail-closed-in-place (the narrowed multi-crash guarantee; SI-39 files
+automated multi-window preservation), exact-set capture validation,
+and the R16 per-op touched-path comparison basis; the reviewer
+confirmed no original SI decision point was silently dropped.
+Awaiting round 4. Next after merge: item (3), SI-32.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -112,11 +119,14 @@ resolution). W-15 implements **layer 1 only**: signed
 `home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
 `TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
 decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 2: the positional D31-4
+prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 3: the positional D31-4
 freshness predicate over total V — including unbranched
-`tool_call.state_root_after` — the D31-6 recovery capture record with
-paired per-store window-drift/`fabric_recovery` closing emission, and
-the journal's home/epoch + prior-attestation-position binding), and replacing the per-decision full
+`tool_call.state_root_after` — the D31-6 recovery capture record
+(exact-set validation, R14 element-wise explanation with
+fail-closed-in-place) with paired per-store
+window-drift/`fabric_recovery` closing emission, the journal's
+home/epoch + prior-attestation-position binding, and the G13(e–g)
+journal-validation negatives), and replacing the per-decision full
 `verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
 abstraction (D5); the migration epoch (invalidation + the R3
 pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
@@ -133,9 +143,9 @@ W-3 may collect disposable examples but may not compile standing authority
 until W-15 lands. *Provenance: RF-13 + 2026-07-12 cryptographic mechanism
 audit; scope re-cut 2026-07-13 by the A23 ratification.*
 
-**W-22 — A25/A26 broker conformance mechanisms.** Close the two
-authority-surface gaps round 1 of the A24–A26 ratification review found
-between the ratified clauses and the merged W-14 broker: RF-36 — gate
+**W-22 — A25/A26 broker conformance mechanisms.** Close the three
+authority-surface gaps the A24–A26 ratification reviews (rounds 1–2)
+found between the ratified clauses and the merged W-14 broker: RF-36 — gate
 replay applies the same exact-match approval binding predicate as
 decision time, evaluated at each effect's durable authorization offset
 (the W-2 shared-evaluator discipline extended to consumption; supplies
@@ -154,8 +164,9 @@ checkpoint-keyed `VerifiedPrefix` consumption — landing RF-36 first
 would be churned; may be pulled earlier by operator decision if W-15
 slips (RF-36 is posture-bounded: the broker is locally the sole
 approval producer; the exposure is the W-9 foreign-trace surface).
-*Provenance: PR #48 round-1 independent review, findings 1–2, ratified
-as ADR 0007 R1/R2 (2026-07-14).*
+*Provenance: PR #48 independent review — round-1 findings 1–2 (ADR 0007
+R1/R2), round-2 finding 3 (R10/RF-39), round-3 finding 3 pinning
+RF-37's comparison basis (R16); all 2026-07-14.*
 
 **W-16 — payload envelope v2 and shred protocol.** Ratify SI-28/SI-29, then
 bind canonical AAD and algorithm/version/key metadata, enforce the KEK wrap

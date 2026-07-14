@@ -2,9 +2,10 @@
 
 **Status: RATIFIED as amendments A24–A26 (spec v0.9, §5.3/§5.5/§6) on
 2026-07-14 — determinations D31-1…D31-6, D33-1…D33-5, D34-1…D34-4 below,
-**as adjusted by the round-1 post-review adjustments R1–R7** (the
-adjustments win where they differ; D31-2, D31-4, D31-6, D33-4, D34-2, and
-D34-3 are read as adjusted). The spec text is the normative *language*.
+**as adjusted by the post-review adjustments R1–R16 (review rounds 1–3;
+the adjustments win where they differ**; D31-2, D31-4, D31-6, D33-4,
+D34-2, and D34-3 are read as adjusted). The spec text is the normative
+*language*.
 SI-31, SI-33, and SI-34 are RESOLVED. The candidate-code gaps are tracked
 as RF-35 (recovery, carried by W-15), RF-36/RF-37 (gate binding parity
 and re-merge outcome equality, carried by W-22), and RF-39 (exemption
@@ -15,7 +16,13 @@ REQUEST CHANGES (seven findings, three high — a missing V source, a
 non-durable capture, an unbound exemption candidate, plus ABA freshness
 and a defective equality quantifier), all verified at source and ratified
 as R8–R13 below, adding one new protocol artifact (the recovery capture
-record) and positional freshness. The corrected text awaits round 3.**
+record) and positional freshness. Round 3 returned REQUEST CHANGES (five
+findings, two high, all in the round-2 additions and evidence
+bookkeeping — the round-2 protocol's own repeated-crash window, an
+exact-set validation predicate, the R12 comparison basis), ratified as
+R14–R16 below with SI-39 filed for the multi-window enhancement; the
+reviewer confirmed no original SI decision point was silently dropped.
+The corrected text awaits round 4.**
 
 ## Context
 
@@ -543,6 +550,77 @@ avoided.
 Finding 7 (the v0.9 status line still said "adjusted in three places")
 was mechanical and corrected directly.
 
+## Post-review adjustments — round 3 (W-20, 2026-07-14 — operator-ratified)
+
+The third round returned REQUEST CHANGES: five findings, two high — both
+in the round-2 additions themselves, confirming the fix surface is
+narrowing (round 1 broke determinations, round 2 broke the repairs,
+round 3 broke only the round-2 material plus evidence bookkeeping). The
+reviewer's completeness sweep confirmed no original SI decision point
+was silently dropped.
+
+**R14 — element-wise explanation on retry; the guarantee narrowed;
+SI-39 filed (finding 1).** R9's first-write-wins — the fix for round 2's
+evidence loss — made retries blind to *new* divergence arising during a
+crashed recovery's own downtime: capture `C1`, crash mid-restore, human
+edits `C2`, retry restores over `C2` with no durable name and no event.
+Following the reviewer's narrow-and-file guidance rather than designing
+capture generations in-PR: on retry with an existing capture record,
+recovery verifies — per store, before any mutation — that **every
+element of live state is explained by either the capture record's
+version or the restore target's version** (per file for fs stores: a
+partial tmp+rename restore leaves each file at exactly one of the two;
+whole-image for sqlite: the swap is atomic). All-explained → an innocent
+interrupted restore; complete idempotently as ratified. Any unexplained
+element → a new divergence window → **fail closed in place**: no
+mutation, the new bytes stay live and untouched, the home stays closed,
+operator resolution. A24's guarantee is re-scoped honestly: automated
+capture-and-attribute covers the divergence present when recovery first
+begins; later-window divergence is detected and preserved-by-refusal,
+never silently normalized. **SI-39** files the enhancement (automated
+multi-window preservation — capture generations / recovery progress),
+composing with the RF-34/RF-38 operator-surface pass for the resolution
+ceremony. Cost note: the check is hash-walking against two CAS-resident
+trees; cheap.
+
+**R15 — capture-record validation is exact-set (finding 2).** Round 2's
+"store set ⊆ the journal's" was a reflexive copy of the journal's own
+tuple logic and wrong for this artifact: pair-or-neither needs every
+journaled store's captured root to *prove* non-divergence, so a record
+missing a journaled store cannot make that determination — and
+first-write-wins forbids repairing it. Corrected predicate: the capture
+record's store set MUST equal the journal's exactly; anything else is
+invalid and fails closed (it can only arise from bug or tamper — the
+writer captures all journaled stores before publishing once).
+
+**R16 — the R12 comparison basis (finding 3).** For multi-path ops the
+two candidate bases disagree: branch-relative ops (`rename(a,b)` still
+reads as itself when trunk independently deleted `a`) versus literal
+applied delta (`add(b)`). Ratified: **basis-1 with per-path scoping** —
+equality is evaluated per previewed op over the op's full touched-path
+set (`rename(a,b)` touches `{a, b}`); an op is preserved iff the
+re-merged result at its touched paths equals the *previewed merged
+result* at those paths (the previewed merged tree is part of the signed
+candidate's stores, CAS-resident — the referent is mechanical) and its
+conflict status is unchanged; paths touched by no previewed op or
+conflict card are trunk's own and free to differ. The reviewer's rename
+example correctly proceeds (`a` absent, `b = h` in both merged trees —
+the human saw exactly what landed); round 2's refuting case still
+correctly re-parks (the conflict card's path resolves differently).
+Rejected: the applied-delta basis — it re-parks on trunk changes that
+leave the approved outcome untouched, the blanket-re-park failure mode
+in different clothes. Opaque stores unchanged from R12 (classification +
+pinned installed image).
+
+Finding 4 (the sweep mapped grouped journal-validation claims to
+STATE-COMMIT tests that cover only some dimensions) is corrected in the
+PR sweep, with the three uncovered dimensions filed as **G13(e)/(f)/(g)**
+(invalid journal signature; pre-existing-sibling exclusive publication;
+journal-roots-vs-committed-event disagreement) landing with W-15's RF-35
+lane. Finding 5 (round-1 wording still controlling in the ADR status,
+changelog intro and its V enumeration, and W-22's count/provenance) was
+mechanical and corrected directly.
+
 ## Implementation deltas (RF-35 → W-15; RF-36/RF-37/RF-39 → W-22)
 
 1. D31-4 freshness predicate as adjusted through round 2: total V
@@ -550,18 +628,21 @@ was mechanical and corrected directly.
    per-store binding (R11), journal-store-set projection — in
    `recover_pending_state_change` (same function W-15 already upgrades to
    the `VerifiedPrefix` per S4). [RF-35 / W-15]
-2. D31-6 as adjusted through round 2: CAS capture + the recovery capture
-   record before restore (R9, first-write-wins, journal validation
-   family); per-store window-drift/closing pairs with `recovery` linkage
-   in one transaction after restore (R13); pinned removal and check
-   orders; restore-skip when live == V. [RF-35 / W-15]
+2. D31-6 as adjusted through round 3: CAS capture + the recovery capture
+   record before restore (R9 — first-write-wins; exact-set validation
+   per R15); the R14 element-wise explanation check on retry with
+   fail-closed-in-place on unexplained live state; per-store
+   window-drift/closing pairs with `recovery` linkage in one transaction
+   after restore (R13); pinned removal and check orders; restore-skip
+   when live == V. [RF-35 / W-15]
 3. Journal `home`/`epoch` (TracePosition) binding with the R3 per-arm
    guard, plus the R11 per-store prior-attestation positions. [RF-35 /
    W-15]
 4. Gate replay binding parity (R1): shared exact-match predicate at each
    effect's durable authorization offset. [RF-36 / W-22]
-5. Re-merge outcome-equality check, R12 quantifier (agent-originated
-   op-set + conflict decisions), with re-park-on-difference (R2).
+5. Re-merge outcome-equality check, R12 quantifier on the R16 basis
+   (per previewed op, touched-path result equality against the previewed
+   merged tree + conflict status), with re-park-on-difference (R2).
    [RF-37 / W-22]
 6. Exemption candidate binding (R10): `escalation_event` in the approval
    body; C2 listings render from or verify against signed escalation

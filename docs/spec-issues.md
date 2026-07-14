@@ -17,17 +17,20 @@
 > required independent re-review used SI-31/SI-33/SI-34 as its oracle).
 > **SI-31, SI-33, and SI-34 are resolved in v0.9 as A24–A26** (W-20
 > retro-ratification, 2026-07-14, ADR 0007, PR #48 — determinations as
-> adjusted by review rounds 1–2, R1–R13; as-built gaps tracked by
-> RF-35–RF-37 and RF-39, carried by W-15/W-22); SI-32 remains open,
-> next in the W-20 batch. **SI-35**
+> adjusted by review rounds 1–3, R1–R16; as-built gaps tracked by
+> RF-35–RF-37 and RF-39, carried by W-15/W-22; SI-39 files the
+> multi-window recovery enhancement); SI-32 remains open, next in the
+> W-20 batch. **SI-35**
 > is the workboard domain-label question, recovered from
 > `codex/workboard-dogfood` (drafted there as SI-22 before main assigned
 > that number) at its W-21 revival decision. **SI-36** (mid-run "actually do
 > Y" amendments — re-manifest link and amend-vs-new-run boundary) was filed
 > 2026-07-13 and merged via PR #46; **SI-37** (TracePosition agreement
 > predicate) was filed by the second independent review of PR #47; **SI-38**
-> (TracePosition genesis representation) by the fourth (2026-07-14); new
-> issues start at **SI-39**.
+> (TracePosition genesis representation) by the fourth (2026-07-14).
+> **SI-39** (recovery-window divergence: automated multi-window
+> preservation) was filed by round 3 of PR #48's review — the
+> narrow-and-file remedy ratified as R14. New issues start at **SI-40**.
 
 Tracked per the handoff: where the spec is ambiguous or contradicts itself,
 we record the question, the interpretation the kernel implements, and why —
@@ -37,6 +40,41 @@ Settled decisions (F1, F4, fail-open) are not re-litigated here.
 Status legend: **open** = needs a spec amendment or an explicit "fine as
 interpreted" from the author; **interpreted** = kernel picked a reading and
 tests encode it; flipping the reading is cheap.
+
+---
+
+## SI-39 — recovery-window divergence: automated preservation across repeated recovery crashes (§5.3, A24, M8) — open
+
+A24's recovery protocol (D31-6/R9/R14, ratified in PR #48) preserves and
+attributes divergence present when recovery first begins: the capture
+record durably names the first capture, and R14's element-wise
+explanation check detects divergence arising during a crashed recovery's
+*own* downtime — but resolves it by **failing closed in place** (no
+mutation, home closed, operator resolution), not by automated
+capture-and-attribute. The round-3 independent review (PR #48, finding 1)
+surfaced the gap: capture `C1`, crash mid-restore, human edits `C2`,
+retry — first-write-wins forbids re-capturing, so without R14 the `C2`
+bytes would be normalized unrecorded; with R14 they are preserved by
+refusal, at the cost of an operator ceremony for every
+divergence-during-recovery event.
+
+Decide the automated shape: capture **generations** (a new signed
+capture record per retry that observes unexplained live state, each a
+distinct M8 window with its own drift/closing pairs — unbounded under
+crash loops, needs naming/ordering/validation rules), a durable
+**recovery-progress** marker (letting a retry distinguish
+partially-restored from newly-edited without per-element comparison), or
+another durable reconstruction source. Also owns: the operator
+resolution ceremony for the fail-closed arm (compose with the RF-34/
+RF-38 operator-surface pass) and the M8 accounting for multi-window
+recoveries (one drift event per window — the generations map onto
+windows naturally). Constraints from the ratified base: intentions are
+write-ahead files, attestations are write-behind events (ADR 0007 R9);
+recovery never moves V; first-write-wins per generation (a generation is
+immutable once published). Trigger: schedule with W-15's RF-35
+implementation if cheap, else the first real fail-closed-in-place
+incident during dogfooding. *Provenance: PR #48 round-3 review finding 1
+(2026-07-14); the narrow-and-file remedy ratified as R14.*
 
 ---
 
@@ -214,8 +252,13 @@ mutable table (RF-39, the RF-31 class on the exemption surface); and
 outcome equality was re-quantified to the agent-originated applied
 op-set and conflict decisions — whole-root equality would have re-parked
 on every unrelated human trunk edit, recreating the blanket re-park R2
-rejects. Determinations D34-1…D34-4 as adjusted by R2/R5 and R10/R12 in
-ADR 0007 (W-20 session, 2026-07-14). Original filing preserved below.
+rejects. Round 3 pinned the comparison basis (R16): equality per
+previewed op over its full touched-path set against the previewed
+merged tree, conflict status unchanged — rename/move made the naive
+bases diverge, and the applied-delta reading was rejected as blanket
+re-park in different clothes. Determinations D34-1…D34-4 as adjusted by
+R2/R5, R10/R12, and R16 in ADR 0007 (W-20 session, 2026-07-14).
+Original filing preserved below.
 
 ---
 
@@ -399,10 +442,17 @@ attestations are write-behind events); freshness became **positional**
 equality passes same-epoch ABA replays); and emission became per-store
 window-drift/closing **pairs** (pair-or-neither, `recovery` linkage,
 pinned removal and check orders). Recovery is V-preserving by
-construction. Determinations D31-1…D31-6 as adjusted by R3/R4 and
-R8/R9/R11/R13 in ADR 0007; challenge pass and fresh-eyes source
-verification 2026-07-14 (W-20 session). Original filing preserved
-below.
+construction. Round 3 hardened the round-2 additions themselves:
+R14's element-wise explanation check on retry (live state explained by
+neither the capture record nor the restore target fails closed **in
+place** — a divergence window opened during recovery's own downtime is
+preserved by refusal, never normalized; the automated multi-window
+enhancement is SI-39) and R15's exact-set capture-record validation
+(the round-2 `⊆` predicate let a partial record pass while
+first-write-wins forbade repairing it). Determinations D31-1…D31-6 as
+adjusted by R3/R4, R8/R9/R11/R13, and R14/R15 in ADR 0007; challenge
+pass and fresh-eyes source verification 2026-07-14 (W-20 session).
+Original filing preserved below.
 
 ---
 

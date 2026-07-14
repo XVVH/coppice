@@ -912,8 +912,15 @@ without it a crash between restore and emission erases the downtime-edit
 evidence); per-store window-drift + `fabric_recovery` closing pairs
 carrying the journal id, pair-or-neither, with the pinned orderings
 (closing-record idempotency check before the freshness predicate);
-per-arm epoch guard. Recovery never moves V (normative invariant). The
-enforcing tests land with W-15's contract lanes.
+per-arm epoch guard. Round 3 (R14/R15): capture-record validation is
+exact-set (a partial record cannot prove non-divergence), and retries
+run the element-wise explanation check — live state explained by neither
+the capture record nor the restore target fails closed in place, so a
+divergence window opened during recovery's own downtime is preserved by
+refusal (automated multi-window preservation is SI-39). Recovery never
+moves V (normative invariant). The enforcing tests land with W-15's
+contract lanes, including the G13(e)/(f)/(g) journal-validation
+negatives round 3 split out.
 
 ## RF-36 — gate replay grants approval headroom without binding, order, or double-resolution checks — open (high, posture-bounded)
 
@@ -953,13 +960,15 @@ conflict and installs the full branch edit the human was shown *not*
 landing. `approve_promotion` re-merges pinned branch roots against live
 trunk and applies the result with no comparison to the previewed outcome.
 
-**Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2 and
-re-quantified by R12 (round 2) — the re-merge MUST reproduce the
-previewed outcome exactly, outcome meaning the **agent-originated applied
-op-set and conflict decisions** (never the whole-store merged root, whose
-equality would re-park on every unrelated human trunk edit); any
-difference re-parks as a fresh candidate with a fresh escalation and
-digest. Bounded meanwhile: the
+**Clause:** A26 §6 re-merge boundary as adjusted by ADR 0007 R2,
+re-quantified by R12 (round 2), and given its comparison basis by R16
+(round 3) — the re-merge MUST reproduce the previewed outcome exactly:
+per previewed op, over the op's full touched-path set, the re-merged
+result equals the previewed merged result (the referent tree is part of
+the signed candidate) with conflict status unchanged; never the
+whole-store merged root, whose equality would re-park on every unrelated
+human trunk edit; any difference re-parks as a fresh candidate with a
+fresh escalation and digest. Bounded meanwhile: the
 applied content is still the digest-pinned branch content, the gate
 re-verifies trace-vs-capability, drift is attributed first (M8), and
 Tier-1 promotion remains revertible. Carried by **W-22**; the

@@ -486,9 +486,18 @@ round-0 sweep wrongly claimed this covered by
 `w14_anomalous_signed_decision_edges_never_authorize_dispatch` (which
 covers conflicting bindings and approval-field mismatches, not double
 resolution). Lands with RF-36's gate-binding-parity lane (W-22), which
-exercises the same edges at both consumers. The D31-4/D31-6/H3-binding
-enforcement gaps are RF-35's (implementation absent, not tests absent);
-their contract lanes land with W-15.
+exercises the same edges at both consumers. Round 3 (finding 4) split
+three more journal-validation dimensions the sweep had grouped under
+STATE-COMMIT's existing negatives: (e) **invalid journal signature**
+(the registered tests cover mistyped/wrong-version/unsafe/misbound, all
+via resealed valid signatures; none presents a signature that fails
+`canon::verify`); (f) **pre-existing write-side sibling** (no test
+proves `O_CREAT|O_EXCL|O_NOFOLLOW` publication fails before any
+mutation when the journal path is occupied); (g) **journal-roots vs
+committed-event disagreement** (the misbinding negative varies kind and
+manifest, not the root tuple). All three land with W-15's RF-35 lane.
+The D31-4/D31-6/H3-binding enforcement gaps are RF-35's (implementation
+absent, not tests absent); their contract lanes land with W-15.
 
 ## Automation lanes
 

@@ -1,0 +1,185 @@
+#!/bin/sh
+# Repo-state hygiene for docs and ADRs — Tier 1 of the review battery
+# (docs/review-battery.md). Dependency-free POSIX shell, in the spirit of
+# check-test-contracts: it runs in the ordinary local gate, needs no network
+# and no cargo, and the repository — not a hosting provider — defines what
+# "hygienic" means.
+#
+# Deterministic, low-false-positive checks over docs/*.md and top-level *.md:
+#   1. doc-refs    — every referenced `docs/<path>.md` and `ADR 0NNN` resolves
+#                    to a file that exists (catches a phantom appendix/ADR ref).
+#   2. list-number — within a section, a top-level ordered list runs 1,2,3,…; a
+#                    reset to `1.` starts a new list; a duplicate or a skip is an
+#                    error (catches the double-"2." class).
+#   3. self-appendix — a doc that names an "appendix" must contain an appendix
+#                    heading (catches a referenced-but-absent inline section).
+#
+# Two-sided evidence: `--self-test` builds a passing fixture and a set of
+# deliberately-broken fixtures in a tempdir and asserts each check fires on the
+# break and passes on the good copy — the negative side of the lane; the
+# real-tree run is the positive side. Mutation testing does not apply: this is
+# shell enforcement logic, not Rust (docs/review-battery.md states this).
+
+set -eu
+
+SELF=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+fail() {
+    printf 'doc-hygiene error: %s\n' "$1" >&2
+    exit 1
+}
+
+# List markdown under a root: the docs/ tree plus top-level *.md.
+list_md() {
+    root=$1
+    [ -d "$root/docs" ] && find "$root/docs" -name '*.md' -type f
+    for f in "$root"/*.md; do
+        [ -f "$f" ] && printf '%s\n' "$f"
+    done
+}
+
+# Append every hygiene violation under $root to the file $out. Returns nothing;
+# emptiness of $out is the verdict, so results survive the pipeline subshells.
+run_checks() {
+    root=$1
+    out=$2
+
+    list_md "$root" | while IFS= read -r f; do
+        rel=${f#"$root"/}
+
+        # --- Check 1: referenced doc files and ADRs resolve ---------------
+        # roadmap.md is exempt from file-existence refs only: by its own
+        # boundary rule it orders *future* work and names planned or
+        # unmerged-branch artifacts (e.g. a doc recovered on an unmerged
+        # branch). Every other doc describes current state and is enforced.
+        # ADR-number refs are enforced everywhere, roadmap included.
+        case "$rel" in
+        docs/roadmap.md) ;;
+        *)
+            grep -noE 'docs/[A-Za-z0-9._/-]+\.md' "$f" 2>/dev/null \
+            | while IFS=: read -r ln ref; do
+                [ -f "$root/$ref" ] || printf '%s:%s references missing file %s\n' \
+                    "$rel" "$ln" "$ref" >> "$out"
+            done
+            ;;
+        esac
+        grep -noE 'ADR 0[0-9][0-9][0-9]' "$f" 2>/dev/null \
+        | while IFS=: read -r ln ref; do
+            num=${ref#ADR }
+            hit=$(find "$root/docs/adr" -name "$num-*.md" -type f 2>/dev/null | head -n1)
+            [ -n "$hit" ] || printf '%s:%s references missing %s\n' \
+                "$rel" "$ln" "$ref" >> "$out"
+        done
+
+        # --- Check 2: ordered-list numbering per section -----------------
+        awk -v rel="$rel" '
+            /^```/          { fence = !fence; next }
+            fence           { next }
+            /^#/            { prev = 0; next }
+            /^[0-9]+\. / {
+                n = $1 + 0
+                if (n == 1)              { prev = 1;  next }
+                if (prev == 0)           { prev = n;  next }
+                if (n == prev + 1)       { prev = n;  next }
+                printf "%s:%d: ordered-list number %d follows %d (expected %d or a reset to 1)\n", \
+                    rel, NR, n, prev, prev + 1
+            }
+        ' "$f" >> "$out"
+
+        # --- Check 3: a named "..." appendix has an appendix heading -----
+        # High-precision: fires only on a *named* appendix reference — a
+        # double-quoted name immediately followed by "appendix" (the finding-7
+        # shape) — not on prose that merely uses the word (e.g. a doc
+        # describing this very check). Requires a matching appendix heading.
+        if grep -vE '^#' "$f" | grep -qE '"[^"]{2,}"[[:space:]]+[Aa]ppendix'; then
+            grep -qiE '^#+ .*appendix' "$f" \
+                || printf '%s: references a named "..." appendix but has no appendix heading\n' "$rel" >> "$out"
+        fi
+    done
+}
+
+report() {
+    root=$1
+    out=$(mktemp "${TMPDIR:-/tmp}/asf-dochyg.XXXXXX")
+    trap 'rm -f "$out"' EXIT HUP INT TERM
+    run_checks "$root" "$out"
+    if [ -s "$out" ]; then
+        printf 'doc-hygiene: violations found\n\n' >&2
+        sort "$out" >&2
+        printf '\n' >&2
+        return 1
+    fi
+    printf 'doc-hygiene OK: docs and ADRs under %s pass repo-state checks\n' "${root#"$SELF"/}"
+    return 0
+}
+
+self_test() {
+    dir=$(mktemp -d "${TMPDIR:-/tmp}/asf-dochyg-fx.XXXXXX")
+    trap 'rm -rf "$dir"' EXIT HUP INT TERM
+    mkdir -p "$dir/docs/adr"
+
+    # Passing fixture: valid ref, contiguous list, appendix heading present.
+    cat > "$dir/docs/adr/0001-good.md" <<'EOF'
+# Good
+See docs/other.md and ADR 0001.
+1. one
+2. two
+3. three
+## Rejected
+1. a
+2. b
+## The inventory appendix
+rows here
+EOF
+    cat > "$dir/docs/other.md" <<'EOF'
+# Other
+No issues here.
+EOF
+    out=$(mktemp "${TMPDIR:-/tmp}/asf-dochyg-st.XXXXXX")
+    run_checks "$dir" "$out"
+    [ -s "$out" ] && { printf 'self-test FAIL: good fixture flagged:\n'; cat "$out"; rm -f "$out"; return 1; }
+
+    # Break 1: dangling doc + ADR reference.
+    printf 'ref docs/missing.md and ADR 0099\n' >> "$dir/docs/adr/0001-good.md"
+    : > "$out"; run_checks "$dir" "$out"
+    grep -q 'missing file docs/missing.md' "$out" || { printf 'self-test FAIL: dangling doc ref not caught\n'; rm -f "$out"; return 1; }
+    grep -q 'missing ADR 0099' "$out" || { printf 'self-test FAIL: dangling ADR ref not caught\n'; rm -f "$out"; return 1; }
+
+    # Break 2: duplicate ordered-list number.
+    cat > "$dir/docs/dup.md" <<'EOF'
+# Dup
+1. one
+2. two
+2. also two
+4. four
+EOF
+    : > "$out"; run_checks "$dir" "$out"
+    grep -q 'dup.md:4: ordered-list number 2 follows 2' "$out" || { printf 'self-test FAIL: duplicate list number not caught\n'; rm -f "$out"; return 1; }
+
+    # Break 3: appendix named but no appendix heading.
+    cat > "$dir/docs/noapp.md" <<'EOF'
+# Inventory reference with no section
+The "Publication site inventory" appendix lists every site.
+## Body
+text
+EOF
+    : > "$out"; run_checks "$dir" "$out"
+    grep -q 'noapp.md: references a named' "$out" || { printf 'self-test FAIL: missing appendix heading not caught\n'; rm -f "$out"; return 1; }
+    # And a doc that merely discusses the word "appendix" must NOT fire.
+    cat > "$dir/docs/meta.md" <<'EOF'
+# Meta
+This check flags a doc that names an "appendix" with no heading.
+EOF
+    : > "$out"; run_checks "$dir" "$out"
+    grep -q 'meta.md:' "$out" && { printf 'self-test FAIL: meta-discussion false-positive\n'; rm -f "$out"; return 1; }
+
+    rm -f "$out"
+    printf 'doc-hygiene self-test OK: all three checks fire on breaks and pass on the good fixture\n'
+    return 0
+}
+
+case "${1:-}" in
+    --self-test) self_test ;;
+    "")          report "$SELF" ;;
+    *)           report "$1" ;;
+esac

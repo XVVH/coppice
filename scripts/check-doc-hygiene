@@ -52,9 +52,14 @@ run_checks() {
         # boundary rule it orders *future* work and names planned or
         # unmerged-branch artifacts (e.g. a doc recovered on an unmerged
         # branch). Every other doc describes current state and is enforced.
+        # docs/substrate-theory-analysis/ is exempt for the same class of
+        # reason: it holds verbatim external-review artifacts (evidence,
+        # never edited), whose quoted URLs can contain foreign-repo paths
+        # like blob/main/docs/design.md that false-positive as local refs.
         # ADR-number refs are enforced everywhere, roadmap included.
         case "$rel" in
         docs/roadmap.md) ;;
+        docs/substrate-theory-analysis/*) ;;
         *)
             grep -noE 'docs/[A-Za-z0-9._/-]+\.md' "$f" 2>/dev/null \
             | while IFS=: read -r ln ref; do

@@ -98,9 +98,14 @@ snapshot and still overwritten by the rename; the snapshot preserves
 exactly the state the prepare check already verified was not at risk.
 What the block layer can genuinely buy is retention of the **outgoing
 live state at swap time**: a clone-and-swap publication that retains
-the outgoing dataset (or a per-file clone of each target immediately
-before its rename), so divergent bytes survive the swap instead of
-being unlinked. Even then the fs artifact is only the preservation
+the outgoing dataset — the sound variant, since the dataset swap is one
+atomic point — or a per-file clone of each target immediately before
+its rename **only under atomic clone-and-swap semantics**: a separate
+clone followed by a separate rename re-opens the window in miniature
+(an edit landing between them is absent from the clone and still
+unlinked), so absent atomicity the per-file variant is race-narrowing,
+not window-closing (the confirming review's finding). Either way
+divergent bytes survive the swap instead of being unlinked. Even then the fs artifact is only the preservation
 substrate: T3's criterion is attributed-never-lost, so the retained
 outgoing state must still be diffed against the prepare image, ingested
 into the CAS, and drift-attributed — retention, reconciliation, and

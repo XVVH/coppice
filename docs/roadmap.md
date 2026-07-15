@@ -172,9 +172,17 @@ SI-40 substrate-assisted paragraph's snapshot-timing over-claim), two
 lows — all folded same-day and recorded in ADR 0008's addendum; the
 round verified all ten determinations integrated, the A24/R24/R25
 grammar preserved, and the RF/G14 source claims. Operator gate decision
-2026-07-15: a confirming delta round, scoped to the fold commit
-(`eff73b2`), within the stopping rule's blocking-round continuation; no
-blocking finding there closes the cycle. **Batch close-out per the operator decision filed
+2026-07-15: a confirming delta round, scoped to PR #50's five-finding
+fold delta, within the stopping rule's blocking-round continuation.
+**The confirming round returned no blocking findings — the cycle is
+closed (2026-07-15).** Its two non-blocking findings were folded under
+the battery: the per-file clone variant in SI-40's candidate text now
+requires atomic clone-and-swap semantics (a separate clone→rename pair
+re-opens the window in miniature), and this entry's own branch-local
+SHA citation was replaced per the citation rule. Cycle cost, complete:
+one internal adversarial pre-review (14 findings) + two external delta
+rounds (5 + 2 findings) — against PR #48's seven. W-20 closes when this
+PR merges, per the close-out decision filed in PR #52. **Batch close-out per the operator decision filed
 in PR #52:** items (4)–(6) defer to their named triggers — SI-26/28/29
 to W-16 and the W-6 publication gate, SI-27 to W-17, the §0 convention
 riding with whichever fires first; W-20 closes when this ratification

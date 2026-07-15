@@ -545,3 +545,15 @@ sentence; two v0.9 version stamps bumped). The round verified: all ten
 determinations have integration sites, A27.3 preserves the A24/R24/R25
 grammar by exact reference, SI-40's corrected refusal disposition is
 sound, and RF-41/RF-42/RF-43 and G14's source/test claims check out.
+
+**Confirming delta round (2026-07-15) — no blocking findings; the
+cycle closes under the stopping rule.** Remedies 1, 2, 4, and 5
+verified correct; the external-round record and the v0.10 provenance
+clause verified accurate. Two non-blocking findings folded under the
+battery without a further round: SI-40's per-file clone variant now
+requires atomic clone-and-swap semantics (a separate clone→rename pair
+re-opens the window in miniature; the dataset-level retain-and-swap
+variant is sound as stated), and a branch-local SHA citation in the
+roadmap was replaced per the citation rule. Complete cycle cost for
+this ratification: one internal adversarial pre-review (14 findings)
+plus two delta-scoped external rounds (5 + 2 findings).

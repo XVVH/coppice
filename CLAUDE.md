@@ -106,6 +106,23 @@ posture row); a finding with no citable clause is a filing (SI/RF/G/P),
 not a blocker. Un-parking a posture row or a parked roadmap item is an
 operator gate decision, never a review outcome.
 
+Review battery (founded by the PR #50 SI-32 candidate, whose external
+review found 5 gaps a self-administered battery should have killed):
+authority-surface and spec-ratification changes run the codified battery
+in `docs/review-battery.md` BEFORE independent review. Non-negotiable
+shape: **enumeration tasks produce row-per-item tables (completeness
+against the filing's named deliverables; every `as-built`/`file:line`
+claim verified at source), adversarial tasks produce findings, and the
+two never bundle into one pass** — a missing table row is a visible
+miss; prose hides omissions. Tier 1 (`scripts/ci hygiene`: doc/ADR ref
+resolution, ordered-list numbering, named-section existence; plus the
+PR-context declared-scope and branch-off-`main` checks) is mechanical
+and runs in `required`. Tier 2 (the two tables) ships in the PR body
+like the G9 sweep. Tier 3 is the internal adversarial pre-review for
+candidates, scoped to soundness/shape, never asked to also be the
+exhaustive checker. A review round that finds completeness or code-fact
+debris means a Tier-1/2 pass was skipped or run as prose.
+
 ## Session-end git contract
 
 Work exists once it is on `origin`, not before. Push your branch before

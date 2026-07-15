@@ -38,8 +38,17 @@ run_contracts() {
     sh scripts/check-test-contracts
 }
 
+run_hygiene() {
+    heading "doc & ADR repo-state hygiene (review battery, Tier 1)"
+    # Self-test first (the negative side: the checks fire on broken fixtures),
+    # then the real docs tree (the positive side). See docs/review-battery.md.
+    sh scripts/check-doc-hygiene --self-test
+    sh scripts/check-doc-hygiene
+}
+
 run_test() {
     run_contracts
+    run_hygiene
 
     heading "workspace tests (all current and future targets)"
     cargo test --workspace --all-targets --locked
@@ -211,7 +220,8 @@ usage: scripts/ci <lane>
 lanes:
   static    strict Clippy over the workspace and all targets
   contracts validate two-sided evidence and reject unclassified new tests
-  test      contracts + all workspace targets + both acceptance demos
+  hygiene   doc & ADR repo-state checks (review battery, Tier 1)
+  test      contracts + hygiene + all workspace targets + both acceptance demos
   required  static + test; deterministic/offline and suitable for pre-push
   audit     RustSec advisory audit (requires cargo-audit and network/cache)
   full      required + audit
@@ -227,6 +237,9 @@ case "${1:-required}" in
         ;;
     contracts)
         run_contracts
+        ;;
+    hygiene)
+        run_hygiene
         ;;
     test)
         run_test

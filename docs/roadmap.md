@@ -130,7 +130,24 @@ items: the internal independent-context pre-review before each paid
 external round caught 13 findings (two high) at a fraction of a
 round's cost — carry it forward for items (3)–(6) and consider it in
 the W-20 close-out as standing practice for authority-surface PRs.
-Next: item (3), SI-32.
+**Item (3), SI-32 — candidate drafted 2026-07-14 (ADR 0008,
+PROPOSED), queued for operator ratification.** Three-tier filesystem
+attacker model (T1 offline tampering → content-address verification;
+T2 same-uid active writer → W-4 containment, not pathname checks; T3
+human edit → M8/A24 attribution), candidate rules A27.1–A27.4, grounded
+in a complete publication-site inventory. Surfaces one genuine T1 gap
+(unsigned `fabric.db` meta rows trusted while sibling events are signed
+— proposed RF-41, posture-bounded under SU) and one uniformity
+correction (R3: `sync_store` fs walk omits the `.git` exclusion and the
+no-follow open). Seven ratification choices enumerated in the ADR — the
+internal pre-review's blocking find promoted rollback/freshness to its
+own decision point (content-addressing answers T1 substitution, **not**
+rollback — that seam hands off to A23, which the first draft wrongly
+folded into content-addressing). Passed the audit battery +
+internal adversarial pre-review before filing. Spec untouched; SI-32
+open. Ratification session (challenge pass → determinations) is
+tomorrow's operator work. Next after item (3): SI-26/28/29, SI-27, the
+§0 posture-qualifier convention (item 6).
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`

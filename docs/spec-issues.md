@@ -411,6 +411,34 @@ verification); the symlink/hardlink/directory-entry rules per store kind
 (fs tree vs. SQLite file); and which publication-safety claims require
 containment before G-PUBLISH.
 
+**Candidate awaiting ratification (ADR 0008, 2026-07-14; W-20 item 3):**
+the three-tier model — T1 offline tampering (answered by content-address
+verification on every authority-bearing read-back), T2 active same-uid
+writer (no pathname check wins; the honest answer is W-4 containment, so
+every T2 claim is labeled "holds under COOP; requires W-4 at
+G-ADVERSARIAL"), T3 legitimate human edit (not an attack; M8 attribution
+and A24/R14 recovery-window capture). Candidate normative rules
+(candidate amendment A27): A27.1 the staged-bytes rule (ratifies RF-20's
+discipline); A27.2 verify-on-read-back, tier-labeled, with three classes
+(cryptographic content-address; trust-root by-boundary; and the
+**unsigned-index gap** — the code reads store paths from unsigned
+`fabric.db` meta rows a T1 tamperer controls while the events beside them
+are signed, proposed **RF-41**, posture-bounded under SU); A27.3 per-kind
+entry rules (fs-tree symlink rejection composing with A24/R21; SQLite
+whole-image + sidecar removal); A27.4 the containment-boundary sentence.
+The ADR enumerates seven human choices (tier count + super-user
+boundary, the T1-rollback/A23 seam, staged-bytes normativity, RF-41 vs
+P17 folding, containment wording, the R3 `sync_store` correction, spec
+placement) and grounds every claim in a complete publication-site
+inventory. The T1-rollback seam is the internal pre-review's blocking
+find: content-addressing answers T1 substitution/corruption/truncation
+but **not** rollback to a legitimately-signed older state (every rehash
+and signature passes) — that is A23's anchor, and the first draft wrongly
+folded it into content-addressing. SI-32 remains **open**; no tier
+label or rule is normative until those choices are ratified. Grounded at
+`ae5ee45`; the candidate passed the audit battery and an internal
+adversarial pre-review before filing.
+
 ## SI-31 — owned-state transition: "atomically" has no commit point, journal semantics, or crash matrix (§5.3) — RESOLVED (author, 2026-07-14)
 
 **Resolution: ratified as amendment A24 (spec v0.9, §5.3) — the owned-state

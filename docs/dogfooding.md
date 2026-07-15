@@ -116,8 +116,10 @@ expected, not FPs). Log outcomes by id in the vault's dogfooding log.
 ## What to measure
 
 **Primary — denial false-positive rate.** "Did the broker block good work?"
-This is the product-thesis metric; a high rate kills the "delegate more,
-sooner" promise. Capture: `asf ledger --home …` surfaces `verdict`
+This is the **friction metric** — necessary but not the thesis (a high
+rate kills the "delegate more, sooner" promise; a low rate proves only
+that the fabric stays out of the way). The thesis metric is the frontier
+log, below. Capture: `asf ledger --home …` surfaces `verdict`
 (source=broker) and `escalation`/`approval` events; for each block, judge by
 hand whether the work was legitimate. Track the ratio over time — it should
 fall as the caveat defaults prove themselves (and, later, as the Stage 3
@@ -142,6 +144,71 @@ noise polluting the ledger → execute the F2 chunking/CID migration.
 **Coarse-session tripwire (ADR 0004).** ops-per-promotion and conflict
 incidence. Routinely large or conflict-prone promotions → build the
 `checkpoint` session boundary.
+
+**The frontier log — the thesis metric (F2′).** Filed 2026-07-15 from
+the substrate-theory review cycle (the panel's one actionable finding;
+`docs/substrate-theory-analysis/`, PR #54). The loop the product claims
+— reversal earns authority — is unobservable by the metrics above, and
+its baseline is perishable: standing grants cannot widen until W-3
+exists, so "the operator did not widen" is mechanically predetermined
+today, while the pre-evidence counterfactual ("what would I grant
+*without* the history?") is destroyed by every week of accumulating
+familiarity. The instrument, per recurring workflow family (vault
+maintenance now; workboard at W-21; others as they emerge):
+
+1. **Baseline declaration — before W-15a→W-3 lands; about an hour.** A
+   dated note in the vault (`coppice-frontier-log.md`, companion to the
+   dogfooding log), one block per family:
+
+   ```
+   ## Frontier declaration — <family> — <date>
+   Declared before reading ledger stats this session: yes/no
+   Behavior bundle: <hash, or "placeholder">
+   - Standing scope I would grant today (paths, action classes):
+   - Grant duration:
+   - Unattended runtime tolerated:
+   - Auto-promotion classes:
+   - Tolerable approvals per successful operation:
+   - What evidence would move each line above:
+   ```
+
+   The last line is pre-registration: it makes later widening decisions
+   comparable against *predicted* evidence, not post-hoc rationale.
+2. **Re-declaration cadence.** Every two weeks, BEFORE reading ledger
+   stats that session — drift is data, and stats-first contaminates the
+   declaration. Pre-ratchet drift (habituation with no mechanism to act
+   on it) is itself a useful control series.
+3. **At W-3 — the treatment.** Every clerk proposal gets
+   accept / narrow / reject plus a one-line reason, categorized
+   **evidence-cited / fatigue-cited / other**; target ≥ 24 decisions at
+   a fixed behavior version. No widening offer counts as evidence-backed
+   for a family until ≥ 3 clean runs AND ≥ 1 *exercised* revert
+   (DF-P7's class): clean streaks test "nothing broke"; only a real
+   restore tests "breakage is survivable," and the thesis is about the
+   second.
+4. **Two legs, measured separately.** Leg A — frontier movement: the
+   declared frontier widens, on evidence-cited reasons. Leg B —
+   judgment displacement (F8): approvals per successful operation and
+   the fraction of consequential operations still escalating must fall
+   *because ratified rules absorbed them*; adopt the parked north-star
+   counters (approval compression ratio, time-to-first-ratified-rule,
+   % sessions fully silent) when W-3 lands.
+
+Disconfirmation — the kill test: after clean histories and a
+demonstrated restore, the frontier widens on no dimension, approval
+burden does not fall, and rejections cite risks recovery does not
+address (exfiltration, correctness, social consequence, accountability).
+That kills the coupling thesis for the design-center operator — better
+known before the trust-loop stages build out. The confound cuts both
+ways: widening on fatigue-cited reasons is not success but the brief's
+reflexive risk #1 (consent fatigue with receipts) wearing the thesis's
+clothes; ratification-velocity-per-channel (§7.1) is the standing
+tripwire. Known limits, stated up front: n = 1, within-subject,
+experimenter-is-subject, and the designer's baseline is already
+contaminated by internals-knowledge plus one prior session — tolerable
+because the instrument measures *movement from a dated baseline*, not
+absolute trust. Falsifies or supports for the design-center operator
+only; market claims need a staged rollout, later.
 
 ## Cadence
 

@@ -135,16 +135,19 @@ PROPOSED), queued for operator ratification.** Three-tier filesystem
 attacker model (T1 offline tampering → content-address verification;
 T2 same-uid active writer → W-4 containment, not pathname checks; T3
 human edit → M8/A24 attribution), candidate rules A27.1–A27.4, grounded
-in a complete publication-site inventory. Surfaces one genuine T1 gap
-(unsigned `fabric.db` meta rows trusted while sibling events are signed
-— proposed RF-41, posture-bounded under SU) and one uniformity
-correction (R3: `sync_store` fs walk omits the `.git` exclusion and the
-no-follow open). Seven ratification choices enumerated in the ADR — the
-internal pre-review's blocking find promoted rollback/freshness to its
-own decision point (content-addressing answers T1 substitution, **not**
-rollback — that seam hands off to A23, which the first draft wrongly
-folded into content-addressing). Passed the audit battery +
-internal adversarial pre-review before filing. Spec untouched; SI-32
+in a publication-site inventory appendix with file:line anchors.
+Surfaces two genuine T1 gaps (RF-41: unsigned `fabric.db` meta rows —
+incl. `substrate_span`, which feeds broker authority — trusted while
+sibling events are signed; RF-42: `capture_sqlite` follows symlinks for
+registered SQLite stores, only `fabric.db` is symlink-checked), an
+unresolved protocol-class T3 case (a human edit during a live
+promotion/revert overwritten with no capture/drift — the item ADR 0007
+R14 deferred here), and one uniformity correction (R3: `sync_store`
+omits the `.git` exclusion). Ten ratification choices enumerated. Built
+via the codified review battery (PR #51): audit battery + internal
+adversarial pre-review before filing (which caught the rollback/A23
+blocking find), then external review round 1 (8 findings — 5 the battery
+now guards against, all folded). Spec untouched; SI-32
 open. Ratification session (challenge pass → determinations) is
 tomorrow's operator work. Next after item (3): SI-26/28/29, SI-27, the
 §0 posture-qualifier convention (item 6).

@@ -424,20 +424,28 @@ discipline); A27.2 verify-on-read-back, tier-labeled, with three classes
 **unsigned-index gap** — the code reads store paths from unsigned
 `fabric.db` meta rows a T1 tamperer controls while the events beside them
 are signed, proposed **RF-41**, posture-bounded under SU); A27.3 per-kind
-entry rules (fs-tree symlink rejection composing with A24/R21; SQLite
-whole-image + sidecar removal); A27.4 the containment-boundary sentence.
-The ADR enumerates seven human choices (tier count + super-user
-boundary, the T1-rollback/A23 seam, staged-bytes normativity, RF-41 vs
-P17 folding, containment wording, the R3 `sync_store` correction, spec
-placement) and grounds every claim in a complete publication-site
-inventory. The T1-rollback seam is the internal pre-review's blocking
-find: content-addressing answers T1 substitution/corruption/truncation
-but **not** rollback to a legitimately-signed older state (every rehash
-and signature passes) — that is A23's anchor, and the first draft wrongly
-folded it into content-addressing. SI-32 remains **open**; no tier
-label or rule is normative until those choices are ratified. Grounded at
-`ae5ee45`; the candidate passed the audit battery and an internal
-adversarial pre-review before filing.
+entry rules (fs-tree canonical grammar = A24/R25's path-state domain,
+non-canonical kinds via A24/R24's kind-complete scan; SQLite whole-image +
+sidecar removal, plus the RF-42 registered-store symlink gap); A27.4 the
+containment-boundary sentence.
+The ADR enumerates **ten** human choices (tier count + root-vs-uid
+boundary; the T1-rollback/A23 seam and its precise layer-1 domain;
+trust-root substitution as an SI-27/RF-14 residual; the active-
+publication-window human edit, protocol-class; staged-bytes normativity;
+RF-41/RF-42 vs P17 folding; containment wording; G-PUBLISH conditional
+publication; the R3 correction; spec placement) and grounds every claim
+in a publication-site inventory appendix with file:line anchors. Two
+gaps beyond RF-41 surfaced by folding external review round 1:
+**RF-42** (`capture_sqlite` follows symlinks for registered SQLite
+stores; only `fabric.db` is symlink-checked), and the active-publication-
+window T3 edit (a human write during a live promotion/revert is
+overwritten with no capture/drift — the item ADR 0007 R14 deferred here,
+protocol-class). SI-32 remains **open**; no tier label or rule is
+normative until those choices are ratified. Candidate filed as PR #48-era
+main; passed the audit battery and an internal adversarial pre-review
+before filing, then folded external review round 1 (8 findings — 5 that
+the codified review battery, PR #51, now guards against) before this
+revision.
 
 ## SI-31 — owned-state transition: "atomically" has no commit point, journal semantics, or crash matrix (§5.3) — RESOLVED (author, 2026-07-14)
 

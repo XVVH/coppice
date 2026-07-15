@@ -1128,6 +1128,80 @@ entry-identity requirement by cross-reference. RF-40 may constitute the
 parked RF-27 recovery-hardening trigger; un-parking is an operator gate
 decision, not a review outcome.
 
+## RF-41 — unsigned `fabric.db` meta rows are consumed for authority while sibling events are signed — open (medium, posture-bounded)
+
+**Severity: medium. Direction: FAIL-OPEN at future boundaries (copied,
+substituted, or shared homes); none under SU.** Filed by the SI-32
+ratification (ADR 0008 inventory R7, A27.2's unsigned-index rule;
+surfaced drafting the candidate, confirmed by external round 1). Store
+paths (the `stores` rows) and `substrate_span` are read from unsigned
+meta/index rows ([kernel.rs:505](crates/asf-kernel/src/kernel.rs:505))
+that a substituted `fabric.db` controls, while the *events* in the same
+database are signature-verified. Reach: `substrate_span` is not merely a
+capture/restore pointer — it feeds broker authority evaluation (grant
+ordering, A22 closure liveness), so a T1 tamperer can redirect which
+store a capture/restore targets or which span is the substrate span
+under an otherwise-fresh, fully-verifying head. This is A23's seam from
+the read side: the anchor proves the head is current, but the
+operational pointers its events reference must themselves derive from
+signed substrate.
+
+**Why not currently exploitable:** SU — the same-uid tamperer holds the
+fabric key and forges signed events outright (RF-13's boundary
+argument); real at G-MULTITENANT and whenever the home leaves the local
+filesystem boundary.
+
+**Fix direction:** operational pointers consumed for authority derive
+from signed substrate or are bound into it (A27.2, normative) — never
+from an unsigned row. Natural carrier: **W-15a/W-15b** (the W-15 split
+in flight in PR #52's heading-check filings) — the signed
+global chain work touches the same region, and binding `substrate_span`
+and store registration into signed events is the read-side complement of
+the `VerifiedPrefix`. Negative (G14(a)): a substituted meta row must not
+redirect any authority-bearing read — no effect, loud denial.
+
+## RF-42 — `capture_sqlite` follows symlinks for registered SQLite stores; only `fabric.db` is symlink-rejected — open (medium, posture-bounded)
+
+**Severity: medium. Direction: FAIL-OPEN (wrong bytes bear authority).**
+Filed by the SI-32 ratification (ADR 0008 inventory R10, A27.3's SQLite
+rule; external round 1, finding 4). `capture_sqlite`
+([snapshot.rs:268](crates/asf-kernel/src/snapshot.rs:268)) reaches the
+store via `is_file` → `Connection::open` → `fs::read`, all
+symlink-following; only the fabric's own `fabric.db` is symlink-checked
+(`w13_validate_existing_fabric_home`,
+[kernel.rs:328](crates/asf-kernel/src/kernel.rs:328)). A symlinked
+registered store (e.g. `db:memory`) redirects capture to an
+attacker-chosen database: the captured root — and every manifest,
+promotion, and drift comparison attesting it — derives from bytes
+outside the store boundary.
+
+**Why not currently exploitable:** SU/COOP — planting the symlink is a
+same-uid act, and registration is first-party only (P6).
+
+**Fix direction:** symlink-reject every SQLite store path, registered
+stores included, before capture/open — the same `symlink_metadata`
+no-follow discipline `fabric.db` already receives (A27.3, normative).
+Carrier: the **RF-40 mechanical bugfix lane** — PR #52's W-15 re-cut
+records the operator option to pull RF-40's mechanism-class fixes
+forward of W-15 as an independent PR; RF-42 and RF-43 ride whichever
+runs first, that pull-forward or W-15b. Negative (G14(b)): a symlinked
+registered store fails capture with no effect.
+
+## RF-43 — `sync_store` fs walk omits the `.git` exclusion and carries no symlink guard — open (low, hygiene)
+
+**Severity: low. Direction: none (fsync-only; no integrity impact) —
+a uniformity defect.** Filed by the SI-32 ratification (ADR 0008
+inventory R3, A27.3). `sync_store`
+([snapshot.rs:608](crates/asf-kernel/src/snapshot.rs:608)) walks the
+store for durability fsyncs without `capture_fs`'s `.git` exclusion,
+breaking the "excluded means untouched" uniformity A27.3 ratifies; it
+also has no symlink check — *proposed hardening*, not an existing
+discipline it violates (capture rejects symlinks via an explicit
+`path_is_symlink` check, not an `O_NOFOLLOW` open). Fix: bring the walk
+into line with capture's exclusion; take the no-follow hardening in the
+same touch. Carrier: the same mechanical lane as RF-42. Negative
+(G14(c)): the excluded directory is untouched through `sync_store`.
+
 ## Verified sound during review (recorded so they aren't re-litigated)
 
 - Per-payload DEKs each perform exactly one encryption → no GCM nonce reuse

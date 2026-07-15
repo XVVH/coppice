@@ -137,7 +137,59 @@ items: the internal independent-context pre-review before each paid
 external round caught 13 findings (two high) at a fraction of a
 round's cost — carry it forward for items (3)–(6) and consider it in
 the W-20 close-out as standing practice for authority-surface PRs.
-Next: item (3), SI-32.
+**Item (3), SI-32 — candidate drafted 2026-07-14 (ADR 0008,
+PROPOSED), queued for operator ratification.** Three-tier filesystem
+attacker model (T1 offline tampering → content-address verification;
+T2 same-uid active writer → W-4 containment, not pathname checks; T3
+human edit → M8/A24 attribution), candidate rules A27.1–A27.4, grounded
+in a publication-site inventory appendix with file:line anchors.
+Surfaces two genuine T1 gaps (RF-41: unsigned `fabric.db` meta rows —
+incl. `substrate_span`, which feeds broker authority — trusted while
+sibling events are signed; RF-42: `capture_sqlite` follows symlinks for
+registered SQLite stores, only `fabric.db` is symlink-checked), an
+unresolved protocol-class T3 case (a human edit during a live
+promotion/revert overwritten with no capture/drift — the item ADR 0007
+R14 deferred here), and one uniformity correction (R3: `sync_store`
+omits the `.git` exclusion). Ten ratification choices enumerated. Built
+via the codified review battery (PR #51): audit battery + internal
+adversarial pre-review before filing (which caught the rollback/A23
+blocking find), then external review round 1 (8 findings — 5 the battery
+now guards against, all folded). **Item (3) ratified 2026-07-15** as
+A27 (spec v0.10 §5.3; determinations D32-1…D32-10 in ADR 0008's
+addendum): three tiers with the rollback carve-out kept inside the
+model (D32-2) and the trust-root residual accepted (D32-3);
+staged-bytes and verify-on-read-back normative; the A27.4 standing
+containment sentence; conditional T2 publication with the G-PUBLISH
+gate entry (D32-8). One divergence from the candidate's lean: D32-4
+forecloses the topology arm for the active-publication window (native
+human access to shared state is the product thesis) and files **SI-40**
+with the preservation/refusal protocol as leading candidate, bounded by
+P29. Filings: RF-41 (carrier W-15a/b — the split PR #52 files),
+RF-42/RF-43 (the RF-40 mechanical bugfix lane, defined at RF-42), SI-40,
+P29, the G-PUBLISH gate entry, G14 negatives. Internal adversarial
+pre-review before the external round: 14 findings (4 medium), all
+applied — recorded in ADR 0008's addendum. Per the
+review-battery stopping rule (adopted 2026-07-15, PR #52): one
+delta-scoped external round on the ratification text, continuation only
+on blocking findings. The delta round returned REQUEST CHANGES — five
+findings, two blocking mediums with reviewer-prescribed remedies
+(A27.1's dropped T1 label; the candidate body's layer-2 misclass of
+caller-pinned heads, corrected in D32-2), one non-blocking medium (the
+SI-40 substrate-assisted paragraph's snapshot-timing over-claim), two
+lows — all folded same-day and recorded in ADR 0008's addendum; the
+round verified all ten determinations integrated, the A24/R24/R25
+grammar preserved, and the RF/G14 source claims. Operator gate decision
+2026-07-15: a confirming delta round, scoped to PR #50's five-finding
+fold delta, within the stopping rule's blocking-round continuation.
+**The confirming round returned no blocking findings — the cycle is
+closed (2026-07-15).** Its two non-blocking findings were folded under
+the battery: the per-file clone variant in SI-40's candidate text now
+requires atomic clone-and-swap semantics (a separate clone→rename pair
+re-opens the window in miniature), and this entry's own branch-local
+SHA citation was replaced per the citation rule. Cycle cost, complete:
+one internal adversarial pre-review (14 findings) + two external delta
+rounds (5 + 2 findings) — against PR #48's seven. W-20 closes when this
+PR merges, per the close-out decision below.
 **Close-out decision (operator, 2026-07-15 heading check): the batch
 closes when item (3) ratifies.** Items (4)–(6) leave the batch and
 defer to their named triggers — SI-26/SI-28/SI-29 to W-16 and the W-6

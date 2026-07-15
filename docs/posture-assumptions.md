@@ -182,6 +182,18 @@ default cannot save this class retroactively.
   (`human_local`); `tool_known` / `unattributed` deferred. → multi-actor
   roots/visibility (roadmap parked); SI-20/A20 (timing resolved);
   `dogfooding.md` "invite a second person" gate.
+- **P29** *(filed 2026-07-15, SI-40/D32-4)* A human edit landing inside a
+  live promotion/revert apply window (after the prepare-time
+  capture-equals-`before` check, before an entry's rename) is overwritten
+  with no CAS capture and no drift event — T3's "attributed, never lost"
+  violated in the one window M8 and A24/R14 do not cover. Safe now:
+  1HUMAN/1SESS make the colliding writer the same person who initiated
+  the transition, and the Tier-1 apply window is sub-second. Un-safed by:
+  a second human (this gate), or — earlier, in expectation — any store
+  whose apply window is not sub-second (Tier-2/3 applies), or a first
+  observed loss in dogfooding (evidence this rationale failed). → SI-40
+  (preservation/refusal protocol, leading candidate; the topology arm is
+  foreclosed by D32-4 — the human is never excluded from shared state).
 
 ### G-CONCURRENT — before a second concurrent session in one home  *(relaxes 1SESS)*
 - **P20** `current_manifest` / `current_span` are mutable **home-global**
@@ -282,12 +294,19 @@ in scope, or when storage leaves that filesystem boundary.
   extract §5.4 conformance vectors from the A22 contract tests.
 - SI-23 constraints and the brief §8 landscape claim should also be settled
   before publication (both already tracked).
+- **T2 conditional publication (A27/D32-8, 2026-07-15 — NEW):** every
+  published T2 publication-safety claim carries the A27.4 label — "holds
+  under COOP; requires W-4 containment at G-ADVERSARIAL." The label is the
+  honest disclosure; W-4 need not land before publication, but a published
+  T2 claim missing its label is a publication defect, and the conformance
+  sweep for any published spec text checks the labels rather than implying
+  a test proves T2 safety.
 
 ---
 
 ## The shortcut ledger (backing index)
 
-All 28 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
+All 29 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 1SESS/1HUMAN/1TEN/DEBUG` = the invariant(s) that make each safe now.
 
 ### Tier 1 — items this sweep filed or newly gated
@@ -304,6 +323,7 @@ All 28 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 | P26 | Corpus-ingest homes: placeholder identities/behavior signed into a real substrate; evidence-quarantined by convention only (second P8 site) | `asf-cli corpus/ingest.rs` (`placeholder_key`, behavior literal) | COOP SU | W-3 mechanical exclusion (G-RATCHET); `agent-trace-corpora-2026-07-11.md` boundaries |
 | P27 | Injected credentials enter a downstream adapter whose response reaches the agent unchanged | `broker.rs:560-576`, `proxy.rs:501-571` | COOP LOCAL, first-party/no credential | RF-23; G-EGRESS/G-3P-TOOL; W-18 |
 | P28 | Staged A23 consumption: clerk/TrustRecord counting on the `VerifiedPrefix`; decision/gate/recovery still on the W-11 verified-row view (cross-span order unauthenticated on those paths) | `broker.rs`, `kernel.rs` (post-W-15a) | SU 1SESS COOP (broker locally the sole approval producer) | W-15b consumption swap; RF-13/P15 remainder |
+| P29 | Human edit inside a live apply window overwritten uncaptured (post-prepare-check, pre-rename) | gate window (`kernel.rs`); fs apply (`snapshot.rs`) | 1HUMAN 1SESS (sub-second Tier-1 windows; self-inflicted concurrency) | SI-40 (D32-4); G-2HUMAN / first slow-apply store / first observed loss |
 
 ### Tier 2 — items already tracked (this ledger just indexes and gates them)
 
@@ -361,3 +381,7 @@ All 28 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
   filed P28 for the staged `VerifiedPrefix` consumption between W-15a
   and W-15b — the ledger's same-change rule, applied at decision time
   rather than late.
+- **Follow-up (SI-32 ratification, 2026-07-15, A27):** added P29 (the
+  active-publication-window edit, SI-40/D32-4) and the G-PUBLISH T2
+  conditional-publication row (D32-8) — the ledger's same-change rule,
+  applied at ratification time.

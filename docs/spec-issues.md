@@ -88,23 +88,30 @@ reopen recovery's capture path owns them — what the capture artifact is
 (the R9 capture record generalizes), and the cost budget (a per-entry recheck on every
 apply pays a stat per file to defend a sub-second window).
 
-A third remedy direction, noted by the operator at ratification:
-**substrate-assisted preservation.** On a CoW filesystem (ZFS, btrfs,
-APFS) an instantaneous snapshot taken at gate-lock acquisition — or a
-clone-and-swap publication — makes the window loss unrepresentable at
-the block layer: an in-window edit lands either before the snapshot
-(preserved there) or after the swap (ordinary M8 drift), never in a
-clobberable middle. Costs, stated so the comparison is honest when a
-trigger fires: a platform dependency the fabric has so far refused (the
-CAS is deliberately CoW-snapshots-in-userspace, portable anywhere); a
-second snapshot mechanism outside the CAS attribution pipeline —
-preserved bytes must still be captured *into* the CAS and
-drift-attributed to satisfy T3's criterion, so the fs snapshot is the
-preservation substrate, never the ledger entry; and per-platform
-divergence exactly where A27.3 just unified per-kind semantics. Shape:
-a deployment-floor option (the RF-15/P17 "OS/full-disk floor" class),
-not the portable default — evaluate against the per-entry
-capture-or-refuse candidate when a trigger fires.
+A third remedy direction, noted by the operator at ratification and
+corrected by the external delta round (finding 3): **substrate-assisted
+preservation.** Stated precisely, because the intuitive version
+over-claims: a CoW snapshot taken at gate-lock acquisition does NOT
+close this window — the SI-40 edit is by definition made *after* that
+snapshot (it lands post-prepare-check), so it is absent from the
+snapshot and still overwritten by the rename; the snapshot preserves
+exactly the state the prepare check already verified was not at risk.
+What the block layer can genuinely buy is retention of the **outgoing
+live state at swap time**: a clone-and-swap publication that retains
+the outgoing dataset (or a per-file clone of each target immediately
+before its rename), so divergent bytes survive the swap instead of
+being unlinked. Even then the fs artifact is only the preservation
+substrate: T3's criterion is attributed-never-lost, so the retained
+outgoing state must still be diffed against the prepare image, ingested
+into the CAS, and drift-attributed — retention, reconciliation, and
+cleanup costs the per-entry capture-or-refuse candidate does not pay.
+Plus the costs from the original note: a platform dependency the fabric
+has so far refused (the CAS is deliberately CoW-snapshots-in-userspace,
+portable anywhere) and per-platform divergence exactly where A27.3 just
+unified per-kind semantics. Shape: a deployment-floor option (the
+RF-15/P17 "OS/full-disk floor" class), not the portable default —
+evaluate against the per-entry capture-or-refuse candidate when a
+trigger fires.
 
 Bounded today by **P29**: under 1HUMAN/1SESS the colliding writer is
 the same person who initiated the transition, the Tier-1 apply window is
@@ -515,8 +522,8 @@ containment before G-PUBLISH.
 the three-tier model — T1 offline tampering (answered by content-address
 verification on every authority-bearing read-back), T2 active same-uid
 writer (no pathname check wins; the honest answer is W-4 containment, so
-every T2 claim is labeled "holds under COOP; requires W-4 at
-G-ADVERSARIAL"), T3 legitimate human edit (not an attack; M8 attribution
+every T2 claim is labeled "holds under COOP; requires W-4 containment
+at G-ADVERSARIAL"), T3 legitimate human edit (not an attack; M8 attribution
 and A24/R14 recovery-window capture). Candidate normative rules
 (candidate amendment A27): A27.1 the staged-bytes rule (ratifies RF-20's
 discipline); A27.2 verify-on-read-back, tier-labeled, with three classes

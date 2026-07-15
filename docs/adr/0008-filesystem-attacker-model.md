@@ -315,14 +315,14 @@ honest sentence RF-20→RF-40 kept rediscovering the absence of.
    posture graduates), or folded into P17/RF-15's at-rest work? This decides
    whether SI-32 spawns a new RF or reuses one. (RF-42, the registered-SQLite
    symlink gap, is the same call — file now or fold.)
-7. **A27.4 containment boundary wording** — the "COOP; W-4 at G-ADVERSARIAL"
+7. **A27.4 containment boundary wording** — the "holds under COOP; requires W-4 containment at G-ADVERSARIAL"
    label on every T2 claim. Ratify as the standing sentence, or scope it
    per-site? Recommend standing sentence, since it is the same honest answer
    at every T2 site.
 8. **G-PUBLISH containment mapping (external review finding 6; the filing's
    explicit ask).** The filing asked *which publication-safety claims require
    containment before G-PUBLISH*. The real fork: may the spec **publish the
-   conditional T2 claims** (labeled "holds under COOP; W-4 at G-ADVERSARIAL")
+   conditional T2 claims** (labeled "holds under COOP; requires W-4 containment at G-ADVERSARIAL")
    with W-4 deferred, or must **W-4 containment land before publication** so no
    published claim rests on an unbuilt topology? Recommend: publish the
    conditional claims with the label — the label *is* the honest disclosure —
@@ -440,6 +440,16 @@ ratified as drafted, with the reasoning recorded so it is citable.
   relative to a surviving expected terminal; a coherent suffix regression
   is layer 2's at its gates; under SU the T1 rollback bite is accidental
   (backup staleness, copied homes), adversarial at G-MULTITENANT.
+  **Correction to the preserved body (external delta round, finding 2 —
+  this addendum wins):** the body's parenthetical "layer 2's job (the
+  external anchor / caller-pinned expected head)" mis-classes the caller
+  pin. A caller-pinned expected head is **layer 1's** — §6.2's local
+  `TraceCheckpoint` supplies the caller-pinned completeness tier at
+  every profile — so a regression that leaves a surviving caller pin
+  ahead of it is layer-1-detectable; only the **external monotonic
+  anchor** is layer 2. The determination's operative wording
+  ("inconsistent relative to a surviving expected terminal" = layer 1)
+  was already correct; the body sentence was the error.
 - **D32-3 — trust-root substitution accepted as the SI-27/RF-14
   residual.** Ratified option 1. The alternative — scoping T1 to a
   trusted verifier key outside the tamperable home — labels an anchor
@@ -520,3 +530,18 @@ its capture-time per-kind dependency and the D32-1 confidentiality
 cross-reference; the A27.4 label was quoted without "containment" in
 CLAUDE.md; P29 was missing the dogfooding-loss trigger; and the
 adversary-tier notation is now disambiguated from §10's store tiers.
+
+**External delta round (2026-07-15, the stopping rule's one budgeted
+round).** REQUEST CHANGES — five findings, all folded same-day: two
+blocking mediums with prescribed remedies (A27.1's ratified T1 label
+had been dropped in spec integration, restored; the body's layer-2
+misclass of caller-pinned expected heads, corrected above in D32-2),
+one non-blocking medium (the SI-40 substrate-assisted paragraph
+over-claimed what a gate-acquisition snapshot preserves — the in-window
+edit postdates that snapshot; corrected to outgoing-state-retention at
+swap with its reconciliation costs), and two lows (A27.4 label
+variants in preserved candidate text normalized to the exact ratified
+sentence; two v0.9 version stamps bumped). The round verified: all ten
+determinations have integration sites, A27.3 preserves the A24/R24/R25
+grammar by exact reference, SI-40's corrected refusal disposition is
+sound, and RF-41/RF-42/RF-43 and G14's source/test claims check out.

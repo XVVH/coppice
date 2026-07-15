@@ -455,6 +455,73 @@ decision, not by drift. From the 2026-07-10 review sessions:
   sections a change touches. Natural W-6 companion (the published
   conformance surface needs the same sentence ids for its vectors). From
   the PR #33 review cycle (2026-07-12).
+- **Response-side secret-leak tripwire (LeakSentinel class)** — a
+  detection tripwire for credentials flowing *back into agent context*
+  via tool output: the return-path complement of "the agent never holds
+  a real credential" (brief §5.3 credential custody), and the
+  "response scrubbing" half RF-23's fix note already names and bounds.
+  Mechanism (after custodian-kernel's `LeakSentinel`,
+  github.com/KeyArgo/custodian-kernel `caduceus/broker.py`, verified
+  2026-07-15): at injection time — `broker.rs:735-751`, the only point
+  where the plaintext secret and the call are co-resident — register
+  SHA-256 digests of the injected value and its whitespace-split tokens
+  (len ≥ 8); scan downstream bytes before they reach the agent; a hit
+  trips a ledger-visible alarm referencing the `tool_call` event and its
+  `result` PayloadRef. Scan coverage must be **every downstream→agent
+  byte path**, not just recorded results: the `tools/call` reply seam
+  (`proxy.rs:623-630`, before `record_result` and before the reply is
+  written to the agent), the `tools/list` response, and the passthrough
+  relay (`proxy.rs:560-584` — "everything else the downstream says goes
+  straight to the agent"), plus the event-body `summary` extract, which
+  lands in the substrate outside payload encryption. **Scope honesty**
+  (RF-23's own finding): exact-hash scanning catches *accidents* —
+  echoing adapters, error messages that quote the bad key, debug dumps —
+  and upgrades P27's interim prohibition from declared to *monitored*;
+  it cannot contain an adversarial encoder (base64/split/paraphrase
+  evasion is trivial), so it never substitutes for W-18's
+  trusted-adapter boundary and never relaxes P27 or the
+  G-EGRESS/G-3P-TOOL gates. **Two stages with different weight.**
+  Detection-only is mechanism-shaped: response bytes unchanged, one new
+  alarm record — though a new §6 event kind is itself amendment-sized
+  (the closed `kind` vocabulary; A22 last changed it). *Redaction* is
+  protocol-class by the triage tiebreaker (no governing clause exists,
+  and it changes which bytes are authoritative for "what the agent
+  saw"): a redacted reply makes agent-visible bytes ≠ the recorded
+  `result` payload, touching the §6 tool_call body and the brief §6
+  replay contract (deterministic re-execution stubs calls by recorded
+  result), so it requires an SI ratified before implementation, and the
+  protocol must record *both* images (original payload retained,
+  redacted image named) — never lose the original. **Payload-encryption
+  interaction (§1):** the scan happens at call time on plaintext — the
+  substrate is unscannable afterward by design; on a hit the secret
+  already sits in the encrypted `result` payload, so the response drill
+  is crypto-shred that payload and treat the credential as burned
+  (rotate at the vault; A22 revoke of capabilities that carry it). The
+  alarm body must carry neither the matched token nor its bare digest —
+  an unsalted SHA-256 of a low-entropy secret is a crackable commitment
+  (P14's confirmation-oracle class); sentinel digests live in broker
+  memory only, never persisted (keyed HMAC if that ever changes).
+  **False positives:** exact-hash matching FPs only on legitimate
+  byte-identical echo — key ids/usernames that are the public half of a
+  composite credential, passphrase-style secrets whose ≥8-char
+  dictionary tokens recur in prose, non-secret vault config echoed by
+  its own tool. Mitigations: register only values actually injected,
+  entropy floor alongside the length floor, full-value hit hard /
+  single-token hit soft, per-tool declared echo fields (§4-shaped,
+  trusted-mechanical). **False negatives, stated per the scoped-evidence
+  rule:** whitespace tokenization misses punctuation-adjacent embedding
+  (JSON `"key":"sk-…"`), encodings, and chunk splits; separator-aware
+  tokenization and a decode-normalize pass buy accident-class coverage
+  only. Evidence at implementation: two-sided contract (planted echo
+  trips and emits the alarm; clean response does not trip; in redact
+  mode the negative asserts the secret bytes did not reach the agent)
+  plus a targeted mutation lane over tokenizer/matcher. **Trigger:**
+  rides with the first real credential injection — W-17/W-18 at
+  G-EGRESS/G-3P-TOOL; today's LOCAL posture carries no live credential
+  (P27), so nothing exists to catch. May be pulled forward by operator
+  decision as a dogfood tripwire against fake vault credentials (the
+  detection-only stage, cheap and self-contained). *Provenance: operator
+  request, 2026-07-15.*
 
 ## Parked (trigger-gated — do not start without the trigger)
 

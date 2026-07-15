@@ -148,13 +148,24 @@ default cannot save this class retroactively.
 - **P15 / RF-16** Standing authority may not derive from a substrate whose
   authority view can be changed through unsigned index columns or whose
   global order/completeness is unauthenticated. W-11 closes verified-row use;
-  **W-15 layer 1** (the A23 signed global chain / `VerifiedPrefix`) must land
-  before W-3 proceeds beyond disposable experiments. Freshness (rollback
+  **W-15a** (layer-1 emission on a fresh-start home plus the clerk-side
+  `VerifiedPrefix` — the 2026-07-15 re-cut of W-15; roadmap) must land
+  before W-3 proceeds beyond disposable experiments. The
+  decision/gate/recovery consumption swap is **W-15b** and does not gate
+  W-3 — P28 records that staged consumption. Freshness (rollback
   detection, layer 2) is **scoped per A23/D2**: single-machine compilation
   under the `local-integrity` label is valid within this posture and
   re-earned at graduation; the anchored head becomes mandatory for counting
   at G-ROAMING-SURFACE (multi-location) and for production claims at
   G-PRODUCTION — it does not gate single-machine W-3.
+- **P28** *(staged consumption, filed 2026-07-15)* After W-15a the clerk
+  and TrustRecord counting read the `VerifiedPrefix` while decision,
+  gate, and recovery still consume the W-11 verified-row view
+  (signature/selector/within-span-chain verified; cross-span order
+  unauthenticated on those paths). No authority *source* changes — both
+  views read the same signed append path, and the clerk is born on the
+  stronger view; the seam is which verification tier each consumer
+  applies. → W-15b consumption swap; RF-13/P15 remainder.
 - **P26** Corpus-ingest homes (`asf corpus ingest`) sign placeholder
   principals and a placeholder behavior bundle into a REAL substrate —
   P8's class, second site. Nothing mechanical distinguishes a corpus
@@ -295,9 +306,7 @@ in scope, or when storage leaves that filesystem boundary.
 
 ## The shortcut ledger (backing index)
 
-All 28 currently tracked, grouped by filing status (P28 is allocated by
-the in-flight heading-check filings, PR #52 — numbered around here to
-avoid the SI-22/SI-35 collision class). `SU/COOP/LOCAL/NOACT/
+All 29 currently tracked, grouped by filing status. `SU/COOP/LOCAL/NOACT/
 1SESS/1HUMAN/1TEN/DEBUG` = the invariant(s) that make each safe now.
 
 ### Tier 1 — items this sweep filed or newly gated
@@ -313,6 +322,7 @@ avoid the SI-22/SI-35 collision class). `SU/COOP/LOCAL/NOACT/
 | P25 | ~~F1 calls capabilities revocable with expiry-only enforcement~~ **CLOSED by W-8 (PR #33)**: signed `revoke` (§5.4), `a22_*` event-derived liveness at decision + gate, `asf revoke` kill switch | `broker.rs` (`a22_*`, `revoke_capability`), `proxy.rs` revoke surface | — (implemented) | SI-24 → A22 (v0.7) → W-8; residuals: P22 (in-flight dispatch), P15/RF-13 (rollback erasure), P21 (partitions) |
 | P26 | Corpus-ingest homes: placeholder identities/behavior signed into a real substrate; evidence-quarantined by convention only (second P8 site) | `asf-cli corpus/ingest.rs` (`placeholder_key`, behavior literal) | COOP SU | W-3 mechanical exclusion (G-RATCHET); `agent-trace-corpora-2026-07-11.md` boundaries |
 | P27 | Injected credentials enter a downstream adapter whose response reaches the agent unchanged | `broker.rs:560-576`, `proxy.rs:501-571` | COOP LOCAL, first-party/no credential | RF-23; G-EGRESS/G-3P-TOOL; W-18 |
+| P28 | Staged A23 consumption: clerk/TrustRecord counting on the `VerifiedPrefix`; decision/gate/recovery still on the W-11 verified-row view (cross-span order unauthenticated on those paths) | `broker.rs`, `kernel.rs` (post-W-15a) | SU 1SESS COOP (broker locally the sole approval producer) | W-15b consumption swap; RF-13/P15 remainder |
 | P29 | Human edit inside a live apply window overwritten uncaptured (post-prepare-check, pre-rename) | gate window (`kernel.rs`); fs apply (`snapshot.rs`) | 1HUMAN 1SESS (sub-second Tier-1 windows; self-inflicted concurrency) | SI-40 (D32-4); G-2HUMAN / first slow-apply store / first observed loss |
 
 ### Tier 2 — items already tracked (this ledger just indexes and gates them)
@@ -366,6 +376,11 @@ avoid the SI-22/SI-35 collision class). `SU/COOP/LOCAL/NOACT/
   switch, closed-parent/closed-id refusals). First closed row in this
   ledger; the row is kept struck-through as the record. Residual exposure
   moved to where it already lived: P22, P15/RF-13, P21.
+- **Follow-up (heading check, 2026-07-15):** re-scoped G-RATCHET's
+  satisfaction condition to W-15a (the W-15a/W-15b re-cut; roadmap) and
+  filed P28 for the staged `VerifiedPrefix` consumption between W-15a
+  and W-15b — the ledger's same-change rule, applied at decision time
+  rather than late.
 - **Follow-up (SI-32 ratification, 2026-07-15, A27):** added P29 (the
   active-publication-window edit, SI-40/D32-4) and the G-PUBLISH T2
   conditional-publication row (D32-8) — the ledger's same-change rule,

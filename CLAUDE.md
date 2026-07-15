@@ -121,7 +121,11 @@ and runs in `required`. Tier 2 (the two tables) ships in the PR body
 like the G9 sweep. Tier 3 is the internal adversarial pre-review for
 candidates, scoped to soundness/shape, never asked to also be the
 exhaustive checker. A review round that finds completeness or code-fact
-debris means a Tier-1/2 pass was skipped or run as prose.
+debris means a Tier-1/2 pass was skipped or run as prose. External
+rounds stop by rule, not by momentum: one round after the battery;
+delta-scoped continuation only while blocking findings persist; buying
+past that is a recorded operator gate decision (`docs/review-battery.md`
+stopping rule, adopted 2026-07-15).
 
 ## Session-end git contract
 

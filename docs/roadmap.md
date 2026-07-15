@@ -171,8 +171,10 @@ caller-pinned heads, corrected in D32-2), one non-blocking medium (the
 SI-40 substrate-assisted paragraph's snapshot-timing over-claim), two
 lows — all folded same-day and recorded in ADR 0008's addendum; the
 round verified all ten determinations integrated, the A24/R24/R25
-grammar preserved, and the RF/G14 source claims. Cycle closure under
-the stopping rule is the operator's gate decision. **Batch close-out per the operator decision filed
+grammar preserved, and the RF/G14 source claims. Operator gate decision
+2026-07-15: a confirming delta round, scoped to the fold commit
+(`eff73b2`), within the stopping rule's blocking-round continuation; no
+blocking finding there closes the cycle. **Batch close-out per the operator decision filed
 in PR #52:** items (4)–(6) defer to their named triggers — SI-26/28/29
 to W-16 and the W-6 publication gate, SI-27 to W-17, the §0 convention
 riding with whichever fires first; W-20 closes when this ratification

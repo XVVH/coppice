@@ -29,6 +29,13 @@ post-A21 session doubles as live verification of the brokered mode
 declaration (ledger shows `authority: {"mode":"brokered"}` + the grant).
 Approvals accumulate as founding examples for W-3 regardless of when the
 clerk lands. *Provenance: standing plan; re-confirmed 2026-07-10.*
+**Resumed 2026-07-15** (heading check; the log had one real session,
+2026-07-09): the remaining rubric residue packs into three staged
+sessions — see "Session plan" in `dogfooding-rubric.md`; log by DF id
+as before. Approvals recorded before the W-15a fresh-home restart are
+disposable examples (G-RATCHET permits collecting them; §6.2
+migration-is-invalidation is why they cannot found standing rules) —
+the denial-FP metric is unaffected by the restart.
 
 ## Queued (ordered)
 
@@ -131,6 +138,19 @@ external round caught 13 findings (two high) at a fraction of a
 round's cost — carry it forward for items (3)–(6) and consider it in
 the W-20 close-out as standing practice for authority-surface PRs.
 Next: item (3), SI-32.
+**Close-out decision (operator, 2026-07-15 heading check): the batch
+closes when item (3) ratifies.** Items (4)–(6) leave the batch and
+defer to their named triggers — SI-26/SI-28/SI-29 to W-16 and the W-6
+publication gate (SI-26 already gates W-6), SI-27 to W-17 (no real
+credential ships before it regardless), and the item-(6) §0
+posture-qualifier convention rides with whichever of those fires
+first. None of the three gates W-1, W-3, or W-5. The closing
+composition review runs when the deferred items ratify, over the full
+seam set; the (1)–(3) seams have meanwhile been exercised by PR #48's
+seven-round cycle and the SI-32 candidate's battery (PR #50). Rationale: review yield had
+fallen below dogfooding yield, and the deferred items harden against
+adversaries the posture ledger parks (P1/P17 bound what further
+integrity refinement buys at this posture).
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`
@@ -154,11 +174,48 @@ SI-25 is ratified as A23 (spec v0.8 §6.2; determinations D1–D7/S1–S5/R1–R
 in ADR 0006's addendum — note the security-critical ones W-15 must honor: R6
 two-terminals/local-closure, R7/R9 cross-epoch order + migration activation
 barrier, R8 journal-before-stores, R9's activation-prefix-aware object
-resolution). W-15 implements **layer 1 only**: signed
-`home`/`epoch`/`global_seq`/`global_prev` on every event; local signed
-`TraceCheckpoint`s (every profile); the `VerifiedPrefix` consumed by
-decision, gate, and recovery — upgrading W-14's journal recovery to
-prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 7: the positional D31-4
+resolution). W-15 implements **layer 1 only**. **Re-cut 2026-07-15
+(operator decision, the heading-check G-RATCHET re-examination): W-15
+splits into W-15a (ratchet substrate — gates W-3) and W-15b (consumer
+migration + recovery hardening — sequenced with W-22).** Rationale:
+G-RATCHET's bite is economic, not cryptographic, at this posture —
+§6.2's migration-is-invalidation means rules and founding examples
+minted on a pre-layer-1 substrate are scheduled to die, so the ratchet
+needs layer-1-native events and its own counting verified; it does not
+need the decision/gate/recovery consumption swap, whose paths keep the
+W-11 verified-row view until W-15b (P28). D2 already ratifies
+single-machine counting under the `local-integrity` label. **Layer 2
+(`AnchorStore`) remains out of scope for both halves** — it lands at
+G-ROAMING-SURFACE (coordination), G-EGRESS (dispatch gating), and
+G-PRODUCTION (freshness authority), where the freshness half of
+RF-13/P15 closes.
+
+**W-15a — layer-1 substrate + clerk consumption (queued next; gates
+W-3).** Fresh homes only, single epoch (`reason: "initialize"`), no
+migration machinery: the existing dogfood home restarts fresh — §6.2's
+own advice ("migrate early, before a large corpus accrues") taken at
+its cheapest moment; total prior history is one session, and the cost
+is DF-P3's founding example #1, re-earnable in a session. Scope:
+signed `home`/`epoch`/`global_seq`/`global_prev` on every event; the
+SI-38 bootstrap-event genesis floor and the SI-37 position-agreement
+predicate at their provisional shapes (fail-closed from day one;
+`TracePosition` emission in signed cross-references per §6.2); the
+terminal `TraceCheckpoint` as a row in the same commit (S3);
+durable-commit at `synchronous=NORMAL` (permitted unanchored per R5);
+a full-scan `VerifiedPrefix` constructor — no checkpoint-keyed caching
+(the clerk runs offline at ceremony time; dogfood volume is hundreds
+of events) — consumed by exactly one reader: W-3's clerk and
+TrustRecord counting (D2). Single-epoch operation makes R7/R9's
+activation prefix the whole chain (as A15 today). Closes RF-13/P15's
+**order/completeness half** for the counting path; satisfies G-RATCHET
+as re-scoped (posture ledger, P15 bullet).
+
+**W-15b — consumer migration + recovery hardening (sequenced with
+W-22, which rewrites the same gate-replay region).** The
+`VerifiedPrefix` consumption swap for decision, gate, and recovery —
+replacing the per-decision full `verified_events` scan with
+checkpoint-keyed incremental caching — upgrading W-14's journal
+recovery to prefix-bounded and to the A24 adjusted clauses (RF-35 as adjusted through review round 7: the positional D31-4
 freshness predicate over total V — including unbranched
 `tool_call.state_root_after` — the D31-6 recovery capture record
 (exact-set validation; the R24 kind-complete scan on every active
@@ -172,22 +229,22 @@ G13(e–g)/(k)/(m) negatives; plus RF-40's as-built fs-pipeline
 entry-identity fixes — planner mode-only ops with the A17 composition
 rule (rename+chmod, G13(n)), mode-only writes, file↔directory pass
 ordering over the widened empty-directory quantifier (G13(o)) — with
-the G13(i–l) negatives), and replacing the per-decision full
-`verified_events` scan with checkpoint-keyed incremental caching; the writer-fence-as-lease
-abstraction (D5); the migration epoch (invalidation + the R3
-pre-epoch-grant refusal + `legacy_commitment`); the SI-37 position-agreement
-predicate (fail-closed from day one); and the durable-commit synchronous
-plumbing. Closes RF-13/P15's **order/completeness half**; unblocks W-3
-beyond disposable examples (G-RATCHET). **Layer 2 (`AnchorStore`) is out of
-scope** — it lands at G-ROAMING-SURFACE (coordination), G-EGRESS (dispatch
-gating), and G-PRODUCTION (freshness authority), where the freshness half
-of RF-13/P15 closes. Implementation seams: the four recovery-note items at
-the top of ADR 0006 (W-14 journal composition, W-13 initialize boundary,
-W-19 diagnostic surface, W-9 baseline re-pin); the unpushed sketch on
-`agent/si25-authenticated-head-design` predates W-12…W-14 and needs rebase.
-W-3 may collect disposable examples but may not compile standing authority
-until W-15 lands. *Provenance: RF-13 + 2026-07-12 cryptographic mechanism
-audit; scope re-cut 2026-07-13 by the A23 ratification.*
+the G13(i–l) negatives; RF-40 is mechanism-class under
+already-ratified semantics and may be pulled forward as an independent
+bugfix PR by operator decision); the writer-fence-as-lease abstraction
+(D5); and the migration epoch (invalidation + the R3 pre-epoch-grant
+refusal + `legacy_commitment`) — implemented only if a pre-A23 home
+with history worth carrying still exists then; otherwise it stays
+spec'd, unimplemented, and posture-noted. Implementation seams: the
+four recovery-note items at the top of ADR 0006 (W-14 journal
+composition, W-13 initialize boundary, W-19 diagnostic surface, W-9
+baseline re-pin); the unpushed sketch on
+`agent/si25-authenticated-head-design` predates W-12…W-14 and needs
+rebase. W-3 may collect disposable examples but may not compile
+standing authority until **W-15a** lands. *Provenance: RF-13 +
+2026-07-12 cryptographic mechanism audit; scope re-cut 2026-07-13 by
+the A23 ratification; W-15a/W-15b split 2026-07-15 by the
+heading-check G-RATCHET re-examination (operator decision).*
 
 **W-22 — A25/A26 broker conformance mechanisms.** Close the three
 authority-surface gaps the A24–A26 ratification reviews (rounds 1–2)
@@ -211,11 +268,11 @@ signed escalation version presented (`escalation_event` in the approval
 body) and C2 listings render from or verify against signed events (the
 RF-31 class on the exemption surface; supplies the version-swap and
 tampered-listing negatives). All under the two-sided contract and
-targeted-mutation discipline. Sequenced after W-15 because RF-36
-rewrites the same gate-replay region W-15 converts to
-checkpoint-keyed `VerifiedPrefix` consumption — landing RF-36 first
-would be churned; may be pulled earlier by operator decision if W-15
-slips (RF-36 is posture-bounded: the broker is locally the sole
+targeted-mutation discipline. Sequenced after W-15a and with W-15b
+(the split of 2026-07-15) because RF-36 rewrites the same gate-replay
+region W-15b converts to checkpoint-keyed `VerifiedPrefix` consumption
+— landing RF-36 first would be churned; may be pulled earlier by
+operator decision if W-15b slips (RF-36 is posture-bounded: the broker is locally the sole
 approval producer; the exposure is the W-9 foreign-trace surface).
 *Provenance: PR #48 independent review — round-1 findings 1–2 (ADR 0007
 R1/R2), round-2 finding 3 (R10/RF-39), round-3 finding 3 pinning
@@ -250,7 +307,13 @@ Deterministic, no model. `asf rules candidates`: cluster approval events
 by (caveat, action-class, domain); at k ≥ 3 propose the least-general
 covering rule with ledger-derived counterfactuals for ratification (§7.1
 schema). TrustRecords as counters over existing events per (principal,
-domain, behavior version) (§7.2). Sequenced after W-1 produces real
+domain, behavior version) (§7.2). Counting reads only the W-15a
+`VerifiedPrefix` (§6.2 D2 — valid single-machine under the
+`local-integrity` label); gate: **W-15a**, not full W-15 (2026-07-15
+G-RATCHET re-examination; P15/P28). Deliverable alongside the clerk:
+P26's mechanical corpus-home exclusion (the clerk refuses substrates
+whose principals carry placeholder keys, or a corpus-home marker).
+Sequenced after W-1 produces real
 approvals to cluster — but not far after; this is where authority stops
 evaporating at session end. *Provenance: 2026-07-10 review (highest-
 confidence convergent recommendation: ratchet before judge).*

@@ -96,6 +96,31 @@ unaddressed item is visible instead of silently absent.
   the external round. The battery's job is to make this round return only
   genuine soundness seams, not completeness or code-fact debris.
 
+## Stopping rule — external rounds end by rule, not by momentum
+
+The default for a ratification or authority-surface artifact is the battery
+(Tiers 1–3) and **one** external round. A further round is bought only while
+the latest round returned a blocking finding — a high-severity defect or a
+finding against the determination skeleton — and each further round is
+**scoped to the previous round's delta**, not the whole artifact (the PR #48
+round-7 pattern). The first round that returns no blocking finding closes the
+cycle; remaining mediums are folded by the author under the battery, without
+a confirming round. Two corollaries:
+
+- **New protocol questions never extend a cycle.** A finding whose remedy is
+  protocol-class files an SI and queues at its own trigger (the R14/SI-39
+  narrow-and-file precedent); the artifact under review narrows, and the
+  cycle converges instead of tracking an open-ended frontier.
+- **Buying past the rule is an operator gate decision**, recorded as one
+  (with what the extra round is expected to find) — the same discipline as
+  un-parking. It is never the silent default.
+
+Founding case: PR #48 ran seven external rounds with no written stopping
+condition — each next round was the default rather than a decision (adopted
+2026-07-15, the heading check). The battery is where exhaustiveness lives
+(the internal pre-review caught 13 findings at a fraction of a round's
+cost); external rounds are for soundness seams.
+
 ## Running order
 
 1. Extract the filing's deliverables into the completeness table (drives

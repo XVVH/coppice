@@ -634,7 +634,9 @@ never sees the real credential.
 scoped/one-use downstream credentials and injection below the agent-visible
 protocol. Response scrubbing can catch accidents but cannot contain an
 adversarial encoder. P27 and the third-party/live-egress gates own the interim
-prohibition.
+prohibition. The scrubbing half is filed as a roadmap candidate (response-side
+secret-leak tripwire, 2026-07-15) — detection-class coverage that monitors this
+finding's exposure window; it never closes RF-23, which W-18 owns.
 
 ## RF-24 — holder, channel, and auth-strength claims lack cryptographic proof — open
 

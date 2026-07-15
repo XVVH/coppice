@@ -147,10 +147,28 @@ omits the `.git` exclusion). Ten ratification choices enumerated. Built
 via the codified review battery (PR #51): audit battery + internal
 adversarial pre-review before filing (which caught the rollback/A23
 blocking find), then external review round 1 (8 findings — 5 the battery
-now guards against, all folded). Spec untouched; SI-32
-open. Ratification session (challenge pass → determinations) is
-tomorrow's operator work. Next after item (3): SI-26/28/29, SI-27, the
-§0 posture-qualifier convention (item 6).
+now guards against, all folded). **Item (3) ratified 2026-07-15** as
+A27 (spec v0.10 §5.3; determinations D32-1…D32-10 in ADR 0008's
+addendum): three tiers with the rollback carve-out kept inside the
+model (D32-2) and the trust-root residual accepted (D32-3);
+staged-bytes and verify-on-read-back normative; the A27.4 standing
+containment sentence; conditional T2 publication with the G-PUBLISH
+gate entry (D32-8). One divergence from the candidate's lean: D32-4
+forecloses the topology arm for the active-publication window (native
+human access to shared state is the product thesis) and files **SI-40**
+with the preservation/refusal protocol as leading candidate, bounded by
+P29. Filings: RF-41 (carrier W-15a/b — the split PR #52 files),
+RF-42/RF-43 (the RF-40 mechanical bugfix lane, defined at RF-42), SI-40,
+P29, the G-PUBLISH gate entry, G14 negatives. Internal adversarial
+pre-review before the external round: 14 findings (4 medium), all
+applied — recorded in ADR 0008's addendum. Per the
+review-battery stopping rule (adopted 2026-07-15, PR #52): one
+delta-scoped external round on the ratification text, continuation only
+on blocking findings. **Batch close-out per the operator decision filed
+in PR #52:** items (4)–(6) defer to their named triggers — SI-26/28/29
+to W-16 and the W-6 publication gate, SI-27 to W-17, the §0 convention
+riding with whichever fires first; W-20 closes when this ratification
+merges.
 
 **W-21 — workboard dogfood profile (revival).** Owner: agent; operator
 ratifies the registration shape. Recovered from `codex/workboard-dogfood`

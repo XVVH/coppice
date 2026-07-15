@@ -1,13 +1,14 @@
 # ADR 0008 — Filesystem attacker model for store publication and read-back
 
-**Status: PROPOSED — SI-32 ratification candidate, awaiting human
-ratification. This ADR is not a specification amendment and authorizes no
-implementation. SI-32 remains OPEN. The tier labels, the staged-bytes rule,
-the per-kind entry rules, and the containment boundary below are candidate
-normative language; none is normative until the human choices in
-"Ratification decision points" are ratified and integrated into the schema
-spec under the amendment discipline (candidate amendment id: A27). W-20 item
-(3).**
+**Status: ACCEPTED — ratified 2026-07-15 (operator session; W-20 item 3).
+SI-32 is RESOLVED. The determinations for the ten decision points are
+recorded in the ratification addendum at the end of this document
+(D32-1…D32-10) and integrated into the schema spec as amendment A27
+(v0.10, §5.3). The body below is preserved as the candidate the
+determinations judged; where the addendum adjusts it, the addendum wins.
+Per the review-battery stopping rule (adopted 2026-07-15, PR #52): one
+delta-scoped external round on the ratification text; continuation only
+on blocking findings.**
 
 ## Context
 
@@ -418,3 +419,104 @@ R-numbers match the residue disposition table.
   (`kernel.rs:1015`) advisory `flock`, no `O_EXCL`/`O_NOFOLLOW`; `sync_store` fs
   walk (`snapshot.rs:608`) omits the `.git` exclusion (R3); CLI/demo/tooling
   writes are non-authority-bearing (R11).
+
+## Ratification addendum — determinations (2026-07-15)
+
+Operator session, challenge pass over the round-1-folded candidate. One
+divergence from the candidate's stated lean (D32-4); everything else
+ratified as drafted, with the reasoning recorded so it is citable.
+
+- **D32-1 — three tiers, confidentiality cross-referenced.** Ratified as
+  drafted. At-rest confidentiality stays P17/RF-15's (a fourth tier would
+  duplicate a ledger row as a threat tier). The boundary statement is
+  ratified precisely: root/privileged-host out of scope (the trust
+  boundary is the Unix account, P7); an unprivileged different uid is
+  *defended* by the enforced 0700/0600 permissions, not out of scope.
+- **D32-2 — the T1-rollback carve-out, kept inside the model.** Ratified
+  as drafted, and deliberately NOT moved out of SI-32's scope: the tier
+  table is where future readers look up "what defeats T1," and a model
+  that omits the rollback seam invites a later wholesale ratification of
+  "content-addressing answers T1." Layer 1 detects rollback inconsistent
+  relative to a surviving expected terminal; a coherent suffix regression
+  is layer 2's at its gates; under SU the T1 rollback bite is accidental
+  (backup staleness, copied homes), adversarial at G-MULTITENANT.
+- **D32-3 — trust-root substitution accepted as the SI-27/RF-14
+  residual.** Ratified option 1. The alternative — scoping T1 to a
+  trusted verifier key outside the tamperable home — labels an anchor
+  that does not exist (SI-27 is open; RF-14 keys are plaintext in the
+  home); that is aspirational labeling, the disease A27.4 treats. The
+  residual is honest about today and names its own closure (SI-27
+  external anchor + RF-14 custody boundary). Revisit the verifier-key
+  shape when SI-27 ratifies.
+- **D32-4 — the active-publication window: topology arm FORECLOSED;
+  SI-40 filed (the addendum's one divergence from the candidate's
+  lean).** The candidate recommended deciding the topology question
+  first. Determination: the topology remedy is structurally unavailable
+  for shared-state stores — native, unmediated human access to the vault
+  is the product thesis (brief §2), W-4's sandbox contains the *agent*
+  and never the human, and momentary exclusion (chmod/lock during apply)
+  fails T3 in the other direction: a bricked save is failing closed on
+  an honest edit. The eventual answer is the preservation/refusal
+  protocol (the A24/R14 capture-or-refuse shape at a per-entry
+  pre-rename point), and it is NOT designed now: SI-40 files it with the
+  leading candidate named, P29 bounds the live window (1HUMAN/1SESS,
+  sub-second Tier-1 applies, self-inflicted concurrency), and the
+  triggers are any non-sub-second apply window (Tier-2/3 stores),
+  G-2HUMAN, or an observed loss in dogfooding. The R14/SI-39
+  narrow-and-file pattern, applied at ratification time.
+- **D32-5 — A27.1 staged-bytes normative.** Ratified. As-built with a
+  two-sided contract (`RESTORE-INTEGRITY`); normative status costs
+  nothing today and binds Tier-2/3 stores before they exist.
+- **D32-6 — RF-41 and RF-42 filed now, not folded.** Folding integrity
+  gaps into P17/RF-15 buries them in a confidentiality tracker (wrong
+  ledger). Carriers assigned at filing: RF-41 → W-15a/W-15b (the W-15
+  split in flight in PR #52; deriving
+  operational pointers from signed substrate is the same region as the
+  signed-chain work; `substrate_span` binding is the read-side of the
+  `VerifiedPrefix`); RF-42 → the RF-40 mechanical bugfix lane (defined
+  at RF-42's entry).
+- **D32-7 — A27.4 standing sentence.** Ratified as the standing sentence
+  on every T2 claim; per-site scoping re-derives the same sentence N
+  times, which is the RF-20→RF-40 disease this ADR treats. The
+  `write_atomic_verified` comment correction (race-narrowing, never
+  race-closing) is mechanism-class and rides any PR.
+- **D32-8 — conditional T2 publication.** Ratified: T2 claims publish as
+  labeled conditionals; the label is the honest disclosure, and gating
+  publication on W-4 would put a containment project on the spec's
+  critical path for no honesty gain (W-7/F2 gate publication regardless).
+  Recorded as the T2 entry under the posture ledger's G-PUBLISH gate; a
+  published T2 claim missing its label is a publication defect.
+- **D32-9 — R3 filed as RF-43.** Follow-up RF riding RF-42's mechanical
+  lane; a threat-model ratification is not grown with a mechanism change
+  (the triage rule: remediation may shrink a PR under review, never grow
+  it).
+- **D32-10 — spec placement.** §5.3 bullet family (matching the
+  section's protocol-bullet architecture), cross-referenced from §1
+  (payload read-back) and §9 F2 (rules survive the CID transition);
+  changelog v0.10. A new top-level section was rejected: publication
+  lives in §5.3, and the tiers label claims spec-wide by reference.
+
+**Validation mapping (per the candidate's plan).** A27.1's pair exists
+(`RESTORE-INTEGRITY`); the outstanding negatives are G14(a)–(c) landing
+with their RF carriers (RF-41 → W-15a/b; RF-42/RF-43 → the mechanical
+lane); G14(d) records the deliberate absence of any T2 race-closure
+negative — the conformance for T2 claims is the documented COOP
+dependency plus W-4's topology, never a test. Enforcement binds at the
+carrier gates per the ledger.
+
+**Internal pre-review (2026-07-15, before the external delta round, per
+the battery).** A fresh-context adversarial pass over the ratification
+fold returned 14 findings (4 medium), all applied before push. The
+substantive ones: the SI-40 filing's refusal-disposition parenthetical
+wrongly routed a preserving refusal through A24's ordinary-failure
+rollback, which restores `before` over the divergent entry with no
+capture record — recreating the loss SI-40 exists to prevent (corrected:
+capture-before-rollback or fail-like-a-crash); the spec's "every
+guarantee carries a label" opener over-claimed in the indicative and is
+now stated by-reference with an inline-label obligation for new claims;
+carrier references to W-15a/W-15b and the RF-40 mechanical lane were
+unresolvable on this branch and now cite PR #52; the T1 headline gained
+its capture-time per-kind dependency and the D32-1 confidentiality
+cross-reference; the A27.4 label was quoted without "containment" in
+CLAUDE.md; P29 was missing the dogfooding-loss trigger; and the
+adversary-tier notation is now disambiguated from §10's store tiers.

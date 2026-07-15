@@ -527,6 +527,32 @@ contract lanes land with W-15, as do RF-40's (i)/(j)/(l)/(n)/(o) and
 RF-35's (k)/(m); (p)/(q) land with RF-37's W-22 lane, and (d)/(h) with
 RF-36's.
 
+**G14. A27 tier-claim negatives outstanding after the SI-32 ratification
+(2026-07-15).** (a) **Unsigned-index redirect** (A27.2/RF-41): a
+substituted `fabric.db` meta row (store path, `substrate_span`) must not
+redirect any authority-bearing read — no effect, loud denial; lands with
+RF-41's carrier (W-15a/b — the W-15 split in flight in PR #52),
+completing the READBACK-VERIFY contract the ADR's validation plan names.
+Its would-be members exist today under other registrations
+(`cas_get_rehashes_content_before_returning_it`,
+`row_substitution_cannot_change_what_a_hash_resolves_to`,
+`w14_reopen_rejects_mistyped_or_unsafe_recovery_journal_before_mutation`);
+the contract id is minted when the lane lands.
+(b) **Registered-SQLite symlink capture** (A27.3/RF-42): a symlinked
+registered store fails capture with no effect — the existing
+`fabric_home_and_database_symlinks_cannot_redirect_reopen_or_initialization`
+covers `fabric.db` only; lands with RF-42's mechanical lane. (c)
+**Excluded-dir uniformity through `sync_store`** (A27.3/RF-43): `.git`
+untouched by the durability walk; same lane. (d) **Deliberate absence,
+recorded so it is never "fixed":** T2 claims carry NO race-closure
+negative — their conformance is the documented COOP dependency plus
+W-4's future topology (A27.4); a test asserting the same-inode recheck
+closes the race would assert a guarantee enforcement does not provide
+(the SI-10/A21 lie surface). A27.1's core pair already exists as the
+`RESTORE-INTEGRITY` contract (blob mutated after prepare cannot reach
+the live store); the SI-40 preservation protocol's negatives are
+designed with SI-40, not before.
+
 ## Automation lanes
 
 | Lane | Purpose |

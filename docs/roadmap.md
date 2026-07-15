@@ -36,6 +36,14 @@ as before. Approvals recorded before the W-15a fresh-home restart are
 disposable examples (G-RATCHET permits collecting them; §6.2
 migration-is-invalidation is why they cannot found standing rules) —
 the denial-FP metric is unaffected by the restart.
+**Frontier log (2026-07-15, F2′):** baseline delegation-frontier
+declarations per workflow family land in the vault BEFORE W-15a→W-3 —
+the pre-evidence counterfactual is perishable and cannot be
+reconstructed after histories accrue; biweekly re-declaration
+thereafter. Owner: operator (not delegable — the declarations are the
+measurement). Methodology and template: `dogfooding.md`, "The frontier
+log." *Provenance: the substrate-theory adversarial panel's one
+actionable finding (PR #54), stance-4 protocol.*
 
 ## Queued (ordered)
 
@@ -365,10 +373,18 @@ domain, behavior version) (§7.2). Counting reads only the W-15a
 G-RATCHET re-examination; P15/P28). Deliverable alongside the clerk:
 P26's mechanical corpus-home exclusion (the clerk refuses substrates
 whose principals carry placeholder keys, or a corpus-home marker).
-Sequenced after W-1 produces real
+Acceptance criteria include the F2′ instrument (dogfooding.md, "The
+frontier log"): reason-captured accept/narrow/reject on every proposal
+(evidence / fatigue / other; ≥ 24 decisions at a fixed behavior
+version), the evidence-backed gate (≥ 3 clean runs + ≥ 1 exercised
+revert per family before a widening offer counts), and adoption of the
+north-star counters (approval compression ratio,
+time-to-first-ratified-rule, % sessions fully silent) as leg-B
+displacement metrics. Sequenced after W-1 produces real
 approvals to cluster — but not far after; this is where authority stops
 evaporating at session end. *Provenance: 2026-07-10 review (highest-
-confidence convergent recommendation: ratchet before judge).*
+confidence convergent recommendation: ratchet before judge); F2′
+measurement clause 2026-07-15 (PR #54's panel).*
 
 **W-4 — Attestation + containment, as a pair.** The intent/behavior
 analog of what A21 did for authority. (a) Per-lineage assurance classes

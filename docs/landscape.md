@@ -36,10 +36,11 @@ stub rules — where the field-incident corpus
 (`docs/field-incidents.md`, the 2026-07-15 Stripe row) shows authored
 controls going un-authored is the norm the design must assume. And
 every neighbor sells prevention, while the incidents the best-funded
-neighbor markets with are recovery failures (see the positioning
-observation under Runta). The delegation thesis these facts leave
-unoccupied is the one the frontier log (F2′, `docs/dogfooding.md`,
-filed via PR #55) now instruments.
+neighbor markets with flow through legitimately granted authority —
+the class prevention doesn't answer (see the positioning observation
+under Runta). The delegation thesis these facts leave unoccupied is
+the one the frontier log (F2′, `docs/dogfooding.md`, filed via PR #55)
+now instruments.
 
 ## 1. custodian-kernel — spend governance from the same Hermes ecosystem
 
@@ -204,13 +205,20 @@ it.
 **Positioning observation.** The incidents Runta's founder cites in the
 same coverage (both filed as the 2026-07-16 grade-B rows in
 `docs/field-incidents.md`) are an authorized agent deleting production
-files and an injected agent executing malicious code — an owned-state
-recovery failure and a containment-of-granted-authority failure. A
-default-open egress posture and fork-only checkpoints answer neither:
-the deleting agent held legitimate write access no sandbox would have
-blocked, and the injected agent ran inside whatever isolation it was
-given. A prevention vendor marketing with recovery failures is market
-evidence that the recovery half is the unserved demand.
+files and an injected agent executing malicious code. The deletion
+incident is not claimed cleanly for undo — it sits on the custody
+boundary, and the report doesn't say which side: fabric-custody state
+is the snapshot-backed-undo case, external infrastructure reached
+through granted authority is the candidate-bound-approvals case with
+compensation fidelity (open) past an approved-but-wrong action; the
+field-incidents row records the split. What the softening does not
+blunt: in every reading of both incidents the damage flows through
+legitimately granted authority, so isolation reaches none of it — a
+default-open egress posture and fork-only checkpoints answer no branch
+of either. A prevention vendor marketing with incidents whose every
+reading calls for the delegation stack — undo where custody exists,
+candidate-bound approvals where it doesn't, compensation past that —
+is market evidence that the delegation half is the unserved demand.
 
 ## Synthesis
 
@@ -236,7 +244,10 @@ Unoccupied (the delegation half, no neighbor within reach):
    none has policy entering through a ratification loop over lived
    examples, and the corpus says the authored kind goes unwritten.
 4. Recovery as the product — all three sell prevention; the neighbor
-   with the most money markets prevention using recovery failures.
+   with the most money markets prevention using incidents whose every
+   reading calls for the delegation stack (undo where custody exists,
+   candidate-bound approvals where it doesn't, compensation fidelity —
+   open — past that).
 
 Follow-ups ride elsewhere, deliberately: a roadmap candidate for a
 custodian-style egress tripwire on the broker (their
